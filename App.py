@@ -4,16 +4,19 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # ==========================
-# CONFIG
+# إعداد الصفحة
 # ==========================
 st.set_page_config(page_title="📊 Sales Dashboard", layout="wide")
+st.title("📊 لوحة تحليلات مبيعات")
+
+# ==========================
+# Google Sheet config
+# ==========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
 SHEET_NAME = "Sales"
 
-st.title("📊 تحليلات مبيعات")
-
 # ==========================
-# AUTH
+# Auth
 # ==========================
 creds = Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
@@ -22,7 +25,7 @@ creds = Credentials.from_service_account_info(
 client = gspread.authorize(creds)
 
 # ==========================
-# READ SHEET
+# Load data
 # ==========================
 sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
 data = sheet.get_all_records()
@@ -30,15 +33,13 @@ df = pd.DataFrame(data)
 df.columns = df.columns.str.strip()
 
 if df.empty:
-    st.error("⚠️ الشيت فارغ")
+    st.error("📭 الشيت لا يحتوي بيانات")
     st.stop()
 
-st.success("📥 تم تحميل بيانات Google Sheets")
-
-# ==========================
-# DATE PARSE
-# ==========================
-date_cols = ["order_date", "created_at", "create_time", "date"]
+# =============
+# Date Parsing
+# =============
+date_cols = ["order_date", "create_time", "created_at", "date"]
 date_col = None
 
 for c in date_cols:
@@ -47,100 +48,121 @@ for c in date_cols:
         date_col = c
         break
 
-# ==========================
-# FILTER BY DATE
-# ==========================
+# ================================
+# فلترة حسب التاريخ (إن وجد تاريخ)
+# ================================
 if date_col:
     st.sidebar.subheader("🗓️ فلترة حسب التاريخ")
-    dmin = df[date_col].min()
-    dmax = df[date_col].max()
-    dr = st.sidebar.date_input("المدى الزمني", (dmin, dmax))
+    start, end = st.sidebar.date_input(
+        "اختر المدة",
+        (df[date_col].min(), df[date_col].max())
+    )
 
-    if len(dr) == 2:
-        start, end = list(dr)
-        df = df[(df[date_col] >= pd.to_datetime(start))
-                & (df[date_col] <= pd.to_datetime(end))]
-        st.info(f"عرض من {start} → {end}")
+    df = df[(df[date_col] >= pd.to_datetime(start)) &
+            (df[date_col] <= pd.to_datetime(end))]
 
-# ==========================
+    st.info(f"📆 عرض البيانات من {start} → {end}")
+
+# =======================================================
+# توحيد قيم Fulfillment (لعدم اختلاف الأسماء)
+# =======================================================
+if "is_fbn" in df.columns:
+    df["is_fbn"] = df["is_fbn"].fillna("Unknown").str.strip()
+
+    df["is_fbn"] = df["is_fbn"].replace({
+        "Fulfilled by Noon": "Fulfilled by Noon (FBN)",
+        "FBN": "Fulfilled by Noon (FBN)",
+        "FBP": "Fulfilled by Partner (FBP)",
+    })
+else:
+    df["is_fbn"] = "Unknown"
+
+# =======================================================
 # KPIs
-# ==========================
+# =======================================================
 st.subheader("📌 مؤشرات الأداء الرئيسية")
+
+total_orders = len(df)
+total_revenue = df["invoice_price"].astype(float).sum()
+avg_price = df["invoice_price"].astype(float).mean()
+
+fbn_count = (df["is_fbn"] == "Fulfilled by Noon (FBN)").sum()
+fbp_count = (df["is_fbn"] == "Fulfilled by Partner (FBP)").sum()
+sm_count  = (df["is_fbn"] == "Supermall").sum()
 
 col1, col2, col3 = st.columns(3)
 
-total_orders = len(df)
-total_revenue = df["invoice_price"].astype(float).sum() if "invoice_price" in df.columns else 0
-avg_price = df["invoice_price"].astype(float).mean() if "invoice_price" in df.columns else 0
+col1.metric("📦 Total Orders | إجمالي الطلبات", total_orders)
+col1.write(f"""
+🔹 **FBN** — Fulfilled by Noon: **{fbn_count}**
+🔸 **FBP** — Fulfilled by Partner: **{fbp_count}**
+🛍️ **Supermall**: **{sm_count}**
+""")
 
-col1.metric("📦 عدد الطلبات", total_orders)
-col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
-col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
+col2.metric("💰 Revenue | إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
+col3.metric("💳 Avg Price | متوسط السعر", f"{avg_price:,.2f} SAR")
 
-# ==========================
-# Fulfillment Analysis
-# ==========================
-st.subheader("🚚 تحليل Fulfillment Type (is_fbn)")
+# =======================================================
+# تحليل Fulfillment
+# =======================================================
+st.subheader("🚚 تحليل الطلبات حسب Fulfillment")
 
-if "is_fbn" not in df.columns:
-    st.error("⚠️ عمود is_fbn غير موجود")
+ful_stats = df["is_fbn"].value_counts().to_frame("عدد الطلبات")
+ful_stats["نسبة %"] = (ful_stats["عدد الطلبات"] / ful_stats["عدد الطلبات"].sum()) * 100
+st.dataframe(ful_stats)
+
+# =======================================================
+# Revenue per fulfillment
+# =======================================================
+st.subheader("💰 الأداء المالي حسب Fulfillment")
+
+rev_stats = (
+    df.groupby("is_fbn")["invoice_price"]
+    .agg(["count", "sum", "mean"])
+    .rename(columns={
+        "count": "📦 عدد الطلبات",
+        "sum": "💰 إجمالي الإيرادات",
+        "mean": "💳 متوسط السعر"
+    })
+    .sort_values(by="💰 إجمالي الإيرادات", ascending=False)
+)
+st.dataframe(rev_stats)
+
+# =======================================================
+# SKUs — كل المنتجات بدون LIMIT
+# =======================================================
+st.subheader("🔥 تحليل المنتجات حسب Fulfillment (كامل بدون حد)")
+
+if "partner_sku" not in df.columns:
+    st.error("⚠️ عمود partner_sku غير موجود في الشيت.")
 else:
-    df["is_fbn"] = df["is_fbn"].fillna("Unknown").str.strip()
+    for f_type in df["is_fbn"].unique():
 
-    # ==== Distribution
-    colA, colB = st.columns(2)
+        st.write(f"### 🔥 {f_type}")
 
-    with colA:
-        st.write("📦 توزيع عدد الطلبات")
-        counts = df["is_fbn"].value_counts()
-        st.bar_chart(counts)
+        subset = df[df["is_fbn"] == f_type]
 
-    with colB:
-        st.write("📊 النسبة المئوية")
-        st.dataframe(
-            pd.DataFrame({
-                "Count": counts,
-                "Percent %": (counts / counts.sum() * 100).round(2)
-            })
-        )
-
-    # ==== Revenue per Fulfillment
-    if "invoice_price" in df.columns:
-        st.subheader("💰 أداء الإيرادات حسب نوع Fulfillment")
-
-        perf = (
-            df.groupby("is_fbn")["invoice_price"]
-            .agg(["count", "sum", "mean"])
-            .rename(columns={
-                "count": "📦 عدد الطلبات",
-                "sum": "💰 إجمالي الربح",
-                "mean": "💳 متوسط سعر الطلب"
-            })
-            .sort_values(by="💰 إجمالي الربح", ascending=False)
-        )
-        st.dataframe(perf)
-
-# ==========================
-# TOP SKUs per Fulfillment
-# ==========================
-if "partner_sku" in df.columns and "invoice_price" in df.columns:
-    st.subheader("🔥 أفضل 10 منتجات حسب نوع Fulfillment")
-
-    for t in df["is_fbn"].unique():
-        subset = df[df["is_fbn"] == t]
         sku_stats = (
             subset.groupby("partner_sku")["invoice_price"]
             .agg(["count", "sum", "mean"])
-            .rename(columns={"count": "طلبات", "sum": "ربح", "mean": "متوسط"})
-            .sort_values(by="ربح", ascending=False)
-            .head(10)
+            .rename(columns={
+                "count": "📦 عدد الطلبات",
+                "sum": "💰 إجمالي الإيرادات",
+                "mean": "💳 متوسط السعر"
+            })
+            .sort_values(by="📦 عدد الطلبات", ascending=False)
         )
-        st.write(f"### {t}")
+
+        # ⭐ تمييز أفضل منتج
+        if len(sku_stats) > 0:
+            first = sku_stats.index[0]
+            sku_stats.rename(index={first: first + " ⭐ TOP"}, inplace=True)
+
         st.dataframe(sku_stats)
 
-# ==========================
-# DISCOUNTS
-# ==========================
+# =======================================================
+# تحليل الخصومات
+# =======================================================
 if "base_price" in df.columns and "invoice_price" in df.columns:
     st.subheader("📉 تحليل الخصومات")
 
@@ -161,8 +183,8 @@ if "base_price" in df.columns and "invoice_price" in df.columns:
     )
     st.dataframe(dis)
 
-# ==========================
-# RAW DATA
-# ==========================
+# =======================================================
+# Raw Data
+# =======================================================
 with st.expander("📄 عرض البيانات الأصلية"):
     st.dataframe(df)
