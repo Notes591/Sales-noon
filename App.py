@@ -53,7 +53,7 @@ except:
     st.warning("⚠️ لم يتم العثور على جدول Coding — سيتم المتابعة بدون تكويد.")
 
 # ===================================================
-# Normalizing SKUs for merging
+# Normalize SKUs
 # ===================================================
 if "partner_sku" not in df.columns:
     st.error("⚠️ عمود partner_sku غير موجود في Sales")
@@ -61,25 +61,17 @@ if "partner_sku" not in df.columns:
 
 df["partner_sku"] = df["partner_sku"].astype(str).str.strip()
 
-if not df_code.empty and "partner_sku" in df_code.columns:
-    df_code["partner_sku"] = df_code["partner_sku"].astype(str).str.strip()
-
 # ===================================================
 # Merge unified_code
 # ===================================================
-if not df_code.empty and "unified_code" in df_code.columns:
+if not df_code.empty and "partner_sku" in df_code.columns and "unified_code" in df_code.columns:
+    df_code["partner_sku"] = df_code["partner_sku"].astype(str).str.strip()
     df = df.merge(df_code, on="partner_sku", how="left")
 else:
     df["unified_code"] = None
 
 # ===================================================
-# 🔒 SAFETY — Prevent KeyError
-# ===================================================
-if "unified_code" not in df.columns:
-    df["unified_code"] = None
-
-# ===================================================
-# Normalize fulfillment column
+# Normalize fulfillment
 # ===================================================
 if "is_fbn" in df.columns:
     df["is_fbn"] = df["is_fbn"].fillna("Unknown").str.strip()
@@ -145,7 +137,35 @@ rev_f = (
 st.dataframe(rev_f)
 
 # ===================================================
-# Unified Product Analysis
+# 🔥 Product Analytics by Fulfillment (old way)
+# ===================================================
+st.subheader("🔥 تحليل المنتجات حسب Fulfillment — كل المنتجات (بدون حد)")
+
+for f_type in df["is_fbn"].unique():
+    st.write(f"### 🔥 {f_type}")
+
+    subset = df[df["is_fbn"] == f_type]
+
+    sku_stats = (
+        subset.groupby("partner_sku")["invoice_price"]
+        .agg(["count", "sum", "mean"])
+        .rename(columns={
+            "count": "📦 الطلبات",
+            "sum": "💰 الإيرادات",
+            "mean": "💳 متوسط السعر"
+        })
+        .sort_values(by="📦 الطلبات", ascending=False)
+    )
+
+    # ⭐ Highlight top SKU
+    if len(sku_stats) > 0:
+        first = sku_stats.index[0]
+        sku_stats.rename(index={first: first + " ⭐ TOP"}, inplace=True)
+
+    st.dataframe(sku_stats)
+
+# ===================================================
+# Unified Product Section
 # ===================================================
 st.subheader("🔗 تحليل المنتجات حسب الكود الموحد (Unified Product)")
 
@@ -167,7 +187,7 @@ else:
     st.dataframe(unified_stats)
 
 # ===================================================
-# SKU Details per Unified Product
+# SKU details inside each unified product
 # ===================================================
 st.subheader("🧩 تفاصيل المنتجات حسب الكود الموحد")
 
