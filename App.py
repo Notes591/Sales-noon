@@ -10,11 +10,11 @@ st.set_page_config(page_title="📊 Sales Dashboard", layout="wide")
 st.title("📊 لوحة تحليلات مبيعات")
 
 # ==========================
-# Google Sheet References
+# Google Sheet Config
 # ==========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
-SALES_SHEET = "Sales"
-CODING_SHEET = "Coding"
+SHEET_SALES = "Sales"
+SHEET_CODING = "Coding"
 
 # ==========================
 # Auth
@@ -25,56 +25,37 @@ creds = Credentials.from_service_account_info(
 )
 client = gspread.authorize(creds)
 
-# ===================================================
+# ==========================
 # Load Sales Sheet
-# ===================================================
-sheet_sales = client.open_by_key(SHEET_ID).worksheet(SALES_SHEET)
-data_sales = sheet_sales.get_all_records()
-df = pd.DataFrame(data_sales)
+# ==========================
+sales_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_SALES)
+sales_data = sales_ws.get_all_records()
+df = pd.DataFrame(sales_data)
 df.columns = df.columns.str.strip()
 
 if df.empty:
-    st.error("📭 لا توجد بيانات في جدول Sales")
+    st.error("📭 شيت Sales فارغ")
     st.stop()
 
-# ===================================================
+# ==========================
 # Load Coding Sheet
-# ===================================================
+# ==========================
 try:
-    sheet_code = client.open_by_key(SHEET_ID).worksheet(CODING_SHEET)
-    data_code = sheet_code.get_all_records()
-    df_code = pd.DataFrame(data_code)
-    df_code.columns = df_code.columns.str.strip()
-    st.success("🧠 جدول Coding تم تحميله ✔️")
+    coding_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_CODING)
+    coding_data = coding_ws.get_all_records()
+    coding_df = pd.DataFrame(coding_data)
+    coding_df.columns = coding_df.columns.str.strip()
+
+    if "partner_sku" in coding_df.columns and "unified_code" in coding_df.columns:
+        df = df.merge(coding_df, on="partner_sku", how="left")
+    else:
+        st.warning("⚠️ جدول Coding يجب أن يحتوي partner_sku + unified_code")
 except:
-    df_code = pd.DataFrame()
-    st.warning("⚠️ لم يتم العثور على Coding — سيستمر البرنامج بدون تكويد")
+    st.warning("⚠️ لم يتم العثور على جدول Coding")
 
-# ===================================================
-# Normalize SKUs
-# ===================================================
-if "partner_sku" not in df.columns:
-    st.error("⚠️ partner_sku غير موجود")
-    st.stop()
-
-df["partner_sku"] = df["partner_sku"].astype(str).str.strip()
-
-# ===================================================
-# Merge unified_code Safely
-# ===================================================
-if not df_code.empty and "partner_sku" in df_code.columns and "unified_code" in df_code.columns:
-    df_code["partner_sku"] = df_code["partner_sku"].astype(str).str.strip()
-    df = df.merge(df_code, on="partner_sku", how="left")
-else:
-    df["unified_code"] = None
-
-# 🔥 🔒 Important — Guarantee column exists
-if "unified_code" not in df.columns:
-    df["unified_code"] = None
-
-# ===================================================
+# =====================================================
 # Normalize Fulfillment
-# ===================================================
+# =====================================================
 if "is_fbn" in df.columns:
     df["is_fbn"] = df["is_fbn"].fillna("Unknown").str.strip()
     df["is_fbn"] = df["is_fbn"].replace({
@@ -85,135 +66,146 @@ if "is_fbn" in df.columns:
 else:
     df["is_fbn"] = "Unknown"
 
-# ===================================================
+# =====================================================
 # KPIs
-# ===================================================
-st.subheader("📌 مؤشرات الأداء")
+# =====================================================
+st.subheader("📌 مؤشرات الأداء الرئيسية")
 
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
+df["base_price"] = pd.to_numeric(df.get("base_price"), errors="coerce")
 
 total_orders = len(df)
 total_revenue = df["invoice_price"].sum()
 avg_price = df["invoice_price"].mean()
 
-fbn = (df["is_fbn"] == "Fulfilled by Noon (FBN)").sum()
-fbp = (df["is_fbn"] == "Fulfilled by Partner (FBP)").sum()
-sm  = (df["is_fbn"] == "Supermall").sum()
+fbn_count = (df["is_fbn"] == "Fulfilled by Noon (FBN)").sum()
+fbp_count = (df["is_fbn"] == "Fulfilled by Partner (FBP)").sum()
+sm_count  = (df["is_fbn"] == "Supermall").sum()
 
 col1, col2, col3 = st.columns(3)
 
 col1.metric("📦 إجمالي الطلبات", total_orders)
 col1.write(f"""
-🔹 **FBN**: {fbn}  
-🔸 **FBP**: {fbp}  
-🛍️ **Supermall**: {sm}
+🔹 **FBN** — Fulfilled by Noon: **{fbn_count}**  
+🔸 **FBP** — Fulfilled by Partner: **{fbp_count}**  
+🛍️ **Supermall**: **{sm_count}**
 """)
 
-col2.metric("💰 الإيرادات", f"{total_revenue:,.2f} SAR")
+col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
 col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
 
-# ===================================================
+# =====================================================
 # Fulfillment Analysis
-# ===================================================
-st.subheader("🚚 الطلبات حسب نوع التنفيذ")
+# =====================================================
+st.subheader("🚚 تحليل الطلبات حسب نوع التنفيذ")
 
-ful = df["is_fbn"].value_counts().to_frame("📦 الطلبات")
-ful["📊 نسبة %"] = (ful["📦 الطلبات"]/total_orders)*100
-st.dataframe(ful)
+ful_stats = df["is_fbn"].value_counts().to_frame("📦 عدد الطلبات")
+ful_stats["📉 نسبة %"] = (ful_stats["📦 عدد الطلبات"] / total_orders) * 100
+st.dataframe(ful_stats)
 
-# ===================================================
+# =====================================================
 # Revenue by Fulfillment
-# ===================================================
-st.subheader("💰 الإيرادات حسب نوع التنفيذ")
+# =====================================================
+st.subheader("💰 الأداء المالي حسب Fulfillment")
 
-rev = (
+rev_stats = (
     df.groupby("is_fbn")["invoice_price"]
-    .agg(["count","sum","mean"])
-    .rename(columns={"count":"📦 الطلبات", "sum":"💰 الإيرادات", "mean":"💳 متوسط السعر"})
-    .sort_values("💰 الإيرادات", ascending=False)
+    .agg(["count", "sum", "mean"])
+    .rename(columns={
+        "count": "📦 الطلبات",
+        "sum": "💰 الإيراد",
+        "mean": "💳 متوسط السعر"
+    })
+    .sort_values(by="💰 الإيراد", ascending=False)
 )
-st.dataframe(rev)
+st.dataframe(rev_stats)
 
-# ===================================================
-# 🔥 Original Product Analytics (SKU level)
-# ===================================================
-st.subheader("🔥 تحليل المنتجات حسب SKU — بدون حد")
+# =====================================================
+# Products by SKU
+# =====================================================
+st.subheader("🔥 المنتجات حسب SKU")
 
-for f_type in df["is_fbn"].unique():
-    st.write(f"### {f_type}")
-    sub = df[df["is_fbn"] == f_type]
+if "partner_sku" in df.columns:
+    for f in df["is_fbn"].unique():
+        st.write(f"### 🔥 {f}")
 
-    stats = (
-        sub.groupby("partner_sku")["invoice_price"]
-        .agg(["count","sum","mean"])
-        .rename(columns={
-            "count":"📦 الطلبات",
-            "sum":"💰 الإيرادات",
-            "mean":"💳 متوسط السعر"
-        })
-        .sort_values("📦 الطلبات", ascending=False)
-    )
+        sub = df[df["is_fbn"] == f]
 
-    if len(stats) > 0:
-        first = stats.index[0]
-        stats.rename(index={first: f"{first} ⭐ TOP"}, inplace=True)
-
-    st.dataframe(stats)
-
-# ===================================================
-# Unified Product Analysis
-# ===================================================
-st.subheader("🔗 تحليل حسب الكود الموحد Unified Product")
-
-if df["unified_code"].isna().all():
-    st.info("⚠️ لا يوجد unified_code — أضف بيانات في جدول Coding")
-else:
-    uni = (
-        df[df["unified_code"].notna()]
-        .groupby("unified_code")["invoice_price"]
-        .agg(["count","sum","mean"])
-        .rename(columns={
-            "count": "📦 الطلبات",
-            "sum": "💰 الإيرادات",
-            "mean": "💳 متوسط السعر"
-        })
-        .sort_values("📦 الطلبات",ascending=False)
-    )
-    st.dataframe(uni)
-
-# ===================================================
-# Unified Product Details + Images
-# ===================================================
-st.subheader("🧩 تفاصيل المنتجات الموحدة + الصور")
-
-if df["unified_code"].notna().any():
-    for uc in df["unified_code"].dropna().unique():
-        st.markdown(f"### 🆔 {uc}")
-        sub = df[df["unified_code"] == uc]
-
-        # عرض صور المنتجات
-        images = sub["image_url"].dropna().unique().tolist()
-        cols = st.columns(min(len(images),4))
-        for i,img in enumerate(images[:4]):
-            cols[i].image(img, use_column_width=True)
-
-        # جدول بيانات SKUs
         sku_stats = (
             sub.groupby("partner_sku")["invoice_price"]
-            .agg(["count","sum","mean"])
+            .agg(["count", "sum", "mean"])
             .rename(columns={
-                "count":"📦 الطلبات",
-                "sum":"💰 الإيرادات",
-                "mean":"💳 متوسط السعر"
+                "count": "📦 الطلبات",
+                "sum": "💰 الإيراد",
+                "mean": "💳 السعر"
             })
-            .sort_values("📦 الطلبات", ascending=False)
+            .sort_values(by="📦 الطلبات", ascending=False)
         )
-        st.dataframe(sku_stats)
-else:
-    st.info("🔔 لا توجد بيانات للكود الموحد لعرض التفاصيل")
 
-# ===================================================
-# Raw data
-# ===================================================
-with st.expander("📄 عرض البيانات الخام"):
+        if len(sku_stats) > 0:
+            top = sku_stats.index[0]
+            sku_stats.rename(index={top: top + " ⭐ TOP"}, inplace=True)
+
+        st.dataframe(sku_stats)
+
+# =====================================================
+# Unified Product Aggregation
+# =====================================================
+st.subheader("🔗 تحليل المنتجات حسب الكود الموحد Unified Code")
+
+if "unified_code" not in df.columns:
+    st.warning("⚠️ لم يتم دمج unified_code — تحقق من جدول Coding")
+else:
+    u_stats = (
+        df.groupby("unified_code")["invoice_price"]
+        .agg(["count", "sum", "mean"])
+        .rename(columns={
+            "count": "📦 الطلبات",
+            "sum": "💰 إيرادات",
+            "mean": "💳 متوسط السعر"
+        })
+        .sort_values(by="📦 الطلبات", ascending=False)
+    )
+    st.dataframe(u_stats)
+
+# =====================================================
+# Product Gallery with Images
+# =====================================================
+st.subheader("🖼️ معرض المنتجات حسب Unified Code")
+
+if "image_url" not in df.columns:
+    st.warning("⚠️ لا يوجد عمود image_url")
+else:
+    for code in df["unified_code"].dropna().unique():
+        st.markdown(f"### 🆔 Unified Code: **{code}**")
+
+        sub = df[df["unified_code"] == code]
+        sub = sub.drop_duplicates(subset="partner_sku")
+
+        cols = st.columns(4)
+        i = 0
+
+        for _, row in sub.iterrows():
+            img_url = row.get("image_url", "")
+
+            if not img_url:
+                continue
+
+            try:
+                cols[i].image(
+                    img_url,
+                    caption=f"{row['partner_sku']} | {row.get('marketplace','')}",
+                    use_column_width=True
+                )
+            except:
+                cols[i].warning(f"🚫 صورة غير صالحة لـ {row['partner_sku']}")
+
+            i += 1
+            if i >= 4:
+                i = 0
+
+# =====================================================
+# Raw Data
+# =====================================================
+with st.expander("📄 البيانات الخام"):
     st.dataframe(df)
