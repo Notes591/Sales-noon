@@ -36,10 +36,10 @@ if df.empty:
     st.error("📭 الشيت لا يحتوي بيانات")
     st.stop()
 
-# =============
+# ==========================
 # Date Parsing
-# =============
-date_cols = ["order_date", "create_time", "created_at", "date"]
+# ==========================
+date_cols = ["order_timestamp", "order_date", "created_at", "create_time", "date"]
 date_col = None
 
 for c in date_cols:
@@ -73,6 +73,8 @@ if "is_fbn" in df.columns:
         "Fulfilled by Noon": "Fulfilled by Noon (FBN)",
         "FBN": "Fulfilled by Noon (FBN)",
         "FBP": "Fulfilled by Partner (FBP)",
+        "Super mall": "Supermall",
+        "supermall": "Supermall"
     })
 else:
     df["is_fbn"] = "Unknown"
@@ -103,9 +105,9 @@ col2.metric("💰 Revenue | إجمالي الإيرادات", f"{total_revenue:,
 col3.metric("💳 Avg Price | متوسط السعر", f"{avg_price:,.2f} SAR")
 
 # =======================================================
-# تحليل Fulfillment
+# توزيع Fulfillment
 # =======================================================
-st.subheader("🚚 تحليل الطلبات حسب Fulfillment")
+st.subheader("🚚 تحليل الطلبات حسب نوع Fulfillment")
 
 ful_stats = df["is_fbn"].value_counts().to_frame("عدد الطلبات")
 ful_stats["نسبة %"] = (ful_stats["عدد الطلبات"] / ful_stats["عدد الطلبات"].sum()) * 100
@@ -129,13 +131,12 @@ rev_stats = (
 st.dataframe(rev_stats)
 
 # =======================================================
-# SKUs — كل المنتجات بدون LIMIT
+# SKUs — مع صور — كامل بدون LIMIT
 # =======================================================
-st.subheader("🔥 تحليل المنتجات حسب Fulfillment (كامل بدون حد)")
+st.subheader("🔥 المنتجات حسب Fulfillment (صور + أرقام)")
 
-if "partner_sku" not in df.columns:
-    st.error("⚠️ عمود partner_sku غير موجود في الشيت.")
-else:
+if "partner_sku" in df.columns:
+
     for f_type in df["is_fbn"].unique():
 
         st.write(f"### 🔥 {f_type}")
@@ -155,10 +156,35 @@ else:
 
         # ⭐ تمييز أفضل منتج
         if len(sku_stats) > 0:
-            first = sku_stats.index[0]
-            sku_stats.rename(index={first: first + " ⭐ TOP"}, inplace=True)
+            top_sku = sku_stats.index[0]
+            sku_stats.rename(index={top_sku: top_sku + " ⭐ TOP"}, inplace=True)
 
-        st.dataframe(sku_stats)
+        # ===== عرض كل منتج =====
+        for sku_name, row in sku_stats.iterrows():
+            clean_sku = sku_name.replace(" ⭐ TOP", "")
+
+            product_info = subset[subset["partner_sku"] == clean_sku].iloc[0]
+            img_url = product_info.get("image_url", None)
+
+            col1, col2 = st.columns([1.2, 3.5])
+
+            with col1:
+                if img_url and isinstance(img_url, str):
+                    st.image(img_url, width=140)
+
+            with col2:
+                st.markdown(f"""
+                **SKU:** `{clean_sku}`  
+                **📦 Orders:** {row['📦 عدد الطلبات']}  
+                **💰 Revenue:** {row['💰 إجمالي الإيرادات']:.2f} SAR  
+                **💳 Avg Price:** {row['💳 متوسط السعر']:.2f} SAR  
+                """)
+                if "brand_en" in subset.columns:
+                    st.markdown(f"**🏷️ Brand:** {product_info['brand_en']}")
+
+        st.divider()
+else:
+    st.error("⚠️ عمود partner_sku غير موجود في الشيت.")
 
 # =======================================================
 # تحليل الخصومات
