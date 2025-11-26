@@ -38,7 +38,7 @@ if df.empty:
     st.stop()
 
 # =======================================================
-# Load Coding Sheet (Mapping)
+# Load Coding Sheet
 # =======================================================
 try:
     sheet_code = client.open_by_key(SHEET_ID).worksheet(CODING_SHEET)
@@ -51,7 +51,7 @@ except:
     df_code = None
 
 # =======================================================
-# Merge SKU -> unified_code
+# Merge unified code
 # =======================================================
 if df_code is not None and "partner_sku" in df_code.columns and "unified_code" in df_code.columns:
     df = df.merge(df_code[["partner_sku", "unified_code"]], on="partner_sku", how="left")
@@ -59,32 +59,7 @@ else:
     df["unified_code"] = None
 
 # =======================================================
-# Date Parsing
-# =======================================================
-date_cols = ["order_timestamp","order_date","create_time","created_at","date"]
-date_col = None
-
-for c in date_cols:
-    if c in df.columns:
-        df[c] = pd.to_datetime(df[c], errors="coerce")
-        date_col = c
-        break
-
-# =======================================================
-# فلترة حسب التاريخ
-# =======================================================
-if date_col:
-    st.sidebar.subheader("🗓️ فلترة حسب التاريخ")
-    start, end = st.sidebar.date_input(
-        "اختر المدة",
-        (df[date_col].min(), df[date_col].max())
-    )
-    df = df[(df[date_col] >= pd.to_datetime(start)) &
-            (df[date_col] <= pd.to_datetime(end))]
-    st.info(f"📆 عرض البيانات من {start} → {end}")
-
-# =======================================================
-# Normalizing Fulfillment
+# Fix fulfillment
 # =======================================================
 if "is_fbn" in df.columns:
     df["is_fbn"] = df["is_fbn"].fillna("Unknown").str.strip()
@@ -101,114 +76,108 @@ else:
 # =======================================================
 st.subheader("📌 مؤشرات الأداء الرئيسية")
 
+df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
+
 total_orders = len(df)
-total_revenue = df["invoice_price"].astype(float).sum()
-avg_price = df["invoice_price"].astype(float).mean()
+total_revenue = df["invoice_price"].sum()
+avg_price = df["invoice_price"].mean() if total_orders > 0 else 0
 
 fbn_count = (df["is_fbn"] == "Fulfilled by Noon (FBN)").sum()
 fbp_count = (df["is_fbn"] == "Fulfilled by Partner (FBP)").sum()
 sm_count  = (df["is_fbn"] == "Supermall").sum()
 
 col1, col2, col3 = st.columns(3)
-col1.metric("📦 Total Orders | إجمالي الطلبات", total_orders)
+col1.metric("📦 إجمالي الطلبات", total_orders)
+col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
+col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
+
 col1.write(f"""
 🔹 **FBN** — Fulfilled by Noon: **{fbn_count}**
 🔸 **FBP** — Fulfilled by Partner: **{fbp_count}**
 🛍️ **Supermall**: **{sm_count}**
 """)
-col2.metric("💰 Revenue | إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
-col3.metric("💳 Avg Price | متوسط السعر", f"{avg_price:,.2f} SAR")
 
 # =======================================================
-# Fulfillment stats
+# Fulfillment Table
 # =======================================================
 st.subheader("🚚 تحليل الطلبات حسب Fulfillment")
+
 ful_stats = df["is_fbn"].value_counts().to_frame("عدد الطلبات")
 ful_stats["نسبة %"] = (ful_stats["عدد الطلبات"]/ful_stats["عدد الطلبات"].sum()*100)
 st.dataframe(ful_stats)
 
 # =======================================================
-# Revenue by fulfillment
+# Revenue Table
 # =======================================================
 st.subheader("💰 الأداء المالي حسب Fulfillment")
+
 rev_stats = (
     df.groupby("is_fbn")["invoice_price"]
-      .agg(["count","sum","mean"])
-      .rename(columns={
+    .agg(["count","sum","mean"])
+    .rename(columns={
         "count":"📦 عدد الطلبات",
         "sum":"💰 إجمالي الإيرادات",
         "mean":"💳 متوسط السعر"
-      })
-      .sort_values("💰 إجمالي الإيرادات",ascending=False)
+    })
+    .sort_values("💰 إجمالي الإيرادات",ascending=False)
 )
 st.dataframe(rev_stats)
 
 # =======================================================
-# SKUs With Images & unified code
+# Products Analysis
 # =======================================================
-st.subheader("🔥 تحليل المنتجات (كامل) — صور + SKU + الكود الموحد")
+st.subheader("🔥 تحليل المنتجات بالصور + الكود الموحد")
 
-for f_type in df["is_fbn"].unique():
-    st.write(f"### 🛒 {f_type}")
+if "partner_sku" not in df.columns:
+    st.error("⚠️ لا يوجد عمود partner_sku بالشيت")
+else:
+    for f_type in df["is_fbn"].unique():
+        st.write(f"### 🛒 {f_type}")
 
-    subset = df[df["is_fbn"] == f_type]
+        subset = df[df["is_fbn"] == f_type]
 
-    sku_stats = (
-        subset.groupby("partner_sku")["invoice_price"]
-        .agg(["count","sum","mean"])
-        .rename(columns={
-            "count":"📦 عدد الطلبات",
-            "sum":"💰 إجمالي الإيرادات",
-            "mean":"💳 متوسط السعر"
-        })
-        .sort_values("📦 عدد الطلبات",ascending=False)
-    )
+        sku_stats = (
+            subset.groupby("partner_sku")["invoice_price"]
+            .agg(["count","sum","mean"])
+            .rename(columns={
+                "count":"📦 عدد الطلبات",
+                "sum":"💰 إجمالي الإيرادات",
+                "mean":"💳 متوسط السعر"
+            })
+            .sort_values("📦 عدد الطلبات",ascending=False)
+        )
 
-    # highlight top
-    if len(sku_stats) > 0:
-        first = sku_stats.index[0]
-        sku_stats.rename(index={first:first+" ⭐ TOP"},inplace=True)
+        if len(sku_stats) > 0:
+            top = sku_stats.index[0]
+            sku_stats.rename(index={top: top+" ⭐ TOP"}, inplace=True)
 
-    # Rendering each product row
-    for sku,row in sku_stats.iterrows():
-        base = sku.replace(" ⭐ TOP","")
-        record = subset[subset["partner_sku"]==base].iloc[0]
+        for sku, row in sku_stats.iterrows():
+            clean_sku = sku.replace(" ⭐ TOP","")
+            item = subset[subset["partner_sku"] == clean_sku].iloc[0]
 
-        img = record.get("image_url",None)
-        ucode = record.get("unified_code","—")
+            img = item.get("image_url",None)
+            code = item.get("unified_code","—")
 
-        colA,colB = st.columns([1.2,4])
+            colA, colB = st.columns([1.2,4])
 
-        with colA:
-            if img and isinstance(img,str) and img.startswith("http"):
-                st.image(img,width=130)
-            else:
-                st.write("📸 No Image")
+            with colA:
+                if img and isinstance(img,str) and img.startswith("http"):
+                    st.image(img, width=130)
+                else:
+                    st.write("📸 No image")
 
-        with colB:
-            st.markdown(f"""
-            **🆔 SKU:** `{base}`
-            **🔗 Unified Code:** `{ucode}`
-            **📦 Orders:** {row['📦 عدد الطلبات']}
-            **💰 Revenue:** {row['💰 إجمالي الإيرادات']:.2f} SAR
-            **💳 Avg:** {row['💳 متوسط السعر']:.2f} SAR
-            """)
-
-    st.divider()
-
-# =======================================================
-# الخصومات
-# =======================================================
-if "base_price" in df.columns:
-    st.subheader("📉 تحليل الخصومات")
-    df["discount"]=df["base_price"].astype(float)-df["invoice_price"].astype(float)
-    df["discount%"]=df["discount"]/df["base_price"].astype(float)*100
-    st.dataframe(
-        df.groupby("is_fbn")[["discount","discount%"]].mean().round(2)
-    )
+            with colB:
+                st.markdown(f"""
+                **SKU:** `{clean_sku}`
+                **🔗 unified_code:** `{code}`
+                **📦 الطلبات:** `{row['📦 عدد الطلبات']}`
+                **💰 الإيرادات:** `{row['💰 إجمالي الإيرادات']:.2f} SAR`
+                **💳 متوسط السعر:** `{row['💳 متوسط السعر']:.2f} SAR`
+                """)
+        st.divider()
 
 # =======================================================
-# عرض البيانات
+# Raw Data
 # =======================================================
-with st.expander("📄 البيانات الأصلية"):
+with st.expander("📄 عرض البيانات الأصلية"):
     st.dataframe(df)
