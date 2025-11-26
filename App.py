@@ -36,10 +36,10 @@ if df.empty:
     st.error("📭 الشيت لا يحتوي بيانات")
     st.stop()
 
-# ==========================
+# =============
 # Date Parsing
-# ==========================
-date_cols = ["order_timestamp", "order_date", "created_at", "create_time", "date"]
+# =============
+date_cols = ["order_date", "create_time", "created_at", "date"]
 date_col = None
 
 for c in date_cols:
@@ -73,8 +73,6 @@ if "is_fbn" in df.columns:
         "Fulfilled by Noon": "Fulfilled by Noon (FBN)",
         "FBN": "Fulfilled by Noon (FBN)",
         "FBP": "Fulfilled by Partner (FBP)",
-        "Super mall": "Supermall",
-        "supermall": "Supermall"
     })
 else:
     df["is_fbn"] = "Unknown"
@@ -105,9 +103,9 @@ col2.metric("💰 Revenue | إجمالي الإيرادات", f"{total_revenue:,
 col3.metric("💳 Avg Price | متوسط السعر", f"{avg_price:,.2f} SAR")
 
 # =======================================================
-# توزيع Fulfillment
+# تحليل Fulfillment
 # =======================================================
-st.subheader("🚚 تحليل الطلبات حسب نوع Fulfillment")
+st.subheader("🚚 تحليل الطلبات حسب Fulfillment")
 
 ful_stats = df["is_fbn"].value_counts().to_frame("عدد الطلبات")
 ful_stats["نسبة %"] = (ful_stats["عدد الطلبات"] / ful_stats["عدد الطلبات"].sum()) * 100
@@ -131,12 +129,13 @@ rev_stats = (
 st.dataframe(rev_stats)
 
 # =======================================================
-# SKUs — مع صور — كامل بدون LIMIT
+# SKUs — كل المنتجات بدون LIMIT + الصور 👇👇
 # =======================================================
-st.subheader("🔥 المنتجات حسب Fulfillment (صور + أرقام)")
+st.subheader("🔥 تحليل المنتجات حسب Fulfillment (مع الصور)")
 
-if "partner_sku" in df.columns:
-
+if "partner_sku" not in df.columns:
+    st.error("⚠️ عمود partner_sku غير موجود في الشيت.")
+else:
     for f_type in df["is_fbn"].unique():
 
         st.write(f"### 🔥 {f_type}")
@@ -156,35 +155,28 @@ if "partner_sku" in df.columns:
 
         # ⭐ تمييز أفضل منتج
         if len(sku_stats) > 0:
-            top_sku = sku_stats.index[0]
-            sku_stats.rename(index={top_sku: top_sku + " ⭐ TOP"}, inplace=True)
+            first = sku_stats.index[0]
+            sku_stats.rename(index={first: first + " ⭐ TOP"}, inplace=True)
 
-        # ===== عرض كل منتج =====
+        # 🔥 إضافة الصور لكل SKU — بدون حذف جدولك
         for sku_name, row in sku_stats.iterrows():
             clean_sku = sku_name.replace(" ⭐ TOP", "")
+            prod_row = subset[subset["partner_sku"] == clean_sku].iloc[0]
+            img_url = prod_row.get("image_url", None)
 
-            product_info = subset[subset["partner_sku"] == clean_sku].iloc[0]
-            img_url = product_info.get("image_url", None)
+            colA, colB = st.columns([1,3])
 
-            col1, col2 = st.columns([1.2, 3.5])
+            with colA:
+                if img_url and isinstance(img_url, str) and img_url.startswith("http"):
+                    st.image(img_url, width=120)
 
-            with col1:
-                if img_url and isinstance(img_url, str):
-                    st.image(img_url, width=140)
-
-            with col2:
-                st.markdown(f"""
-                **SKU:** `{clean_sku}`  
-                **📦 Orders:** {row['📦 عدد الطلبات']}  
-                **💰 Revenue:** {row['💰 إجمالي الإيرادات']:.2f} SAR  
-                **💳 Avg Price:** {row['💳 متوسط السعر']:.2f} SAR  
-                """)
-                if "brand_en" in subset.columns:
-                    st.markdown(f"**🏷️ Brand:** {product_info['brand_en']}")
+            with colB:
+                st.write(f"**SKU:** `{clean_sku}`")
+                st.write(f"📦 الطلبات: {row['📦 عدد الطلبات']}")
+                st.write(f"💰 الإيرادات: {row['💰 إجمالي الإيرادات']:.2f} SAR")
+                st.write(f"💳 متوسط السعر: {row['💳 متوسط السعر']:.2f} SAR")
 
         st.divider()
-else:
-    st.error("⚠️ عمود partner_sku غير موجود في الشيت.")
 
 # =======================================================
 # تحليل الخصومات
