@@ -6,18 +6,14 @@ from google.oauth2.service_account import Credentials
 # ==========================
 # إعداد الصفحة
 # ==========================
-st.set_page_config(
-    page_title="📊 Sales Dashboard",
-    layout="wide",
-)
-
-st.title("📊 Sales Dashboard — Google Sheet")
+st.set_page_config(page_title="📊 لوحة مبيعات نون", layout="wide")
+st.title("📊 لوحة تحليلات مبيعات نون")
 
 # ==========================
 # Google Sheet Config
 # ==========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
-SHEET_NAME = "Sales"  # <- هنا اسم الورقة داخل الملف
+SHEET_NAME = "Sales"
 
 # ==========================
 # Auth من Streamlit Secrets
@@ -26,54 +22,107 @@ creds = Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=["https://www.googleapis.com/auth/spreadsheets"]
 )
-
 client = gspread.authorize(creds)
 
 # ==========================
-# قراءة البيانات
+# قراءة الداتا من Google Sheets
 # ==========================
 sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-records = sheet.get_all_records()
-df = pd.DataFrame(records)
+data = sheet.get_all_records()
+df = pd.DataFrame(data)
 
-# ==========================
-# عرض البيانات
-# ==========================
+# تنظيف أسماء الأعمدة
+df.columns = df.columns.str.strip()
+
 if df.empty:
     st.warning("📭 لا توجد بيانات داخل الشيت.")
+    st.stop()
+
+st.success("📥 تم تحميل البيانات من Google Sheets!")
+
+# ==========================
+# تحديد عمود التاريخ
+# ==========================
+date_col_candidates = ["order_date", "create_time", "date", "created_at"]
+date_col = None
+
+for c in date_col_candidates:
+    if c in df.columns:
+        date_col = c
+        break
+
+if date_col:
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+
+# ==========================
+# KPI
+# ==========================
+st.subheader("📌 مؤشرات الأداء الرئيسية")
+
+col1, col2, col3 = st.columns(3)
+
+total_orders = df.shape[0]
+
+# تأكد أن invoice_price موجود
+if "invoice_price" not in df.columns:
+    st.error("⚠️ عمود invoice_price غير موجود في الشيت.")
+    st.stop()
+
+total_revenue = df["invoice_price"].astype(float).sum()
+avg_price = df["invoice_price"].astype(float).mean()
+
+col1.metric("📦 عدد الطلبات", total_orders)
+col2.metric("💰 إجمالي الأرباح", f"{total_revenue:,.2f} SAR")
+col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
+
+# ==========================
+# فلترة حسب التاريخ
+# ==========================
+if date_col:
+    st.sidebar.subheader("🗓️ فلترة حسب التاريخ")
+    dmin = df[date_col].min()
+    dmax = df[date_col].max()
+
+    dr = st.sidebar.date_input("حدد المدى الزمني", (dmin, dmax))
+
+    if isinstance(dr, tuple) and len(dr) == 2:
+        start, end = dr
+        mask = (df[date_col] >= pd.to_datetime(start)) & (df[date_col] <= pd.to_datetime(end))
+        df = df[mask]
+
+        st.info(f"📆 عرض البيانات من **{start}** إلى **{end}**")
+
+# ==========================
+# أداء المنتجات SKU
+# ==========================
+st.subheader("🔥 أداء المنتجات (SKU)")
+
+if "partner_sku" in df.columns:
+    sku_stats = (
+        df.groupby("partner_sku")["invoice_price"]
+        .agg(["count", "sum", "mean"])
+        .rename(columns={"count": "🛒 الطلبات", "sum": "💰 الربح", "mean": "💳 متوسط السعر"})
+        .sort_values(by="💰 الربح", ascending=False)
+    )
+    st.dataframe(sku_stats)
 else:
-    st.success("📥 تم قراءة البيانات من Google Sheets")
-    st.dataframe(df, use_container_width=True)
+    st.warning("⚠️ عمود partner_sku غير موجود في الشيت.")
 
 # ==========================
-# KPIs (لو أعمدة المبيعات موجودة)
+# تحليل الخصومات
 # ==========================
-if not df.empty:
+if "base_price" in df.columns:
+    st.subheader("📉 تحليل الخصومات")
 
-    st.subheader("📊 KPIs")
+    df["discount"] = (df["base_price"].astype(float) - df["invoice_price"].astype(float))
+    df["discount%"] = (df["discount"] / df["base_price"]) * 100
 
-    col1, col2, col3 = st.columns(3)
-
-    total_orders = len(df)
-
-    revenue_col = None
-    for c in ["invoice_price", "total", "amount", "price"]:
-        if c in df.columns:
-            revenue_col = c
-            break
-
-    if revenue_col:
-        total_revenue = df[revenue_col].astype(float).sum()
-        avg_revenue = df[revenue_col].astype(float).mean()
-
-        col1.metric("📦 عدد الطلبات", total_orders)
-        col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f}")
-        col3.metric("💳 متوسط سعر الطلب", f"{avg_revenue:,.2f}")
-    else:
-        st.info("⚠️ لم أجد عمود الإيرادات — ساعتها قولّي اسم العمود")
+    st.dataframe(
+        df[["partner_sku", "base_price", "invoice_price", "discount", "discount%"]]
+    )
 
 # ==========================
-# إكسباندر لعرض البيانات الخام
+# عرض البيانات الخام
 # ==========================
-with st.expander("👀 البيانات الأصلية (Raw)"):
-    st.write(records)
+with st.expander("👀 عرض البيانات الأصلية"):
+    st.dataframe(df)
