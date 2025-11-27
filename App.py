@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 # إعداد الصفحة
 # =========================
 st.set_page_config(page_title="📊 Unified Product Dashboard", layout="wide")
-st.title("📊 تحليل المنتجات حسب الكود الموحد")
+st.title("📊تحليل المنتجات")
 
 
 # =========================
@@ -83,15 +83,15 @@ df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 # =========================================================
 # 📦 عدد الـ SKUs حسب نوع الشحن (مع التكرار)
 # =========================================================
-st.subheader("📦 عدد صفوف الـ SKU حسب نوع الشحن (مع التكرار)")
+st.subheader("📦 عدد الطلبات")
 
 sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].count()
 sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].count()
 sku_sm  = df[df["is_fbn"] == "Supermall"]["partner_sku"].count()
 
-st.write(f"🔵 SKUs FBN: **{sku_fbn}**")
-st.write(f"🟠 SKUs FBP: **{sku_fbp}**")
-st.write(f"🟣 SKUs Supermall: **{sku_sm}**")
+st.write(f"🔵 SKUs FBNطلبات التخزين: **{sku_fbn}**")
+st.write(f"🟠 SKUs FBPالطلبات العادية:**{sku_fbp}**")
+st.write(f"🟣 SKUs Supermall(تخزين)طلبات سوبر مول: **{sku_sm}**")
 
 st.markdown("---")
 
