@@ -58,19 +58,16 @@ if not {"partner_sku", "unified_code"}.issubset(coding_df.columns):
 df = df.merge(coding_df, on="partner_sku", how="left")
 
 
-# ======================================================
-# Normalize Fulfillment — أقوى نسخة (لا تفشل)
-# ======================================================
+# =========================
+# Normalize Fulfillment
+# =========================
 df["is_fbn"] = df["is_fbn"].astype(str)
 
-# إزالة الرموز الخفية (RTL + مسافات غير مرئية)
 df["is_fbn"] = df["is_fbn"].str.replace("\u200f", "", regex=False)
 df["is_fbn"] = df["is_fbn"].str.replace("\xa0", "", regex=False)
 
-# تحويل Lowercase + strip
 df["is_fbn"] = df["is_fbn"].str.strip().str.lower()
 
-# تصنيف ذكي
 df.loc[df["is_fbn"].str.contains("noon"), "is_fbn"] = "FBN"
 df.loc[df["is_fbn"].str.contains("fbn"), "is_fbn"] = "FBN"
 
@@ -80,6 +77,22 @@ df.loc[df["is_fbn"].str.contains("fbp"), "is_fbn"] = "FBP"
 df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
 
 df["is_fbn"] = df["is_fbn"].fillna("Unknown")
+
+
+# =========================================================
+# SHOW SKU COUNTS (بدون أي علاقة بالكود الموحد)
+# =========================================================
+st.subheader("📦 عدد الـ SKUs حسب نوع الشحن")
+
+sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].nunique()
+sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].nunique()
+sku_sm  = df[df["is_fbn"] == "Supermall"]["partner_sku"].nunique()
+
+st.write(f"🔵 SKUs FBN: **{sku_fbn}**")
+st.write(f"🟠 SKUs FBP: **{sku_fbp}**")
+st.write(f"🟣 SKUs Supermall: **{sku_sm}**")
+
+st.markdown("---")
 
 
 # =========================
@@ -92,7 +105,7 @@ if "unified_code" not in df.columns or df["unified_code"].isna().all():
 st.subheader("🟢 تحليل حسب الكود الموحد (ترتيب تنازلي حسب الطلبات)")
 
 
-# ترتيب حسب عدد الطلبات الحقيقية
+# ترتيب حسب عدد الطلبات
 codes = (
     df.groupby("unified_code")["invoice_price"]
     .count()
@@ -109,39 +122,26 @@ for code in codes:
 
     st.markdown(f"## 🆔 Unified Code: **{code}**")
 
-    # ============
-    # عدد الطلبات الحقيقي
-    # ============
     total_orders = sub.shape[0]
-
-    # ============
-    # الإيرادات والإحصائيات
-    # ============
     total_revenue = sub["invoice_price"].sum()
     avg_price = sub["invoice_price"].mean()
 
-    # ============
-    # Breakdown by fulfillment
-    # ============
-    fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
+    # Fulfillment breakdown
     fbp_orders = sub[sub["is_fbn"] == "FBP"].shape[0]
+    fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
     sm_orders = sub[sub["is_fbn"] == "Supermall"].shape[0]
 
-    fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
     fbp_rev = sub[sub["is_fbn"] == "FBP"]["invoice_price"].sum()
+    fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
     sm_rev = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
 
-    # ============
-    # Summary
-    # ============
+    # Summary cards
     col1, col2, col3 = st.columns(3)
     col1.metric("📦 إجمالي الطلبات", total_orders)
     col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
     col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
 
-    # ============
-    # Fulfillment UI
-    # ============
+    # Fulfillment type cards
     st.markdown("### 🚚 تحليل حسب نوع الشحن")
 
     c1, c2, c3 = st.columns(3)
@@ -154,9 +154,6 @@ for code in codes:
     c3.metric("Supermall - عدد الطلبات", sm_orders)
     c3.metric("Supermall - الإيراد", f"{sm_rev:,.2f} SAR")
 
-    # ============
-    # Image
-    # ============
     st.markdown("### 🖼️ صورة المنتج")
     try:
         img = sub["image_url"].dropna().iloc[0]
