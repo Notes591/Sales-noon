@@ -63,6 +63,7 @@ df = df.merge(coding_df, on="partner_sku", how="left")
 # =========================
 df["is_fbn"] = df["is_fbn"].astype(str)
 
+# إزالة الرموز الخفية
 df["is_fbn"] = df["is_fbn"].str.replace("\u200f", "", regex=False)
 df["is_fbn"] = df["is_fbn"].str.replace("\xa0", "", regex=False)
 
@@ -80,13 +81,13 @@ df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
 
 # =========================================================
-# SHOW SKU COUNTS (بدون أي علاقة بالكود الموحد)
+# 📦 عدد الـ SKUs حسب نوع الشحن (مع التكرار)
 # =========================================================
-st.subheader("📦 عدد الـ SKUs حسب نوع الشحن")
+st.subheader("📦 عدد صفوف الـ SKU حسب نوع الشحن (مع التكرار)")
 
-sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].nunique()
-sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].nunique()
-sku_sm  = df[df["is_fbn"] == "Supermall"]["partner_sku"].nunique()
+sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].count()
+sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].count()
+sku_sm  = df[df["is_fbn"] == "Supermall"]["partner_sku"].count()
 
 st.write(f"🔵 SKUs FBN: **{sku_fbn}**")
 st.write(f"🟠 SKUs FBP: **{sku_fbp}**")
