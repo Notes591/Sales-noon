@@ -59,15 +59,22 @@ df = df.merge(coding_df, on="partner_sku", how="left")
 
 
 # =========================
-# Normalize Fulfillment
+# Normalize Fulfillment (Smart classification)
 # =========================
-df["is_fbn"] = df["is_fbn"].astype(str).str.strip()
+df["is_fbn"] = df["is_fbn"].astype(str)
 
-df["is_fbn"] = df["is_fbn"].replace({
-    "Fulfilled by Noon (FBN)": "FBN",
-    "Fulfilled by Partner (FBP)": "FBP",
-    "Supermall": "Supermall",
-}).fillna("Unknown")
+# إزالة الرموز الخفية
+df["is_fbn"] = df["is_fbn"].str.replace('\u200f', '', regex=False)
+
+# Lowercase + strip
+df["is_fbn"] = df["is_fbn"].str.strip().str.lower()
+
+# تصنيف ديناميكي
+df.loc[df["is_fbn"].str.contains("partner"), "is_fbn"] = "FBP"
+df.loc[df["is_fbn"].str.contains("noon"), "is_fbn"] = "FBN"
+df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
+
+df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
 
 # =========================
@@ -133,7 +140,7 @@ for code in codes:
     st.markdown("### 🖼️ صورة المنتج")
     try:
         img = sub["image_url"].dropna().iloc[0]
-        st.image(img, width=120)  # حجم صغير
+        st.image(img, width=120)
     except:
         st.warning("🚫 لا يوجد صورة متاحة")
 
