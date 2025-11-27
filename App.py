@@ -61,13 +61,13 @@ df = df.merge(coding_df, on="partner_sku", how="left")
 # =========================
 # Normalize Fulfillment
 # =========================
-df["is_fbn"] = df["is_fbn"].fillna("Unknown").replace({
-    "Fulfilled by Noon": "Fulfilled by Noon (FBN)",
-    "FBN": "Fulfilled by Noon (FBN)",
-    "FBP": "Fulfilled by Partner (FBP)",
-    "Supermall Fulfilled by Noon (FBN)": "Supermall",
+df["is_fbn"] = df["is_fbn"].astype(str).str.strip()
+
+df["is_fbn"] = df["is_fbn"].replace({
+    "Fulfilled by Noon (FBN)": "FBN",
+    "Fulfilled by Partner (FBP)": "FBP",
     "Supermall": "Supermall",
-})
+}).fillna("Unknown")
 
 
 # =========================
@@ -102,12 +102,12 @@ for code in codes:
     avg_price = sub["invoice_price"].mean()
 
     # Fulfillment breakdown
-    fbp_orders = sub[sub["is_fbn"] == "Fulfilled by Partner (FBP)"].shape[0]
-    fbn_orders = sub[sub["is_fbn"] == "Fulfilled by Noon (FBN)"].shape[0]
+    fbp_orders = sub[sub["is_fbn"] == "FBP"].shape[0]
+    fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
     sm_orders = sub[sub["is_fbn"] == "Supermall"].shape[0]
 
-    fbp_rev = sub[sub["is_fbn"] == "Fulfilled by Partner (FBP)"]["invoice_price"].sum()
-    fbn_rev = sub[sub["is_fbn"] == "Fulfilled by Noon (FBN)"]["invoice_price"].sum()
+    fbp_rev = sub[sub["is_fbn"] == "FBP"]["invoice_price"].sum()
+    fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
     sm_rev = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
 
     # Summary cards
