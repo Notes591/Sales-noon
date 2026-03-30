@@ -72,8 +72,8 @@ coding_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_CODING)
 coding_df = pd.DataFrame(coding_ws.get_all_records())
 coding_df.columns = coding_df.columns.str.strip()
 
-if not {"partner_sku", "unified_code"}.issubset(coding_df.columns):
-    st.error("⚠️ جدول Coding يجب أن يحتوي partner_sku + unified_code")
+if not {"partner_sku", "unified_code", "marketplace"}.issubset(coding_df.columns):
+    st.error("⚠️ جدول Coding يجب أن يحتوي partner_sku + unified_code + marketplace")
     st.stop()
 
 coding_df["partner_sku"] = coding_df["partner_sku"].astype(str).str.strip()
@@ -117,7 +117,7 @@ for i, (store, fbn_type, orders_count, revenue_sum) in enumerate(cards):
 st.markdown("---")
 
 # =========================
-# Unified Code Analysis (per store)
+# Unified Code Analysis (per marketplace)
 # =========================
 if "unified_code" not in df.columns or df["unified_code"].isna().all():
     st.error("⚠️ لا يوجد unified_code — تأكد من جدول Coding")
@@ -129,9 +129,9 @@ for code in df["unified_code"].dropna().unique():
     st.markdown(f"## 🆔 Unified Code: **{code}**")
     df_code = df[df["unified_code"] == code]
 
-    for store in df_code["store"].unique():
-        st.markdown(f"### 🏬 متجر: {store}")
-        sub = df_code[df_code["store"] == store]
+    for market in df_code["marketplace"].dropna().unique():
+        st.markdown(f"### 🏬 السوق: {market}")
+        sub = df_code[df_code["marketplace"] == market]
 
         total_orders = sub.shape[0]
         total_revenue = sub["invoice_price"].sum()
@@ -170,11 +170,11 @@ for code in df["unified_code"].dropna().unique():
         except:
             st.warning("🚫 لا يوجد صورة متاحة")
 
-        # Partner SKU counts
+        # Partner SKU counts (Horizontal)
         st.markdown("### 📋 partner_sku مع عدد الطلبات لكل SKU")
         sku_counts = sub["partner_sku"].dropna().value_counts()
-        for sku, count in sku_counts.items():
-            st.write(f"{sku} - {count} طلب")
+        sku_df = pd.DataFrame({"SKU": sku_counts.index, "عدد الطلبات": sku_counts.values})
+        st.dataframe(sku_df.T)  # نسخة أفقية لكل partner_sku
 
         st.markdown("---")
 
