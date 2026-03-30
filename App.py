@@ -70,14 +70,21 @@ df = pd.concat([df_noon, amazon_df], ignore_index=True, sort=False)
 # =========================
 coding_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_CODING)
 coding_df = pd.DataFrame(coding_ws.get_all_records())
-coding_df.columns = coding_df.columns.str.strip()
+coding_df.columns = coding_df.columns.str.strip().str.replace("\u200f", "").str.replace("\xa0", "")
 
-if not {"partner_sku", "unified_code", "marketplace"}.issubset(coding_df.columns):
-    st.error("⚠️ جدول Coding يجب أن يحتوي partner_sku + unified_code + marketplace")
+required_cols = {"partner_sku", "unified_code", "marketplace"}
+if not required_cols.issubset(coding_df.columns):
+    st.error(f"⚠️ جدول Coding يجب أن يحتوي الأعمدة التالية: {required_cols}. الأعمدة الموجودة: {list(coding_df.columns)}")
     st.stop()
 
 coding_df["partner_sku"] = coding_df["partner_sku"].astype(str).str.strip()
+coding_df["marketplace"] = coding_df["marketplace"].astype(str).str.strip()
 df = df.merge(coding_df, on="partner_sku", how="left")
+
+# تحقق من وجود بيانات marketplace بعد الدمج
+if "marketplace" not in df.columns or df["marketplace"].isna().all():
+    st.warning("⚠️ بعد الدمج، عمود marketplace فارغ، سيتم استخدام store كبديل")
+    df["marketplace"] = df["store"]
 
 # =========================
 # Normalize Fulfillment
@@ -129,7 +136,15 @@ for code in df["unified_code"].dropna().unique():
     st.markdown(f"## 🆔 Unified Code: **{code}**")
     df_code = df[df["unified_code"] == code]
 
-    for market in df_code["marketplace"].dropna().unique():
+    # استخدم marketplace إذا موجود، وإلا استخدم store
+    if "marketplace" in df_code.columns and not df_code["marketplace"].isna().all():
+        markets = df_code["marketplace"].dropna().unique()
+    else:
+        st.warning(f"⚠️ لا يوجد marketplace محدد لـ Unified Code {code}، سيتم استخدام store")
+        df_code["marketplace"] = df_code["store"]
+        markets = df_code["marketplace"].unique()
+
+    for market in markets:
         st.markdown(f"### 🏬 السوق: {market}")
         sub = df_code[df_code["marketplace"] == market]
 
