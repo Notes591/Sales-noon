@@ -14,7 +14,7 @@ st.title("📊 تحليل المنتجات - Noon + Amazon")
 # =========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
 SHEET_SALES = "Sales"
-SHEET_AMAZON = "Amazon"
+SHEET_ASIN = "ASIN"
 SHEET_CODING = "Coding"
 
 # =========================
@@ -39,27 +39,24 @@ df_noon["invoice_price"] = pd.to_numeric(df_noon["invoice_price"], errors="coerc
 df_noon["store"] = "Noon"
 
 # =========================
-# Load Amazon Sheet
+# Load Amazon ASIN Sheet
 # =========================
 try:
-    amazon_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_AMAZON)
-    amazon_df = pd.DataFrame(amazon_ws.get_all_records())
+    asin_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_ASIN)
+    amazon_df = pd.DataFrame(asin_ws.get_all_records())
     amazon_df.columns = amazon_df.columns.str.strip()
 
     if not amazon_df.empty:
-        # Rename Amazon columns
-        amazon_df = amazon_df.rename(columns={
-            "رقم تخزين سلعة التاجر MSKU": "partner_sku",
-            "مبلغ المنتج": "invoice_price"
-        })
+        # Rename ASIN column to partner_sku ليتم الربط مع Coding
+        amazon_df = amazon_df.rename(columns={"ASIN": "partner_sku", "مبلغ المنتج": "invoice_price"})
         amazon_df["invoice_price"] = pd.to_numeric(amazon_df["invoice_price"], errors="coerce")
-        amazon_df["is_fbn"] = "FBN"  # أمازون دائماً FBN
+        amazon_df["is_fbn"] = "FBN"  # Amazon دائما FBN
         amazon_df["store"] = "Amazon"
-        amazon_df["image_url"] = None  # placeholder إذا مفيش صور
+        amazon_df["image_url"] = None  # placeholder لو مفيش صور
     else:
         amazon_df = pd.DataFrame()
 except:
-    st.warning("⚠️ لا يوجد Sheet باسم Amazon")
+    st.warning("⚠️ لا يوجد Sheet باسم ASIN")
     amazon_df = pd.DataFrame()
 
 # =========================
