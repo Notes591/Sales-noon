@@ -3,21 +3,19 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
-
 # =========================
 # إعداد الصفحة
 # =========================
 st.set_page_config(page_title="📊 Unified Product Dashboard", layout="wide")
-st.title("📊تحليل المنتجات")
-
+st.title("📊 تحليل المنتجات - Noon + Amazon")
 
 # =========================
 # Google Sheet Settings
 # =========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
 SHEET_SALES = "Sales"
+SHEET_AMAZON = "Amazon"
 SHEET_CODING = "Coding"
-
 
 # =========================
 # Auth
@@ -28,20 +26,46 @@ creds = Credentials.from_service_account_info(
 )
 client = gspread.authorize(creds)
 
-
 # =========================
-# Load Sales Sheet
+# Load Noon Sales
 # =========================
 sales_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_SALES)
-df = pd.DataFrame(sales_ws.get_all_records())
-df.columns = df.columns.str.strip()
-
-if df.empty:
+df_noon = pd.DataFrame(sales_ws.get_all_records())
+df_noon.columns = df_noon.columns.str.strip()
+if df_noon.empty:
     st.error("📭 Sheet Sales فارغ")
     st.stop()
+df_noon["invoice_price"] = pd.to_numeric(df_noon["invoice_price"], errors="coerce")
+df_noon["store"] = "Noon"
 
-df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce")
+# =========================
+# Load Amazon Sheet
+# =========================
+try:
+    amazon_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_AMAZON)
+    amazon_df = pd.DataFrame(amazon_ws.get_all_records())
+    amazon_df.columns = amazon_df.columns.str.strip()
 
+    if not amazon_df.empty:
+        # Rename Amazon columns
+        amazon_df = amazon_df.rename(columns={
+            "رقم تخزين سلعة التاجر MSKU": "partner_sku",
+            "مبلغ المنتج": "invoice_price"
+        })
+        amazon_df["invoice_price"] = pd.to_numeric(amazon_df["invoice_price"], errors="coerce")
+        amazon_df["is_fbn"] = "FBN"  # أمازون دائماً FBN
+        amazon_df["store"] = "Amazon"
+        amazon_df["image_url"] = None  # placeholder إذا مفيش صور
+    else:
+        amazon_df = pd.DataFrame()
+except:
+    st.warning("⚠️ لا يوجد Sheet باسم Amazon")
+    amazon_df = pd.DataFrame()
+
+# =========================
+# Merge Noon + Amazon
+# =========================
+df = pd.concat([df_noon, amazon_df], ignore_index=True, sort=False)
 
 # =========================
 # Load Coding Sheet
@@ -54,73 +78,56 @@ if not {"partner_sku", "unified_code"}.issubset(coding_df.columns):
     st.error("⚠️ جدول Coding يجب أن يحتوي partner_sku + unified_code")
     st.stop()
 
-# Merge Coding
 df = df.merge(coding_df, on="partner_sku", how="left")
-
 
 # =========================
 # Normalize Fulfillment
 # =========================
 df["is_fbn"] = df["is_fbn"].astype(str)
-
-# إزالة الرموز الخفية
 df["is_fbn"] = df["is_fbn"].str.replace("\u200f", "", regex=False)
 df["is_fbn"] = df["is_fbn"].str.replace("\xa0", "", regex=False)
-
 df["is_fbn"] = df["is_fbn"].str.strip().str.lower()
-
 df.loc[df["is_fbn"].str.contains("noon"), "is_fbn"] = "FBN"
 df.loc[df["is_fbn"].str.contains("fbn"), "is_fbn"] = "FBN"
-
 df.loc[df["is_fbn"].str.contains("partner"), "is_fbn"] = "FBP"
 df.loc[df["is_fbn"].str.contains("fbp"), "is_fbn"] = "FBP"
-
 df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
-
 df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
-
-# =========================================================
-# 📦 عدد الـ SKUs حسب نوع الشحن (مع التكرار)
-# =========================================================
-st.subheader("📦 عدد الطلبات")
-
-sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].count()
-sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].count()
-sku_sm  = df[df["is_fbn"] == "Supermall"]["partner_sku"].count()
-
-st.write(f"🔵 SKUs FBNطلبات التخزين: **{sku_fbn}**")
-st.write(f"🟠 SKUs FBPالطلبات العادية:**{sku_fbp}**")
-st.write(f"🟣 SKUs Supermall(تخزين)طلبات سوبر مول: **{sku_sm}**")
-
+# =========================
+# Store Analytics
+# =========================
+st.subheader("🏬 تحليل حسب المتاجر")
+store_counts = df["store"].value_counts()
+col1, col2 = st.columns(2)
+col1.metric("🟡 Noon Orders", store_counts.get("Noon", 0))
+col2.metric("🟣 Amazon Orders", store_counts.get("Amazon", 0))
 st.markdown("---")
 
+# =========================
+# Orders by fulfillment
+# =========================
+st.subheader("📦 عدد الطلبات حسب نوع الشحن")
+sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].count()
+sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].count()
+sku_sm = df[df["is_fbn"] == "Supermall"]["partner_sku"].count()
+st.write(f"🔵 FBN: **{sku_fbn}**")
+st.write(f"🟠 FBP: **{sku_fbp}**")
+st.write(f"🟣 Supermall: **{sku_sm}**")
+st.markdown("---")
 
 # =========================
-# Start unified code analytics
+# Unified Code Analysis
 # =========================
 if "unified_code" not in df.columns or df["unified_code"].isna().all():
     st.error("⚠️ لا يوجد unified_code — تأكد من جدول Coding")
     st.stop()
 
 st.subheader("🟢 تحليل حسب الكود الموحد (ترتيب تنازلي حسب الطلبات)")
+codes = df.groupby("unified_code")["invoice_price"].count().sort_values(ascending=False).index
 
-
-# ترتيب حسب عدد الطلبات
-codes = (
-    df.groupby("unified_code")["invoice_price"]
-    .count()
-    .sort_values(ascending=False)
-    .index
-)
-
-
-# =========================
-# Loop on each unified code
-# =========================
 for code in codes:
     sub = df[df["unified_code"] == code]
-
     st.markdown(f"## 🆔 Unified Code: **{code}**")
 
     total_orders = sub.shape[0]
@@ -130,11 +137,11 @@ for code in codes:
     # Fulfillment breakdown
     fbp_orders = sub[sub["is_fbn"] == "FBP"].shape[0]
     fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
-    sm_orders = sub[sub["is_fbn"] == "Supermall"].shape[0]
+    sm_orders  = sub[sub["is_fbn"] == "Supermall"].shape[0]
 
     fbp_rev = sub[sub["is_fbn"] == "FBP"]["invoice_price"].sum()
     fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
-    sm_rev = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
+    sm_rev  = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
 
     # Summary cards
     col1, col2, col3 = st.columns(3)
@@ -144,17 +151,15 @@ for code in codes:
 
     # Fulfillment type cards
     st.markdown("### 🚚 تحليل حسب نوع الشحن")
-
     c1, c2, c3 = st.columns(3)
     c1.metric("FBP - عدد الطلبات", fbp_orders)
     c1.metric("FBP - الإيراد", f"{fbp_rev:,.2f} SAR")
-
     c2.metric("FBN - عدد الطلبات", fbn_orders)
     c2.metric("FBN - الإيراد", f"{fbn_rev:,.2f} SAR")
-
     c3.metric("Supermall - عدد الطلبات", sm_orders)
     c3.metric("Supermall - الإيراد", f"{sm_rev:,.2f} SAR")
 
+    # Product Image
     st.markdown("### 🖼️ صورة المنتج")
     try:
         img = sub["image_url"].dropna().iloc[0]
@@ -164,9 +169,8 @@ for code in codes:
 
     st.markdown("---")
 
-
 # =========================
-# الأصل
+# Raw Data
 # =========================
 with st.expander("📜 عرض البيانات الأصلية"):
     st.dataframe(df)
