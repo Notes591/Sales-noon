@@ -92,27 +92,25 @@ df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
 df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
 # =========================
-# Store Analytics & Fulfillment
+# Orders by store + fulfillment (including Amazon)
 # =========================
 st.subheader("📦 عدد الطلبات حسب المتاجر ونوع الشحن")
 
 stores = df["store"].unique()
 fulfillments = ["FBN", "FBP", "Supermall"]
 
+cards = []
 for store in stores:
-    sub_store = df[df["store"] == store]
-    st.markdown(f"### 🏬 {store} Orders")
-    
-    col_cards = []
     for fbn_type in fulfillments:
-        orders_count = sub_store[sub_store["is_fbn"] == fbn_type].shape[0]
-        revenue_sum = sub_store[sub_store["is_fbn"] == fbn_type]["invoice_price"].sum()
-        col_cards.append((fbn_type, orders_count, revenue_sum))
-    
-    cols = st.columns(len(col_cards))
-    for i, (fbn_type, orders_count, revenue_sum) in enumerate(col_cards):
-        cols[i].metric(f"{fbn_type} - عدد الطلبات", orders_count)
-        cols[i].metric(f"{fbn_type} - الإيراد", f"{revenue_sum:,.2f} SAR")
+        subset = df[(df["store"] == store) & (df["is_fbn"] == fbn_type)]
+        orders_count = subset.shape[0]
+        revenue_sum = subset["invoice_price"].sum()
+        cards.append((store, fbn_type, orders_count, revenue_sum))
+
+cols = st.columns(len(cards))
+for i, (store, fbn_type, orders_count, revenue_sum) in enumerate(cards):
+    cols[i].metric(f"{store} - {fbn_type} عدد الطلبات", orders_count)
+    cols[i].metric(f"{store} - {fbn_type} الإيراد", f"{revenue_sum:,.2f} SAR")
 
 st.markdown("---")
 
