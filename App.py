@@ -103,19 +103,27 @@ df.loc[df["is_fbn"].str.contains("amazon"), "is_fbn"] = "AMAZON"
 df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
 # =========================
-# Orders by store + fulfillment
+# ✅ FIXED Cards Logic (الأهم)
 # =========================
 st.subheader("📦 عدد الطلبات حسب المتاجر ونوع الشحن")
 
-stores = df["store"].unique()
-fulfillments = ["FBN", "FBP", "Supermall", "AMAZON"]
-
 cards = []
-for store in stores:
-    for fbn_type in fulfillments:
+
+for store in df["store"].unique():
+
+    if store == "Noon":
+        valid_types = ["FBN", "FBP", "Supermall"]
+    elif store == "Amazon":
+        valid_types = ["AMAZON"]
+    else:
+        valid_types = df["is_fbn"].unique()
+
+    for fbn_type in valid_types:
         subset = df[(df["store"] == store) & (df["is_fbn"] == fbn_type)]
+
         orders_count = subset.shape[0]
         revenue_sum = subset["invoice_price"].sum()
+
         cards.append((store, fbn_type, orders_count, revenue_sum))
 
 cols = st.columns(len(cards))
@@ -144,11 +152,17 @@ for code in df["unified_code"].dropna().unique():
     col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
     col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
 
-    # Fulfillment
+    # Fulfillment per code
     st.markdown("### 🚚 حسب نوع الشحن")
-    c1, c2, c3, c4 = st.columns(4)
 
-    for col, ftype in zip([c1, c2, c3, c4], ["FBP", "FBN", "Supermall", "AMAZON"]):
+    if "Amazon" in df_code["store"].values:
+        c1, c2, c3, c4 = st.columns(4)
+        types = ["FBP", "FBN", "Supermall", "AMAZON"]
+    else:
+        c1, c2, c3 = st.columns(3)
+        types = ["FBP", "FBN", "Supermall"]
+
+    for col, ftype in zip([c1, c2, c3] if len(types)==3 else [c1,c2,c3,c4], types):
         sub = df_code[df_code["is_fbn"] == ftype]
         col.metric(f"{ftype} طلبات", sub.shape[0])
         col.metric(f"{ftype} إيراد", f"{sub['invoice_price'].sum():,.2f} SAR")
@@ -160,9 +174,7 @@ for code in df["unified_code"].dropna().unique():
     except:
         st.warning("🚫 لا يوجد صورة")
 
-    # =========================
-    # SKU Cards per Store
-    # =========================
+    # SKU Cards
     st.markdown("### 📋 توزيع الطلبات لكل SKU حسب المتجر")
 
     sku_counts = df_code.groupby(["store", "partner_sku"]) \
