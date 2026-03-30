@@ -117,62 +117,66 @@ for i, (store, fbn_type, orders_count, revenue_sum) in enumerate(cards):
 st.markdown("---")
 
 # =========================
-# Unified Code Analysis
+# Unified Code Analysis (per store)
 # =========================
 if "unified_code" not in df.columns or df["unified_code"].isna().all():
     st.error("⚠️ لا يوجد unified_code — تأكد من جدول Coding")
     st.stop()
 
 st.subheader("🟢 تحليل حسب الكود الموحد (ترتيب تنازلي حسب الطلبات)")
-codes = df.groupby("unified_code")["invoice_price"].count().sort_values(ascending=False).index
 
-for code in codes:
-    sub = df[df["unified_code"] == code]
+for code in df["unified_code"].dropna().unique():
     st.markdown(f"## 🆔 Unified Code: **{code}**")
+    df_code = df[df["unified_code"] == code]
 
-    total_orders = sub.shape[0]
-    total_revenue = sub["invoice_price"].sum()
-    avg_price = sub["invoice_price"].mean()
+    for store in df_code["store"].unique():
+        st.markdown(f"### 🏬 متجر: {store}")
+        sub = df_code[df_code["store"] == store]
 
-    # Fulfillment breakdown
-    fbp_orders = sub[sub["is_fbn"] == "FBP"].shape[0]
-    fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
-    sm_orders  = sub[sub["is_fbn"] == "Supermall"].shape[0]
+        total_orders = sub.shape[0]
+        total_revenue = sub["invoice_price"].sum()
+        avg_price = sub["invoice_price"].mean()
 
-    fbp_rev = sub[sub["is_fbn"] == "FBP"]["invoice_price"].sum()
-    fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
-    sm_rev  = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
+        # Fulfillment breakdown
+        fbp_orders = sub[sub["is_fbn"] == "FBP"].shape[0]
+        fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
+        sm_orders  = sub[sub["is_fbn"] == "Supermall"].shape[0]
 
-    # Summary cards
-    col1, col2, col3 = st.columns(3)
-    col1.metric("📦 إجمالي الطلبات", total_orders)
-    col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
-    col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
+        fbp_rev = sub[sub["is_fbn"] == "FBP"]["invoice_price"].sum()
+        fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
+        sm_rev  = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
 
-    # Fulfillment type cards
-    st.markdown("### 🚚 تحليل حسب نوع الشحن")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("FBP - عدد الطلبات", fbp_orders)
-    c1.metric("FBP - الإيراد", f"{fbp_rev:,.2f} SAR")
-    c2.metric("FBN - عدد الطلبات", fbn_orders)
-    c2.metric("FBN - الإيراد", f"{fbn_rev:,.2f} SAR")
-    c3.metric("Supermall - عدد الطلبات", sm_orders)
-    c3.metric("Supermall - الإيراد", f"{sm_rev:,.2f} SAR")
+        # Summary cards
+        col1, col2, col3 = st.columns(3)
+        col1.metric("📦 إجمالي الطلبات", total_orders)
+        col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
+        col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
 
-    # Product Image
-    st.markdown("### 🖼️ صورة المنتج")
-    try:
-        img = sub["image_url"].dropna().iloc[0]
-        st.image(img, width=120)
-    except:
-        st.warning("🚫 لا يوجد صورة متاحة")
+        # Fulfillment type cards
+        st.markdown("### 🚚 تحليل حسب نوع الشحن")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("FBP - عدد الطلبات", fbp_orders)
+        c1.metric("FBP - الإيراد", f"{fbp_rev:,.2f} SAR")
+        c2.metric("FBN - عدد الطلبات", fbn_orders)
+        c2.metric("FBN - الإيراد", f"{fbn_rev:,.2f} SAR")
+        c3.metric("Supermall - عدد الطلبات", sm_orders)
+        c3.metric("Supermall - الإيراد", f"{sm_rev:,.2f} SAR")
 
-    # ====== قائمة partner_sku لكل طلب بدون تكرار ======
-    st.markdown("### 📋 قائمة partner_sku لكل الطلبات تحت هذا الكود (فريدة)")
-    skus_list = sub["partner_sku"].dropna().unique().tolist()
-    st.write(skus_list)
+        # Product Image
+        st.markdown("### 🖼️ صورة المنتج")
+        try:
+            img = sub["image_url"].dropna().iloc[0]
+            st.image(img, width=120)
+        except:
+            st.warning("🚫 لا يوجد صورة متاحة")
 
-    st.markdown("---")
+        # Partner SKU counts
+        st.markdown("### 📋 partner_sku مع عدد الطلبات لكل SKU")
+        sku_counts = sub["partner_sku"].dropna().value_counts()
+        for sku, count in sku_counts.items():
+            st.write(f"{sku} - {count} طلب")
+
+        st.markdown("---")
 
 # =========================
 # Raw Data
