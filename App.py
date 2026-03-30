@@ -37,6 +37,7 @@ if df_noon.empty:
     st.stop()
 df_noon["invoice_price"] = pd.to_numeric(df_noon["invoice_price"], errors="coerce")
 df_noon["store"] = "Noon"
+df_noon["partner_sku"] = df_noon["partner_sku"].astype(str).str.strip()  # تنظيف العمود
 
 # =========================
 # Load Amazon Sheet
@@ -53,6 +54,7 @@ try:
         amazon_df["is_fbn"] = "FBN"  # Amazon دائما FBN
         amazon_df["store"] = "Amazon"
         amazon_df["image_url"] = None  # placeholder لو مفيش صور
+        amazon_df["partner_sku"] = amazon_df["partner_sku"].astype(str).str.strip()
     else:
         amazon_df = pd.DataFrame()
 except:
@@ -75,6 +77,7 @@ if not {"partner_sku", "unified_code"}.issubset(coding_df.columns):
     st.error("⚠️ جدول Coding يجب أن يحتوي partner_sku + unified_code")
     st.stop()
 
+coding_df["partner_sku"] = coding_df["partner_sku"].astype(str).str.strip()
 df = df.merge(coding_df, on="partner_sku", how="left")
 
 # =========================
@@ -92,7 +95,7 @@ df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
 df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
 # =========================
-# Orders by store + fulfillment (including Amazon)
+# Orders by store + fulfillment
 # =========================
 st.subheader("📦 عدد الطلبات حسب المتاجر ونوع الشحن")
 
@@ -164,6 +167,11 @@ for code in codes:
         st.image(img, width=120)
     except:
         st.warning("🚫 لا يوجد صورة متاحة")
+
+    # ====== قائمة partner_sku لكل طلب ======
+    st.markdown("### 📋 قائمة partner_sku لكل الطلبات تحت هذا الكود")
+    skus_list = sub["partner_sku"].tolist()
+    st.write(skus_list)
 
     st.markdown("---")
 
