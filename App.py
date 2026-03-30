@@ -37,7 +37,7 @@ if df_noon.empty:
     st.stop()
 df_noon["invoice_price"] = pd.to_numeric(df_noon["invoice_price"], errors="coerce")
 df_noon["store"] = "Noon"
-df_noon["partner_sku"] = df_noon["partner_sku"].astype(str).str.strip()  # تنظيف العمود
+df_noon["partner_sku"] = df_noon["partner_sku"].astype(str).str.strip()
 
 # =========================
 # Load Amazon Sheet
@@ -48,12 +48,11 @@ try:
     amazon_df.columns = amazon_df.columns.str.strip()
 
     if not amazon_df.empty:
-        # Rename ASIN column to partner_sku ليتم الربط مع Coding
         amazon_df = amazon_df.rename(columns={"ASIN": "partner_sku", "مبلغ المنتج": "invoice_price"})
         amazon_df["invoice_price"] = pd.to_numeric(amazon_df["invoice_price"], errors="coerce")
-        amazon_df["is_fbn"] = "FBN"  # Amazon دائما FBN
+        amazon_df["is_fbn"] = "FBN"
         amazon_df["store"] = "Amazon"
-        amazon_df["image_url"] = None  # placeholder لو مفيش صور
+        amazon_df["image_url"] = None
         amazon_df["partner_sku"] = amazon_df["partner_sku"].astype(str).str.strip()
     else:
         amazon_df = pd.DataFrame()
@@ -168,9 +167,9 @@ for code in codes:
     except:
         st.warning("🚫 لا يوجد صورة متاحة")
 
-    # ====== قائمة partner_sku لكل طلب ======
-    st.markdown("### 📋 قائمة partner_sku لكل الطلبات تحت هذا الكود")
-    skus_list = sub["partner_sku"].tolist()
+    # ====== قائمة partner_sku لكل طلب بدون تكرار ======
+    st.markdown("### 📋 قائمة partner_sku لكل الطلبات تحت هذا الكود (فريدة)")
+    skus_list = sub["partner_sku"].dropna().unique().tolist()
     st.write(skus_list)
 
     st.markdown("---")
