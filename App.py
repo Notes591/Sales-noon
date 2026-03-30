@@ -14,7 +14,7 @@ st.title("📊 تحليل المنتجات - Noon + Amazon")
 # =========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
 SHEET_SALES = "Sales"
-SHEET_ASIN = "ASIN"
+SHEET_AMAZON = "Amazon"
 SHEET_CODING = "Coding"
 
 # =========================
@@ -39,11 +39,11 @@ df_noon["invoice_price"] = pd.to_numeric(df_noon["invoice_price"], errors="coerc
 df_noon["store"] = "Noon"
 
 # =========================
-# Load Amazon ASIN Sheet
+# Load Amazon Sheet
 # =========================
 try:
-    asin_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_ASIN)
-    amazon_df = pd.DataFrame(asin_ws.get_all_records())
+    amazon_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_AMAZON)
+    amazon_df = pd.DataFrame(amazon_ws.get_all_records())
     amazon_df.columns = amazon_df.columns.str.strip()
 
     if not amazon_df.empty:
@@ -56,7 +56,7 @@ try:
     else:
         amazon_df = pd.DataFrame()
 except:
-    st.warning("⚠️ لا يوجد Sheet باسم ASIN")
+    st.warning("⚠️ لا يوجد Sheet باسم Amazon")
     amazon_df = pd.DataFrame()
 
 # =========================
