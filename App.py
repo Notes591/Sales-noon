@@ -50,9 +50,12 @@ try:
     amazon_df.columns = amazon_df.columns.str.strip()
 
     if not amazon_df.empty:
-        amazon_df = amazon_df.rename(columns={"ASIN": "partner_sku", "مبلغ المنتج": "invoice_price"})
+        amazon_df = amazon_df.rename(columns={
+            "ASIN": "partner_sku",
+            "مبلغ المنتج": "invoice_price"
+        })
         amazon_df["invoice_price"] = pd.to_numeric(amazon_df["invoice_price"], errors="coerce")
-        amazon_df["is_fbn"] = "FBN"
+        amazon_df["is_fbn"] = "AMAZON"   # ✅ FIX
         amazon_df["store"] = "Amazon"
         amazon_df["image_url"] = None
         amazon_df["partner_sku"] = amazon_df["partner_sku"].astype(str).str.strip()
@@ -95,6 +98,7 @@ df.loc[df["is_fbn"].str.contains("fbn"), "is_fbn"] = "FBN"
 df.loc[df["is_fbn"].str.contains("partner"), "is_fbn"] = "FBP"
 df.loc[df["is_fbn"].str.contains("fbp"), "is_fbn"] = "FBP"
 df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
+df.loc[df["is_fbn"].str.contains("amazon"), "is_fbn"] = "AMAZON"
 
 df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
@@ -104,7 +108,7 @@ df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 st.subheader("📦 عدد الطلبات حسب المتاجر ونوع الشحن")
 
 stores = df["store"].unique()
-fulfillments = ["FBN", "FBP", "Supermall"]
+fulfillments = ["FBN", "FBP", "Supermall", "AMAZON"]
 
 cards = []
 for store in stores:
@@ -116,8 +120,8 @@ for store in stores:
 
 cols = st.columns(len(cards))
 for i, (store, fbn_type, orders_count, revenue_sum) in enumerate(cards):
-    cols[i].metric(f"{store} - {fbn_type} عدد الطلبات", orders_count)
-    cols[i].metric(f"{store} - {fbn_type} الإيراد", f"{revenue_sum:,.2f} SAR")
+    cols[i].metric(f"{store} - {fbn_type} طلبات", orders_count)
+    cols[i].metric(f"{store} - {fbn_type} إيراد", f"{revenue_sum:,.2f} SAR")
 
 st.markdown("---")
 
@@ -142,9 +146,9 @@ for code in df["unified_code"].dropna().unique():
 
     # Fulfillment
     st.markdown("### 🚚 حسب نوع الشحن")
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
 
-    for col, ftype in zip([c1, c2, c3], ["FBP", "FBN", "Supermall"]):
+    for col, ftype in zip([c1, c2, c3, c4], ["FBP", "FBN", "Supermall", "AMAZON"]):
         sub = df_code[df_code["is_fbn"] == ftype]
         col.metric(f"{ftype} طلبات", sub.shape[0])
         col.metric(f"{ftype} إيراد", f"{sub['invoice_price'].sum():,.2f} SAR")
@@ -157,7 +161,7 @@ for code in df["unified_code"].dropna().unique():
         st.warning("🚫 لا يوجد صورة")
 
     # =========================
-    # ✅ الكروت حسب Store (المهم)
+    # SKU Cards per Store
     # =========================
     st.markdown("### 📋 توزيع الطلبات لكل SKU حسب المتجر")
 
@@ -172,7 +176,6 @@ for code in df["unified_code"].dropna().unique():
     for i, store_name in enumerate(store_list):
         with cols[i]:
             st.markdown(f"### 🏪 {store_name}")
-
             store_df = sku_counts[sku_counts["store"] == store_name]
 
             for _, row in store_df.iterrows():
