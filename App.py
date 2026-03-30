@@ -92,25 +92,28 @@ df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
 df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
 # =========================
-# Store Analytics
+# Store Analytics & Fulfillment
 # =========================
-st.subheader("🏬 تحليل حسب المتاجر")
-store_counts = df["store"].value_counts()
-col1, col2 = st.columns(2)
-col1.metric("🟡 Noon Orders", store_counts.get("Noon", 0))
-col2.metric("🟣 Amazon Orders", store_counts.get("Amazon", 0))
-st.markdown("---")
+st.subheader("📦 عدد الطلبات حسب المتاجر ونوع الشحن")
 
-# =========================
-# Orders by fulfillment
-# =========================
-st.subheader("📦 عدد الطلبات حسب نوع الشحن")
-sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].count()
-sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].count()
-sku_sm = df[df["is_fbn"] == "Supermall"]["partner_sku"].count()
-st.write(f"🔵 FBN: **{sku_fbn}**")
-st.write(f"🟠 FBP: **{sku_fbp}**")
-st.write(f"🟣 Supermall: **{sku_sm}**")
+stores = df["store"].unique()
+fulfillments = ["FBN", "FBP", "Supermall"]
+
+for store in stores:
+    sub_store = df[df["store"] == store]
+    st.markdown(f"### 🏬 {store} Orders")
+    
+    col_cards = []
+    for fbn_type in fulfillments:
+        orders_count = sub_store[sub_store["is_fbn"] == fbn_type].shape[0]
+        revenue_sum = sub_store[sub_store["is_fbn"] == fbn_type]["invoice_price"].sum()
+        col_cards.append((fbn_type, orders_count, revenue_sum))
+    
+    cols = st.columns(len(col_cards))
+    for i, (fbn_type, orders_count, revenue_sum) in enumerate(col_cards):
+        cols[i].metric(f"{fbn_type} - عدد الطلبات", orders_count)
+        cols[i].metric(f"{fbn_type} - الإيراد", f"{revenue_sum:,.2f} SAR")
+
 st.markdown("---")
 
 # =========================
