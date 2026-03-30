@@ -72,19 +72,13 @@ coding_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_CODING)
 coding_df = pd.DataFrame(coding_ws.get_all_records())
 coding_df.columns = coding_df.columns.str.strip().str.replace("\u200f", "").str.replace("\xa0", "")
 
-required_cols = {"partner_sku", "unified_code", "marketplace"}
+required_cols = {"partner_sku", "unified_code"}
 if not required_cols.issubset(coding_df.columns):
     st.error(f"⚠️ جدول Coding يجب أن يحتوي الأعمدة التالية: {required_cols}. الأعمدة الموجودة: {list(coding_df.columns)}")
     st.stop()
 
 coding_df["partner_sku"] = coding_df["partner_sku"].astype(str).str.strip()
-coding_df["marketplace"] = coding_df["marketplace"].astype(str).str.strip()
 df = df.merge(coding_df, on="partner_sku", how="left")
-
-# تحقق من وجود بيانات marketplace بعد الدمج
-if "marketplace" not in df.columns or df["marketplace"].isna().all():
-    st.warning("⚠️ بعد الدمج، عمود marketplace فارغ، سيتم استخدام store كبديل")
-    df["marketplace"] = df["store"]
 
 # =========================
 # Normalize Fulfillment
@@ -124,7 +118,7 @@ for i, (store, fbn_type, orders_count, revenue_sum) in enumerate(cards):
 st.markdown("---")
 
 # =========================
-# Unified Code Analysis (per marketplace)
+# Unified Code Analysis (بدون تقسيم على السوق)
 # =========================
 if "unified_code" not in df.columns or df["unified_code"].isna().all():
     st.error("⚠️ لا يوجد unified_code — تأكد من جدول Coding")
@@ -136,62 +130,49 @@ for code in df["unified_code"].dropna().unique():
     st.markdown(f"## 🆔 Unified Code: **{code}**")
     df_code = df[df["unified_code"] == code]
 
-    # استخدم marketplace إذا موجود، وإلا استخدم store
-    if "marketplace" in df_code.columns and not df_code["marketplace"].isna().all():
-        markets = df_code["marketplace"].dropna().unique()
-    else:
-        st.warning(f"⚠️ لا يوجد marketplace محدد لـ Unified Code {code}، سيتم استخدام store")
-        df_code["marketplace"] = df_code["store"]
-        markets = df_code["marketplace"].unique()
+    total_orders = df_code.shape[0]
+    total_revenue = df_code["invoice_price"].sum()
+    avg_price = df_code["invoice_price"].mean()
 
-    for market in markets:
-        st.markdown(f"### 🏬 السوق: {market}")
-        sub = df_code[df_code["marketplace"] == market]
+    # Fulfillment breakdown
+    fbp_orders = df_code[df_code["is_fbn"] == "FBP"].shape[0]
+    fbn_orders = df_code[df_code["is_fbn"] == "FBN"].shape[0]
+    sm_orders  = df_code[df_code["is_fbn"] == "Supermall"].shape[0]
 
-        total_orders = sub.shape[0]
-        total_revenue = sub["invoice_price"].sum()
-        avg_price = sub["invoice_price"].mean()
+    fbp_rev = df_code[df_code["is_fbn"] == "FBP"]["invoice_price"].sum()
+    fbn_rev = df_code[df_code["is_fbn"] == "FBN"]["invoice_price"].sum()
+    sm_rev  = df_code[df_code["is_fbn"] == "Supermall"]["invoice_price"].sum()
 
-        # Fulfillment breakdown
-        fbp_orders = sub[sub["is_fbn"] == "FBP"].shape[0]
-        fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
-        sm_orders  = sub[sub["is_fbn"] == "Supermall"].shape[0]
+    # Summary cards
+    col1, col2, col3 = st.columns(3)
+    col1.metric("📦 إجمالي الطلبات", total_orders)
+    col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
+    col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
 
-        fbp_rev = sub[sub["is_fbn"] == "FBP"]["invoice_price"].sum()
-        fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
-        sm_rev  = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
+    # Fulfillment type cards
+    st.markdown("### 🚚 تحليل حسب نوع الشحن")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("FBP - عدد الطلبات", fbp_orders)
+    c1.metric("FBP - الإيراد", f"{fbp_rev:,.2f} SAR")
+    c2.metric("FBN - عدد الطلبات", fbn_orders)
+    c2.metric("FBN - الإيراد", f"{fbn_rev:,.2f} SAR")
+    c3.metric("Supermall - عدد الطلبات", sm_orders)
+    c3.metric("Supermall - الإيراد", f"{sm_rev:,.2f} SAR")
 
-        # Summary cards
-        col1, col2, col3 = st.columns(3)
-        col1.metric("📦 إجمالي الطلبات", total_orders)
-        col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
-        col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
+    # Product Image
+    st.markdown("### 🖼️ صورة المنتج")
+    try:
+        img = df_code["image_url"].dropna().iloc[0]
+        st.image(img, width=120)
+    except:
+        st.warning("🚫 لا يوجد صورة متاحة")
 
-        # Fulfillment type cards
-        st.markdown("### 🚚 تحليل حسب نوع الشحن")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("FBP - عدد الطلبات", fbp_orders)
-        c1.metric("FBP - الإيراد", f"{fbp_rev:,.2f} SAR")
-        c2.metric("FBN - عدد الطلبات", fbn_orders)
-        c2.metric("FBN - الإيراد", f"{fbn_rev:,.2f} SAR")
-        c3.metric("Supermall - عدد الطلبات", sm_orders)
-        c3.metric("Supermall - الإيراد", f"{sm_rev:,.2f} SAR")
+    # Partner SKU counts مع Store
+    st.markdown("### 📋 partner_sku مع عدد الطلبات لكل SKU")
+    sku_counts = df_code.groupby(["partner_sku", "store"]).size().reset_index(name="عدد الطلبات")
+    st.dataframe(sku_counts.T)  # عرض أفقي لكل SKU مع المصدر
 
-        # Product Image
-        st.markdown("### 🖼️ صورة المنتج")
-        try:
-            img = sub["image_url"].dropna().iloc[0]
-            st.image(img, width=120)
-        except:
-            st.warning("🚫 لا يوجد صورة متاحة")
-
-        # Partner SKU counts (Horizontal)
-        st.markdown("### 📋 partner_sku مع عدد الطلبات لكل SKU")
-        sku_counts = sub["partner_sku"].dropna().value_counts()
-        sku_df = pd.DataFrame({"SKU": sku_counts.index, "عدد الطلبات": sku_counts.values})
-        st.dataframe(sku_df.T)  # نسخة أفقية لكل partner_sku
-
-        st.markdown("---")
+    st.markdown("---")
 
 # =========================
 # Raw Data
