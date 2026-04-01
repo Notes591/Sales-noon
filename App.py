@@ -123,14 +123,21 @@ noon_fbp = df_noon[df_noon["order_type"] == "طلب عادي (FBP)"].shape[0]
 # Amazon حسب حاوية كاملة الحمولة
 if not df_amazon.empty:
     df_amazon["order_type_storage"] = df_amazon["حاوية كاملة الحمولة"].apply(lambda x: "تخزين" if str(x).strip() == "FSAB" else "عادي")
-    amazon_storage = df_amazon[df_amazon["order_type_storage"] == "تخزين"]["الكمية"].sum()
-    amazon_regular = df_amazon[df_amazon["order_type_storage"] == "عادي"]["الكمية"].sum()
+    
+    if "الكمية" in df_amazon.columns:
+        df_amazon["الكمية"] = pd.to_numeric(df_amazon["الكمية"], errors="coerce").fillna(0)
+        amazon_storage = df_amazon[df_amazon["order_type_storage"] == "تخزين"]["الكمية"].sum()
+        amazon_regular = df_amazon[df_amazon["order_type_storage"] == "عادي"]["الكمية"].sum()
+    else:
+        amazon_storage = 0
+        amazon_regular = 0
 else:
     amazon_storage = 0
     amazon_regular = 0
 
 # Trendyol حسب Quantity
-if not df_trendyol.empty:
+if not df_trendyol.empty and "Quantity" in df_trendyol.columns:
+    df_trendyol["Quantity"] = pd.to_numeric(df_trendyol["Quantity"], errors="coerce").fillna(0)
     trendyol_total = df_trendyol["Quantity"].sum()
 else:
     trendyol_total = 0
@@ -184,7 +191,7 @@ for code in code_order:
         st.image(main_img, width=200)
 
     # =========================
-    # 🔥 تحليل لكل كود
+    # تحليل لكل كود
     # =========================
     min_price = df_code["invoice_price"].min()
     max_price = df_code["invoice_price"].max()
