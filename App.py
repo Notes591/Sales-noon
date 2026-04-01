@@ -26,6 +26,8 @@ st.markdown("""
 .small {color:gray;font-size:12px;}
 .order-type {font-size:12px;color:#555;}
 .divider {border-top:1px solid #ccc;margin:10px 0;}
+.total-sales {background:#f0f0f0;padding:15px;border-radius:12px;margin-bottom:20px;text-align:center;}
+.total-sales div {margin:5px 0;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -114,6 +116,25 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
+# === إجمالي المبيعات حسب المتجر والنوع ===
+# =========================
+noon_fbn = df_noon[df_noon["order_type"] == "تخزين (FBN)"].shape[0]
+noon_fbp = df_noon[df_noon["order_type"] == "طلب عادي (FBP)"].shape[0]
+amazon_storage = df_amazon[df_amazon["order_type"] == "تخزين (FBN)"].shape[0]  # لو عندك أنواع FBN
+amazon_regular = df_amazon[df_amazon["order_type"] == "عادي"].shape[0]
+trendyol_total = df_trendyol.shape[0]
+
+st.markdown(f"""
+<div class="total-sales">
+    <div>🟡 Noon - FBN: <b>{noon_fbn} طلب</b></div>
+    <div>🟡 Noon - عادي (FBP): <b>{noon_fbp} طلب</b></div>
+    <div>🔵 Amazon - تخزين: <b>{amazon_storage} طلب</b></div>
+    <div>🔵 Amazon - عادي: <b>{amazon_regular} طلب</b></div>
+    <div>🟣 Trendyol - إجمالي: <b>{trendyol_total} طلب</b></div>
+</div>
+""", unsafe_allow_html=True)
+
+# =========================
 # ترتيب الأكواد
 # =========================
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
@@ -156,7 +177,6 @@ for code in code_order:
     min_price = df_code["invoice_price"].min()
     max_price = df_code["invoice_price"].max()
 
-    # الأكثر مبيعًا والأقل مبيعًا مع عدد الطلبات
     store_counts = df_code["store"].value_counts()
     top_store = store_counts.idxmax()
     top_store_orders = store_counts.max()
@@ -191,7 +211,7 @@ for code in code_order:
 
     📦 أكثر SKU طلبًا: <b style="color:purple;">{top_sku}</b>
     </div>
-    """, unsafe_allow_html=True)
+    """ , unsafe_allow_html=True)
 
     # =========================
     # عرض كل SKU داخل كل متجر
