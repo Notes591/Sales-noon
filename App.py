@@ -1,226 +1,195 @@
-from PyQt6.QtWidgets import (
-    QApplication, QWidget, QTextEdit, QPushButton, QVBoxLayout,
-    QHBoxLayout, QFileDialog, QMessageBox, QLineEdit, QLabel, QProgressBar
-)
-import requests
-import os
-import re
-import sys
+import streamlit as st
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
-session = requests.Session()
-session.headers.update(HEADERS)
+import gspread
+from google.oauth2.service_account import Credentials
 
 # =========================
-# 🟠 Amazon
+# إعداد الصفحة
 # =========================
-def get_amazon_image(asin):
-    try:
-        url = f"https://www.amazon.sa/dp/{asin}"
-        r = session.get(url, timeout=10)
-        html = r.text
-
-        patterns = [
-            r'data-old-hires="(https:[^"]+)"',
-            r'"hiRes":"(https:[^"]+)"',
-            r'"large":"(https:[^"]+)"',
-            r'"mainUrl":"(https:[^"]+)"'
-        ]
-
-        for p in patterns:
-            match = re.search(p, html)
-            if match:
-                return match.group(1).replace('\\', '')
-
-    except:
-        return None
-
-    return None
-
+st.set_page_config(page_title="📊 Pro Dashboard", layout="wide")
 
 # =========================
-# 🔵 Noon + Trendyol (نفس اللوجيك)
+# CSS احترافي
 # =========================
-def get_noon_like_image(code):
-    try:
-        # Noon CDN (شغال مع SKU/Barcode)
-        return f"https://f.nooncdn.com/p/{code}.jpg"
-    except:
-        return None
+st.markdown("""
+<style>
+.big-card {
+    padding: 20px;
+    border-radius: 15px;
+    margin-bottom: 20px;
+}
+.green {background-color: #e8f5e9;}
+.red {background-color: #ffebee;}
 
+.card {
+    background-color: white;
+    padding: 5px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    text-align: center;
+    margin-bottom: 5px;
+}
+.title {font-weight: bold; font-size: 14px;}
+.small {color: gray; font-size: 12px;}
+.order-type {font-size:12px; color:#555;}
 
-# =========================
-# 🟢 Process
-# =========================
-def process_amazon(asin):
-    return {
-        "ASIN": asin,
-        "image_url": get_amazon_image(asin)
-    }
+.divider {
+    border-top: 1px solid #ccc;
+    margin: 10px 0;
+}
+</style>
+""", unsafe_allow_html=True)
 
-def process_noon(sku):
-    return {
-        "SKU": sku,
-        "image_url": get_noon_like_image(sku)
-    }
-
-def process_trendyol(barcode):
-    return {
-        "Barcode": barcode,
-        "Stock Code": barcode,
-        "Brand": "Trendyol",
-        "image_url": get_noon_like_image(barcode)  # نفس نون
-    }
-
-
-# =========================
-# 🖥 UI
-# =========================
-class App(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Amazon + Noon + Trendyol Scraper")
-        self.setGeometry(400, 200, 700, 650)
-
-        self.amazon_text = QTextEdit()
-        self.amazon_text.setPlaceholderText("ASIN (Amazon)")
-
-        self.noon_text = QTextEdit()
-        self.noon_text.setPlaceholderText("SKU (Noon)")
-
-        self.trendyol_text = QTextEdit()
-        self.trendyol_text.setPlaceholderText("Barcode (Trendyol)")
-
-        self.folder_edit = QLineEdit()
-        self.folder_edit.setReadOnly(True)
-
-        btn_folder = QPushButton("اختيار فولدر")
-        btn_folder.clicked.connect(self.choose_folder)
-
-        self.start_btn = QPushButton("ابدأ")
-        self.start_btn.clicked.connect(self.start)
-
-        self.progress = QProgressBar()
-
-        layout = QVBoxLayout()
-
-        layout.addWidget(QLabel("Amazon"))
-        layout.addWidget(self.amazon_text)
-
-        layout.addWidget(QLabel("Noon"))
-        layout.addWidget(self.noon_text)
-
-        layout.addWidget(QLabel("Trendyol"))
-        layout.addWidget(self.trendyol_text)
-
-        folder_layout = QHBoxLayout()
-        folder_layout.addWidget(self.folder_edit)
-        folder_layout.addWidget(btn_folder)
-        layout.addLayout(folder_layout)
-
-        layout.addWidget(self.start_btn)
-        layout.addWidget(self.progress)
-
-        self.setLayout(layout)
-
-    def choose_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "اختر فولدر")
-        if folder:
-            self.folder_edit.setText(folder)
-
-    def start(self):
-        folder = self.folder_edit.text()
-        if not folder:
-            QMessageBox.critical(self, "خطأ", "اختار فولدر")
-            return
-
-        amazon_list = self.amazon_text.toPlainText().split()
-        noon_list = self.noon_text.toPlainText().split()
-        trendyol_list = self.trendyol_text.toPlainText().split()
-
-        total = len(amazon_list) + len(noon_list) + len(trendyol_list)
-        self.progress.setMaximum(total)
-
-        amazon_results = []
-        noon_results = []
-        trendyol_results = []
-
-        i = 0
-
-        with ThreadPoolExecutor(max_workers=10) as executor:
-
-            futures = []
-
-            for a in amazon_list:
-                futures.append(executor.submit(process_amazon, a))
-
-            for n in noon_list:
-                futures.append(executor.submit(process_noon, n))
-
-            for t in trendyol_list:
-                futures.append(executor.submit(process_trendyol, t))
-
-            for future in as_completed(futures):
-                result = future.result()
-
-                if "ASIN" in result:
-                    amazon_results.append(result)
-                elif "SKU" in result:
-                    noon_results.append(result)
-                else:
-                    trendyol_results.append(result)
-
-                i += 1
-                self.progress.setValue(i)
-
-        # =========================
-        # 💾 Save Excel
-        # =========================
-        file_path = os.path.join(folder, "output.xlsx")
-
-        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-
-            # Amazon
-            pd.DataFrame(amazon_results).to_excel(writer, sheet_name="amazon", index=False)
-
-            # Noon
-            pd.DataFrame(noon_results).to_excel(writer, sheet_name="noon", index=False)
-
-            # Trendyol
-            columns = [
-                "Barcode","Package No","Shipping Company","Order Date",
-                "Handling Time Deadline","Dispatch Date","Shipping Code",
-                "Order Number","Recipient","Delivery Address","City","Town",
-                "Product Name","Invoice Address","Recipient - Billing Address",
-                "Order Status","Email","Commission Rate","Brand","Stock Code",
-                "Quantity","Unit Price","Sales Amount","Discount Amount",
-                "Trendyol Discount","Invoice Amount","Boutique Number",
-                "Delivery Date","Invoiced Shipping","Number Of Customer Orders",
-                "Age","Gender","Shipment Number","Country","Customer Phone No",
-                "Shipping Tracking Number","image_url"
-            ]
-
-            df_trendyol = pd.DataFrame(trendyol_results)
-
-            for col in columns:
-                if col not in df_trendyol.columns:
-                    df_trendyol[col] = ""
-
-            df_trendyol = df_trendyol[columns]
-
-            df_trendyol.to_excel(writer, sheet_name="trendol", index=False)
-
-        QMessageBox.information(self, "تم", f"تم حفظ الملف:\n{file_path}")
-
+st.title("🚀 Advanced Product Dashboard")
 
 # =========================
-# ▶ Run
+# Auth
 # =========================
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    win = App()
-    win.show()
-    sys.exit(app.exec())
+SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
+
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=["https://www.googleapis.com/auth/spreadsheets"]
+)
+client = gspread.authorize(creds)
+
+# =========================
+# Load Noon
+# =========================
+df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
+if "base_price" in df_noon.columns:
+    df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
+df_noon["store"] = "Noon"
+df_noon["sku"] = df_noon["sku"].astype(str)  # اعتماد على sku بدل partner_sku
+
+# =========================
+# تمييز نوع الطلب في Noon
+# =========================
+def classify_noon_order(row):
+    fbn = str(row.get("is_fbn","")).strip().lower()
+    if "fulfilled by noon" in fbn:
+        return "تخزين (FBN)"
+    elif "fulfilled by partner" in fbn:
+        return "طلب عادي (FBP)"
+    else:
+        # أي حالة أخرى (بما فيها Supermall) تعتبر تخزين
+        return "تخزين (FBN)"
+df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
+
+# =========================
+# Load Amazon
+# =========================
+try:
+    df_amazon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Amazon").get_all_records())
+    df_amazon = df_amazon.rename(columns={
+        "ASIN": "partner_sku",
+        "مبلغ المنتج": "invoice_price"
+    })
+    df_amazon["store"] = "Amazon"
+    df_amazon["image_url"] = None
+
+    # =========================
+    # تمييز نوع الطلب في Amazon
+    # =========================
+    def classify_amazon_order(row):
+        container = str(row.get("حاوية كاملة الحمولة","")).strip().upper()
+        if container == "FSAB":
+            return "طلب عادي"
+        else:
+            return "تخزين"
+    df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+
+except:
+    df_amazon = pd.DataFrame()
+
+# =========================
+# Merge
+# =========================
+# قبل الدمج، نعطي Noon عمود partner_sku مؤقت مساوي للـ sku ليتوافق مع الكود الحالي
+df_noon["partner_sku"] = df_noon["sku"]
+df = pd.concat([df_noon, df_amazon], ignore_index=True)
+
+# =========================
+# Coding
+# =========================
+coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
+coding["partner_sku"] = coding["partner_sku"].astype(str)
+
+df = df.merge(coding, on="partner_sku", how="left")
+
+# =========================
+# 🔍 بحث
+# =========================
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+if search:
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
+            df["unified_code"].astype(str).str.contains(search)]
+
+# =========================
+# ترتيب الأكواد
+# =========================
+code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
+
+# =========================
+# عرض الأكواد
+# =========================
+for code in code_order:
+    df_code = df[df["unified_code"] == code]
+    total_orders = df_code.shape[0]
+    noon_orders = df_code[df_code["store"] == "Noon"].shape[0]
+    amazon_orders = df_code[df_code["store"] == "Amazon"].shape[0]
+
+    # لون حسب الأداء
+    color_class = "green" if total_orders >= 50 else "red"
+
+    # صورة الكود الرئيسية
+    img = df_code["image_url"].dropna()
+    main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
+
+    st.markdown(f"""
+    <div class="big-card {color_class}">
+        <div class="title">🆔 {code}</div>
+        <div>📦 إجمالي الطلبات: {total_orders}</div>
+        <div>🟡 Noon: {noon_orders} طلب | 🔵 Amazon: {amazon_orders} طلب</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns([1,4])
+
+    # صورة كبيرة
+    with col1:
+        st.image(main_img, width=200)
+
+    # =========================
+    # عرض SKU Cards مع دمج الأسعار المختلفة تحت نفس الصورة
+    # =========================
+    with col2:
+        for store_name in ["Noon","Amazon"]:
+            df_store = df_code[df_code["store"] == store_name]
+            if df_store.empty:
+                continue
+
+            st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+            cols = st.columns(4)
+            displayed_skus = set()
+            df_store_grouped = df_store.groupby(["partner_sku","invoice_price","order_type"]).agg(
+                orders=("partner_sku","count"),
+                image=("image_url","first")
+            ).reset_index().sort_values(by="orders", ascending=False)
+
+            for i, row in df_store_grouped.iterrows():
+                sku = row['partner_sku']
+                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
+                order_type = row["order_type"]
+                if sku not in displayed_skus:
+                    displayed_skus.add(sku)
+                    with cols[i % 4]:
+                        st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+                        st.image(image, width=80)
+                        st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
+                        # كل الأسعار المختلفة تحت الصورة
+                        sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
+                        for _, r in sku_prices.iterrows():
+                            st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
