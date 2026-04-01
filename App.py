@@ -97,8 +97,6 @@ except:
 # Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
-
-# تنظيف الأسعار
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
@@ -149,29 +147,46 @@ for code in code_order:
     </div>
     """, unsafe_allow_html=True)
 
+    col1, col2 = st.columns([1,4])
+    with col1:
+        st.image(main_img, width=200)
+
     # =========================
-    # 🔥 تحليل لكل كود
+    # 🔥 تحليل لكل كود (نهائي)
     # =========================
     min_price = df_code["invoice_price"].min()
     max_price = df_code["invoice_price"].max()
+
     top_store = df_code["store"].value_counts().idxmax()
+    least_store = df_code["store"].value_counts().idxmin()
     top_sku = df_code["partner_sku"].value_counts().idxmax()
-    best_price_store = df_code.loc[df_code["invoice_price"].idxmin(), "store"]
+
+    min_row = df_code.loc[df_code["invoice_price"].idxmin()]
+    min_price_value = min_row["invoice_price"]
+    min_price_sku = min_row["partner_sku"]
+    min_price_store = min_row["store"]
+
+    max_row = df_code.loc[df_code["invoice_price"].idxmax()]
+    max_price_value = max_row["invoice_price"]
+    max_price_sku = max_row["partner_sku"]
+    max_price_store = max_row["store"]
 
     st.markdown(f"""
     <div style="background:#f9f9f9;padding:10px;border-radius:10px;margin-bottom:10px">
     📊 <b>تحليل المنتج:</b><br>
-    💰 أقل سعر: <b>{min_price:.2f}</b><br>
-    💸 أعلى سعر: <b>{max_price:.2f}</b><br>
+
+    💰 أقل سعر: <b>{min_price_value:.2f}</b>  
+    (🛒 {min_price_store} | 🔢 {min_price_sku})<br>
+
+    💸 أعلى سعر: <b>{max_price_value:.2f}</b>  
+    (🛒 {max_price_store} | 🔢 {max_price_sku})<br>
+
     🏆 الأكثر مبيعًا: <b>{top_store}</b><br>
-    🔥 أفضل سعر عند: <b>{best_price_store}</b><br>
+    ❌ الأقل مبيعًا: <b>{least_store}</b><br>
+
     📦 أكثر SKU طلبًا: <b>{top_sku}</b>
     </div>
     """, unsafe_allow_html=True)
-
-    col1, col2 = st.columns([1,4])
-    with col1:
-        st.image(main_img, width=200)
 
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
@@ -203,7 +218,6 @@ for code in code_order:
                         st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
 
                         sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
-
                         for _, r in sku_prices.iterrows():
                             st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
 
