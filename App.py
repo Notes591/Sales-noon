@@ -5,6 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import requests
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
 
 # =========================
 # إعداد الصفحة
@@ -60,10 +61,8 @@ client = gspread.authorize(creds)
 # Load Noon
 # =========================
 df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
-
 if "base_price" in df_noon.columns:
     df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
-
 df_noon["store"] = "Noon"
 df_noon["sku"] = df_noon["sku"].astype(str)
 
@@ -87,8 +86,19 @@ def get_noon_image_url(sku):
     except:
         return "https://via.placeholder.com/250"
 
-# تطبيق على كل SKU
-df_noon["image_url"] = df_noon["sku"].apply(get_noon_image_url)
+# =========================
+# تحميل الصور بشكل متوازي
+# =========================
+sku_list = df_noon["sku"].unique()
+images_dict = {}
+
+def fetch_image(sku):
+    images_dict[sku] = get_noon_image_url(sku)
+
+with ThreadPoolExecutor(max_workers=10) as executor:
+    executor.map(fetch_image, sku_list)
+
+df_noon["image_url"] = df_noon["sku"].map(images_dict)
 
 # =========================
 # تمييز نوع الطلب في Noon
