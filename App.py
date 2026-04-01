@@ -48,7 +48,6 @@ client = gspread.authorize(creds)
 df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
 df_noon["base_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
 df_noon["invoice_price"] = df_noon["base_price"]
-
 df_noon["store"] = "Noon"
 df_noon["sku"] = df_noon["sku"].astype(str)
 
@@ -138,7 +137,7 @@ for code in code_order:
     st.markdown(f"""
     <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
-        <div>📦 إجمالي الطلبات: {total_orders}</div>
+        <div>📦 إجمالي الطلبات: <b>{total_orders}</b></div>
         <div style="display:flex; gap:20px; margin-top:10px;">
             <div>🟡 Noon: <b>{noon_orders}</b></div>
             <div>🔵 Amazon: <b>{amazon_orders}</b></div>
@@ -152,13 +151,19 @@ for code in code_order:
         st.image(main_img, width=200)
 
     # =========================
-    # 🔥 تحليل لكل كود (نهائي)
+    # 🔥 تحليل لكل كود (نهائي + ألوان + بولد + عدد الطلبات)
     # =========================
     min_price = df_code["invoice_price"].min()
     max_price = df_code["invoice_price"].max()
 
-    top_store = df_code["store"].value_counts().idxmax()
-    least_store = df_code["store"].value_counts().idxmin()
+    # الأكثر مبيعًا والأقل مبيعًا مع عدد الطلبات
+    store_counts = df_code["store"].value_counts()
+    top_store = store_counts.idxmax()
+    top_store_orders = store_counts.max()
+
+    least_store = store_counts.idxmin()
+    least_store_orders = store_counts.min()
+
     top_sku = df_code["partner_sku"].value_counts().idxmax()
 
     min_row = df_code.loc[df_code["invoice_price"].idxmin()]
@@ -175,19 +180,22 @@ for code in code_order:
     <div style="background:#f9f9f9;padding:10px;border-radius:10px;margin-bottom:10px">
     📊 <b>تحليل المنتج:</b><br>
 
-    💰 أقل سعر: <b>{min_price_value:.2f}</b>  
-    (🛒 {min_price_store} | 🔢 {min_price_sku})<br>
+    💰 أقل سعر: <b style="color:green;">{min_price_value:.2f}</b>  
+    (🛒 <b>{min_price_store}</b> | 🔢 <b>{min_price_sku}</b>)<br>
 
-    💸 أعلى سعر: <b>{max_price_value:.2f}</b>  
-    (🛒 {max_price_store} | 🔢 {max_price_sku})<br>
+    💸 أعلى سعر: <b style="color:red;">{max_price_value:.2f}</b>  
+    (🛒 <b>{max_price_store}</b> | 🔢 <b>{max_price_sku}</b>)<br>
 
-    🏆 الأكثر مبيعًا: <b>{top_store}</b><br>
-    ❌ الأقل مبيعًا: <b>{least_store}</b><br>
+    🏆 الأكثر مبيعًا: <b style="color:blue;">{top_store}</b> (<b>{top_store_orders} طلب</b>)<br>
+    ❌ الأقل مبيعًا: <b style="color:orange;">{least_store}</b> (<b>{least_store_orders} طلب</b>)<br>
 
-    📦 أكثر SKU طلبًا: <b>{top_sku}</b>
+    📦 أكثر SKU طلبًا: <b style="color:purple;">{top_sku}</b>
     </div>
     """, unsafe_allow_html=True)
 
+    # =========================
+    # عرض كل SKU داخل كل متجر
+    # =========================
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
         if df_store.empty:
@@ -219,6 +227,6 @@ for code in code_order:
 
                         sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
                         for _, r in sku_prices.iterrows():
-                            st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='small'>💰 <b style='color:green;'>{r['invoice_price']:.2f}</b> | 📦 <b>{r['orders']}</b> طلب</div>", unsafe_allow_html=True)
 
                         st.markdown("</div>", unsafe_allow_html=True)
