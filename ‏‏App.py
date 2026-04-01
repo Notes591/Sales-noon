@@ -6,20 +6,47 @@ from google.oauth2.service_account import Credentials
 # =========================
 # إعداد الصفحة
 # =========================
-st.set_page_config(page_title="📊 Unified Product Dashboard", layout="wide")
-st.title("📊 تحليل المنتجات - Noon + Amazon")
+st.set_page_config(page_title="📊 Pro Dashboard", layout="wide")
 
 # =========================
-# Google Sheet Settings
+# CSS احترافي
 # =========================
-SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
-SHEET_SALES = "Sales"
-SHEET_AMAZON = "Amazon"
-SHEET_CODING = "Coding"
+st.markdown("""
+<style>
+.big-card {
+    padding: 20px;
+    border-radius: 15px;
+    margin-bottom: 20px;
+}
+.green {background-color: #e8f5e9;}
+.red {background-color: #ffebee;}
+
+.card {
+    background-color: white;
+    padding: 5px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    text-align: center;
+    margin-bottom: 5px;
+}
+.title {font-weight: bold; font-size: 14px;}
+.small {color: gray; font-size: 12px;}
+.order-type {font-size:12px; color:#555;}
+
+.divider {
+    border-top: 1px solid #ccc;
+    margin: 10px 0;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🚀 Advanced Product Dashboard")
 
 # =========================
 # Auth
 # =========================
+SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
+
 creds = Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=["https://www.googleapis.com/auth/spreadsheets"]
@@ -27,150 +54,142 @@ creds = Credentials.from_service_account_info(
 client = gspread.authorize(creds)
 
 # =========================
-# Load Noon Sales
+# Load Noon
 # =========================
-sales_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_SALES)
-df_noon = pd.DataFrame(sales_ws.get_all_records())
-df_noon.columns = df_noon.columns.str.strip()
-if df_noon.empty:
-    st.error("📭 Sheet Sales فارغ")
-    st.stop()
-df_noon["invoice_price"] = pd.to_numeric(df_noon["invoice_price"], errors="coerce")
+df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
+if "base_price" in df_noon.columns:
+    df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
 df_noon["store"] = "Noon"
+df_noon["sku"] = df_noon["sku"].astype(str)  # اعتماد على sku بدل partner_sku
 
 # =========================
-# Load Amazon Sheet
+# تمييز نوع الطلب في Noon
+# =========================
+def classify_noon_order(row):
+    fbn = str(row.get("is_fbn","")).strip().lower()
+    if "fulfilled by noon" in fbn:
+        return "تخزين (FBN)"
+    elif "fulfilled by partner" in fbn:
+        return "طلب عادي (FBP)"
+    else:
+        # أي حالة أخرى (بما فيها Supermall) تعتبر تخزين
+        return "تخزين (FBN)"
+df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
+
+# =========================
+# Load Amazon
 # =========================
 try:
-    amazon_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_AMAZON)
-    amazon_df = pd.DataFrame(amazon_ws.get_all_records())
-    amazon_df.columns = amazon_df.columns.str.strip()
+    df_amazon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Amazon").get_all_records())
+    df_amazon = df_amazon.rename(columns={
+        "ASIN": "partner_sku",
+        "مبلغ المنتج": "invoice_price"
+    })
+    df_amazon["store"] = "Amazon"
+    df_amazon["image_url"] = None
 
-    if not amazon_df.empty:
-        # Rename Amazon columns
-        amazon_df = amazon_df.rename(columns={
-            "رقم تخزين سلعة التاجر MSKU": "partner_sku",
-            "مبلغ المنتج": "invoice_price"
-        })
-        amazon_df["invoice_price"] = pd.to_numeric(amazon_df["invoice_price"], errors="coerce")
-        amazon_df["is_fbn"] = "FBN"  # أمازون دائماً FBN
-        amazon_df["store"] = "Amazon"
-        amazon_df["image_url"] = None  # placeholder إذا مفيش صور
-    else:
-        amazon_df = pd.DataFrame()
+    # =========================
+    # تمييز نوع الطلب في Amazon
+    # =========================
+    def classify_amazon_order(row):
+        container = str(row.get("حاوية كاملة الحمولة","")).strip().upper()
+        if container == "FSAB":
+            return "طلب عادي"
+        else:
+            return "تخزين"
+    df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+
 except:
-    st.warning("⚠️ لا يوجد Sheet باسم Amazon")
-    amazon_df = pd.DataFrame()
+    df_amazon = pd.DataFrame()
 
 # =========================
-# Merge Noon + Amazon
+# Merge
 # =========================
-df = pd.concat([df_noon, amazon_df], ignore_index=True, sort=False)
-
-# =========================
-# Load Coding Sheet
-# =========================
-coding_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_CODING)
-coding_df = pd.DataFrame(coding_ws.get_all_records())
-coding_df.columns = coding_df.columns.str.strip()
-
-if not {"partner_sku", "unified_code"}.issubset(coding_df.columns):
-    st.error("⚠️ جدول Coding يجب أن يحتوي partner_sku + unified_code")
-    st.stop()
-
-df = df.merge(coding_df, on="partner_sku", how="left")
+# قبل الدمج، نعطي Noon عمود partner_sku مؤقت مساوي للـ sku ليتوافق مع الكود الحالي
+df_noon["partner_sku"] = df_noon["sku"]
+df = pd.concat([df_noon, df_amazon], ignore_index=True)
 
 # =========================
-# Normalize Fulfillment
+# Coding
 # =========================
-df["is_fbn"] = df["is_fbn"].astype(str)
-df["is_fbn"] = df["is_fbn"].str.replace("\u200f", "", regex=False)
-df["is_fbn"] = df["is_fbn"].str.replace("\xa0", "", regex=False)
-df["is_fbn"] = df["is_fbn"].str.strip().str.lower()
-df.loc[df["is_fbn"].str.contains("noon"), "is_fbn"] = "FBN"
-df.loc[df["is_fbn"].str.contains("fbn"), "is_fbn"] = "FBN"
-df.loc[df["is_fbn"].str.contains("partner"), "is_fbn"] = "FBP"
-df.loc[df["is_fbn"].str.contains("fbp"), "is_fbn"] = "FBP"
-df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
-df["is_fbn"] = df["is_fbn"].fillna("Unknown")
+coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
+coding["partner_sku"] = coding["partner_sku"].astype(str)
+
+df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
-# Store Analytics
+# 🔍 بحث
 # =========================
-st.subheader("🏬 تحليل حسب المتاجر")
-store_counts = df["store"].value_counts()
-col1, col2 = st.columns(2)
-col1.metric("🟡 Noon Orders", store_counts.get("Noon", 0))
-col2.metric("🟣 Amazon Orders", store_counts.get("Amazon", 0))
-st.markdown("---")
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+if search:
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
+            df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# Orders by fulfillment
+# ترتيب الأكواد
 # =========================
-st.subheader("📦 عدد الطلبات حسب نوع الشحن")
-sku_fbn = df[df["is_fbn"] == "FBN"]["partner_sku"].count()
-sku_fbp = df[df["is_fbn"] == "FBP"]["partner_sku"].count()
-sku_sm = df[df["is_fbn"] == "Supermall"]["partner_sku"].count()
-st.write(f"🔵 FBN: **{sku_fbn}**")
-st.write(f"🟠 FBP: **{sku_fbp}**")
-st.write(f"🟣 Supermall: **{sku_sm}**")
-st.markdown("---")
+code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
-# Unified Code Analysis
+# عرض الأكواد
 # =========================
-if "unified_code" not in df.columns or df["unified_code"].isna().all():
-    st.error("⚠️ لا يوجد unified_code — تأكد من جدول Coding")
-    st.stop()
+for code in code_order:
+    df_code = df[df["unified_code"] == code]
+    total_orders = df_code.shape[0]
+    noon_orders = df_code[df_code["store"] == "Noon"].shape[0]
+    amazon_orders = df_code[df_code["store"] == "Amazon"].shape[0]
 
-st.subheader("🟢 تحليل حسب الكود الموحد (ترتيب تنازلي حسب الطلبات)")
-codes = df.groupby("unified_code")["invoice_price"].count().sort_values(ascending=False).index
+    # لون حسب الأداء
+    color_class = "green" if total_orders >= 50 else "red"
 
-for code in codes:
-    sub = df[df["unified_code"] == code]
-    st.markdown(f"## 🆔 Unified Code: **{code}**")
+    # صورة الكود الرئيسية
+    img = df_code["image_url"].dropna()
+    main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
 
-    total_orders = sub.shape[0]
-    total_revenue = sub["invoice_price"].sum()
-    avg_price = sub["invoice_price"].mean()
+    st.markdown(f"""
+    <div class="big-card {color_class}">
+        <div class="title">🆔 {code}</div>
+        <div>📦 إجمالي الطلبات: {total_orders}</div>
+        <div>🟡 Noon: {noon_orders} طلب | 🔵 Amazon: {amazon_orders} طلب</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # Fulfillment breakdown
-    fbp_orders = sub[sub["is_fbn"] == "FBP"].shape[0]
-    fbn_orders = sub[sub["is_fbn"] == "FBN"].shape[0]
-    sm_orders  = sub[sub["is_fbn"] == "Supermall"].shape[0]
+    col1, col2 = st.columns([1,4])
 
-    fbp_rev = sub[sub["is_fbn"] == "FBP"]["invoice_price"].sum()
-    fbn_rev = sub[sub["is_fbn"] == "FBN"]["invoice_price"].sum()
-    sm_rev  = sub[sub["is_fbn"] == "Supermall"]["invoice_price"].sum()
+    # صورة كبيرة
+    with col1:
+        st.image(main_img, width=200)
 
-    # Summary cards
-    col1, col2, col3 = st.columns(3)
-    col1.metric("📦 إجمالي الطلبات", total_orders)
-    col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
-    col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
+    # =========================
+    # عرض SKU Cards مع دمج الأسعار المختلفة تحت نفس الصورة
+    # =========================
+    with col2:
+        for store_name in ["Noon","Amazon"]:
+            df_store = df_code[df_code["store"] == store_name]
+            if df_store.empty:
+                continue
 
-    # Fulfillment type cards
-    st.markdown("### 🚚 تحليل حسب نوع الشحن")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("FBP - عدد الطلبات", fbp_orders)
-    c1.metric("FBP - الإيراد", f"{fbp_rev:,.2f} SAR")
-    c2.metric("FBN - عدد الطلبات", fbn_orders)
-    c2.metric("FBN - الإيراد", f"{fbn_rev:,.2f} SAR")
-    c3.metric("Supermall - عدد الطلبات", sm_orders)
-    c3.metric("Supermall - الإيراد", f"{sm_rev:,.2f} SAR")
+            st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+            cols = st.columns(4)
+            displayed_skus = set()
+            df_store_grouped = df_store.groupby(["partner_sku","invoice_price","order_type"]).agg(
+                orders=("partner_sku","count"),
+                image=("image_url","first")
+            ).reset_index().sort_values(by="orders", ascending=False)
 
-    # Product Image
-    st.markdown("### 🖼️ صورة المنتج")
-    try:
-        img = sub["image_url"].dropna().iloc[0]
-        st.image(img, width=120)
-    except:
-        st.warning("🚫 لا يوجد صورة متاحة")
-
-    st.markdown("---")
-
-# =========================
-# Raw Data
-# =========================
-with st.expander("📜 عرض البيانات الأصلية"):
-    st.dataframe(df)
+            for i, row in df_store_grouped.iterrows():
+                sku = row['partner_sku']
+                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
+                order_type = row["order_type"]
+                if sku not in displayed_skus:
+                    displayed_skus.add(sku)
+                    with cols[i % 4]:
+                        st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+                        st.image(image, width=80)
+                        st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
+                        # كل الأسعار المختلفة تحت الصورة
+                        sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
+                        for _, r in sku_prices.iterrows():
+                            st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
