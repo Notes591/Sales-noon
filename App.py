@@ -81,10 +81,10 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
-    # تصنيف الطلبات بناء على عمود "حاوية كاملة"
+    # تصنيف الطلبات بناء على عمود "حاوية كاملة الحمولة"
     def classify_amazon_order(row):
-        container = str(row.get("حاوية كاملة", "")).strip().upper()
-        if container in ["FSAB", "حاوية كاملة"]:
+        container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
+        if container == "FSAB":
             return "عادي"
         else:
             return "تخزين"
