@@ -82,6 +82,7 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
+    # تصنيف الطلبات بناء على عمود "حاوية كاملة الحمولة"
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
         if container == "FSAB":
@@ -127,7 +128,7 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# ملخص إجمالي الطلبات لكل متجر
+# ملخص إجمالي الطلبات لكل متجر بعد البحث / الفلترة
 # =========================
 summary = []
 for store_name in ["Noon","Amazon","Trendyol"]:
