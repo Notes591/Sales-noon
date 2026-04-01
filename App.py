@@ -82,7 +82,6 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
-    # تصنيف الطلبات بناء على عمود "حاوية كاملة الحمولة"
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
         if container == "FSAB":
@@ -128,11 +127,17 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# ملخص إجمالي الطلبات لكل متجر بعد البحث / الفلترة
+# ملخص إجمالي الطلبات لكل متجر بعد إزالة التكرارات (Amazon و Trendyol)
 # =========================
 summary = []
+
 for store_name in ["Noon","Amazon","Trendyol"]:
     df_store = df[df["store"] == store_name]
+
+    # فقط أمازون وتريندول نزيل التكرارات الناتجة عن دمج Coding
+    if store_name in ["Amazon","Trendyol"]:
+        df_store = df_store.drop_duplicates(subset=["partner_sku","invoice_price","order_type"])
+
     total = df_store.shape[0]
     normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")].shape[0]
     storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")].shape[0]
