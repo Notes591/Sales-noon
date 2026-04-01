@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import gspread
@@ -57,10 +58,20 @@ client = gspread.authorize(creds)
 # Load Noon
 # =========================
 df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
+
+# تحويل السعر
 if "base_price" in df_noon.columns:
     df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
+
 df_noon["store"] = "Noon"
-df_noon["sku"] = df_noon["sku"].astype(str)  # اعتماد على sku بدل partner_sku
+df_noon["sku"] = df_noon["sku"].astype(str)
+
+# =========================
+# توليد رابط الصورة من Noon CDN باستخدام SKU
+# =========================
+df_noon["image_url"] = df_noon["sku"].apply(
+    lambda x: f"https://f.nooncdn.com/p/{x}.jpg" if pd.notna(x) else "https://via.placeholder.com/250"
+)
 
 # =========================
 # تمييز نوع الطلب في Noon
@@ -103,10 +114,11 @@ except:
     df_amazon = pd.DataFrame()
 
 # =========================
-# Merge
+# دمج Noon و Amazon
 # =========================
-# قبل الدمج، نعطي Noon عمود partner_sku مؤقت مساوي للـ sku ليتوافق مع الكود الحالي
+# Noon: نسخ sku في partner_sku مؤقت للتوافق مع الكود
 df_noon["partner_sku"] = df_noon["sku"]
+
 df = pd.concat([df_noon, df_amazon], ignore_index=True)
 
 # =========================
