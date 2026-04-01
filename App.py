@@ -24,12 +24,19 @@ st.markdown("""
 
 .card {
     background-color: white;
-    padding: 10px;
+    padding: 5px;
     border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    text-align: center;
+    margin-bottom: 5px;
 }
-.title {font-weight: bold;}
-.small {color: gray; font-size: 13px;}
+.title {font-weight: bold; font-size: 14px;}
+.small {color: gray; font-size: 12px;}
+
+.divider {
+    border-top: 1px solid #ccc;
+    margin: 10px 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -109,7 +116,7 @@ ax.bar(sales_chart.index, sales_chart.values)
 st.pyplot(fig)
 
 # =========================
-# عرض
+# عرض الأكواد
 # =========================
 for code in code_order:
 
@@ -120,12 +127,9 @@ for code in code_order:
     amazon_orders = df_code[df_code["store"] == "Amazon"].shape[0]
 
     # لون حسب الأداء
-    if total_orders >= 50:
-        color_class = "green"
-    else:
-        color_class = "red"
+    color_class = "green" if total_orders >= 50 else "red"
 
-    # صورة الكود
+    # صورة الكود الرئيسية
     img = df_code["image_url"].dropna()
     main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
 
@@ -145,22 +149,24 @@ for code in code_order:
 
     # SKU Cards
     with col2:
-        sku_stats = df_code.groupby("partner_sku").agg(
+        # ترتيب تنازلي حسب عدد الطلبات
+        sku_stats = df_code.groupby(["store","partner_sku"]).agg(
             orders=("partner_sku","count"),
             image=("image_url","first")
         ).reset_index().sort_values(by="orders", ascending=False)
 
-        cols = st.columns(4)
-
-        for i, row in sku_stats.iterrows():
-            with cols[i % 4]:
-
-                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/100"
-
-                st.markdown(f"""
-                <div class="card">
-                    <img src="{image}" width="80%">
-                    <div class="title">{row['partner_sku']}</div>
-                    <div class="small">📦 {row['orders']} طلب</div>
-                </div>
-                """, unsafe_allow_html=True)
+        for store_name in ["Noon","Amazon"]:
+            df_store = sku_stats[sku_stats["store"] == store_name]
+            if not df_store.empty:
+                st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+                cols = st.columns(4)
+                for i, row in df_store.iterrows():
+                    with cols[i % 4]:
+                        image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
+                        st.markdown(f"""
+                        <div class="card">
+                            <img src="{image}" width="60%">
+                            <div class="title">{row['partner_sku']}</div>
+                            <div class="small">📦 {row['orders']} طلب</div>
+                        </div>
+                        """, unsafe_allow_html=True)
