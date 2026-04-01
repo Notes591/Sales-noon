@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-import validators  # pip install validators
 
 # =========================
 # إعداد الصفحة
@@ -136,7 +135,7 @@ def valid_image(img_url):
     if not img_url or pd.isna(img_url):
         return False
     img_url = str(img_url)
-    return validators.url(img_url)
+    return img_url.startswith("http")
 
 # =========================
 # عرض الأكواد
@@ -168,7 +167,7 @@ for code in code_order:
         try:
             st.image(main_img, width=200)
         except:
-            st.warning("❌ الصورة غير صالحة")
+            st.image("https://via.placeholder.com/250", width=200)
 
     # =========================
     # عرض SKU Cards مع دمج الأسعار المختلفة تحت نفس الصورة
@@ -198,7 +197,7 @@ for code in code_order:
                         try:
                             st.image(image, width=80)
                         except:
-                            st.warning("❌ الصورة غير صالحة")
+                            st.image("https://via.placeholder.com/80", width=80)
                         st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                         st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
                         sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
