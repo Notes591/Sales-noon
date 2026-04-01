@@ -107,12 +107,19 @@ except:
     df_trendyol = pd.DataFrame()
 
 # =========================
-# Merge all stores
+# إزالة التكرارات قبل دمج Coding
 # =========================
-df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
+df_amazon_unique = df_amazon.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
+df_trendyol_unique = df_trendyol.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
+df_noon_only = df_noon
 
 # =========================
-# Coding
+# دمج كل المتاجر
+# =========================
+df = pd.concat([df_noon_only, df_amazon_unique, df_trendyol_unique], ignore_index=True)
+
+# =========================
+# دمج Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
 coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
@@ -127,16 +134,16 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# ملخص إجمالي الطلبات لكل متجر بعد إزالة التكرارات (Amazon و Trendyol)
+# ملخص إجمالي الطلبات لكل متجر بعد إزالة التكرارات
 # =========================
 summary = []
 
 for store_name in ["Noon","Amazon","Trendyol"]:
     df_store = df[df["store"] == store_name]
 
-    # فقط أمازون وتريندول نزيل التكرارات الناتجة عن دمج Coding
+    # إزالة التكرارات فقط لأمازون وتريندول (مرة واحدة)
     if store_name in ["Amazon","Trendyol"]:
-        df_store = df_store.drop_duplicates(subset=["partner_sku","invoice_price","order_type"])
+        df_store = df_store.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
 
     total = df_store.shape[0]
     normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")].shape[0]
