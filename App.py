@@ -22,12 +22,11 @@ st.markdown("""
 .red {background-color: #ffebee;}
 
 .card {
-    background-color: white;
-    padding: 5px;
+    padding: 8px;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     text-align: center;
-    margin-bottom: 5px;
+    margin-bottom: 8px;
 }
 .title {font-weight: bold; font-size: 14px;}
 .small {color: gray; font-size: 12px;}
@@ -95,7 +94,7 @@ except:
     df_amazon = pd.DataFrame()
 
 # =========================
-# ✅ Load Trendyol
+# Load Trendyol
 # =========================
 try:
     df_trendyol = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Trendyol").get_all_records())
@@ -104,7 +103,7 @@ try:
     df_trendyol["invoice_price"] = pd.to_numeric(df_trendyol["Unit Price"], errors="coerce")
     df_trendyol["store"] = "Trendyol"
 
-    # نفس فكرة نون → كله تخزين
+    # نوع الطلب (تقدر تطوره بعدين)
     df_trendyol["order_type"] = "تخزين"
 
 except:
@@ -127,6 +126,7 @@ df = df.merge(coding, on="partner_sku", how="left")
 # Search
 # =========================
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+
 if search:
     df = df[
         df["partner_sku"].str.contains(search, case=False, na=False) |
@@ -137,6 +137,17 @@ if search:
 # ترتيب الأكواد
 # =========================
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
+
+# =========================
+# ألوان المتاجر
+# =========================
+store_colors = {
+    "Noon": "#fef9c3",
+    "Amazon": "#dbeafe",
+    "Trendyol": "#f3e8ff"
+}
+
+stores = ["Noon", "Amazon", "Trendyol"]
 
 # =========================
 # عرض
@@ -158,26 +169,30 @@ for code in code_order:
     <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
-        <div>
-        🟡 Noon: {noon_orders} |
-        🔵 Amazon: {amazon_orders} |
-        🟣 Trendyol: {trendyol_orders}
+
+        <div style="display:flex; gap:20px; margin-top:10px;">
+            <div>🟡 Noon: <b>{noon_orders}</b></div>
+            <div>🔵 Amazon: <b>{amazon_orders}</b></div>
+            <div>🟣 Trendyol: <b>{trendyol_orders}</b></div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     col1, col2 = st.columns([1,4])
 
+    # صورة
     with col1:
         st.image(main_img, width=200)
 
+    # عرض المتاجر
     with col2:
-        for store_name in ["Noon","Amazon","Trendyol"]:
+        for store_name in stores:
             df_store = df_code[df_code["store"] == store_name]
             if df_store.empty:
                 continue
 
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+
             cols = st.columns(4)
 
             df_store_grouped = df_store.groupby(
@@ -197,7 +212,11 @@ for code in code_order:
                     displayed_skus.add(sku)
 
                     with cols[i % 4]:
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='card' style='background-color:{store_colors.get(store_name,'white')}'>",
+                            unsafe_allow_html=True
+                        )
+
                         st.image(image, width=80)
                         st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                         st.markdown(f"<div class='order-type'>{row['order_type']}</div>", unsafe_allow_html=True)
