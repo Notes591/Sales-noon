@@ -83,7 +83,8 @@ try:
         "مبلغ المنتج": "invoice_price"
     })
     df_amazon["store"] = "Amazon"
-    df_amazon["image_url"] = None
+    # استخدام العمود الموجود في الشيت لجلب الصور
+    df_amazon["image_url"] = df_amazon.get("image_url", None)
 
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة","")).strip().upper()
@@ -105,7 +106,7 @@ try:
     df_trendyol["partner_sku"] = df_trendyol["Barcode"].astype(str).str.strip()
     df_trendyol["invoice_price"] = pd.to_numeric(df_trendyol["Unit Price"], errors="coerce")
     df_trendyol["image_url"] = df_trendyol.get("image_url", None)
-    df_trendyol["order_type"] = "تخزين"  # أو حسب الحاجة يمكنك تعديلها بناءً على أي عمود
+    df_trendyol["order_type"] = "عادي"
 except:
     df_trendyol = pd.DataFrame()
 
@@ -163,13 +164,9 @@ for code in code_order:
 
     col1, col2 = st.columns([1,4])
 
-    # صورة كبيرة
     with col1:
         st.image(main_img, width=200)
 
-    # =========================
-    # عرض SKU Cards لكل متجر
-    # =========================
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
         if df_store.empty:
