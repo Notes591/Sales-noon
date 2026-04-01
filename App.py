@@ -82,9 +82,6 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
-    # =========================
-    # تصنيف الطلبات لأمازون
-    # =========================
     def classify_amazon_order(row):
         fc = str(row.get("full_container","")).strip().upper()
         if fc == "FSAB":
@@ -130,6 +127,19 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
+# ====== لوحة ملخص إجمالي الطلبات لكل متجر + نوع
+# =========================
+st.markdown("## 📊 ملخص إجمالي الطلبات لكل متجر")
+total_summary_html = ""
+for store_name in ["Noon","Amazon","Trendyol"]:
+    df_store = df[df["store"] == store_name]
+    type_counts = df_store.groupby("order_type").size().to_dict()
+    type_str = " | ".join([f"{t}: {c}" for t,c in type_counts.items()])
+    total_summary_html += f"<div>🟡 {store_name}: {type_str}</div>"
+
+st.markdown(f"<div class='big-card green'>{total_summary_html}</div>", unsafe_allow_html=True)
+
+# =========================
 # ترتيب الأكواد
 # =========================
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
@@ -142,7 +152,7 @@ for code in code_order:
     total_orders = df_code.shape[0]
 
     # =========================
-    # إجمالي الطلبات لكل متجر ونوع
+    # إجمالي الطلبات لكل متجر ونوع لكل كود
     # =========================
     summary = {}
     for store_name in ["Noon","Amazon","Trendyol"]:
@@ -155,9 +165,6 @@ for code in code_order:
     img = df_code["image_url"].dropna()
     main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
 
-    # =========================
-    # عرض الملخص أعلى كل كود
-    # =========================
     summary_html = ""
     for store, types in summary.items():
         type_str = " | ".join([f"{t}: {c}" for t,c in types.items()])
