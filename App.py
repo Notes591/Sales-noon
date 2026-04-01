@@ -110,36 +110,41 @@ coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
+# 🏆 ملخص إجمالي الطلبات لكل متجر حسب النوع (قبل البحث)
+# =========================
+st.markdown("## 🏆 إجمالي الطلبات لكل متجر حسب النوع")
+
+summary_data = []
+for store_name in ["Noon", "Amazon", "Trendyol"]:
+    df_store = df[df["store"] == store_name].copy()
+    if df_store.empty:
+        continue
+    if "order_type" not in df_store.columns:
+        df_store["order_type"] = "عادي"
+    type_counts = df_store.groupby("order_type").size().to_dict()
+    summary_data.append(f"**{store_name}**: " + " | ".join([f"{k}: {v}" for k,v in type_counts.items()]))
+
+st.markdown(" <br> ".join(summary_data), unsafe_allow_html=True)
+
+# =========================
 # 🔍 بحث
 # =========================
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+df_filtered = df.copy()
 if search:
-    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
-            df["unified_code"].astype(str).str.contains(search)]
-
-# =========================
-# 🏆 ملخص إجمالي الطلبات لكل متجر حسب النوع
-# =========================
-st.markdown("## 🏆 إجمالي الطلبات لكل متجر حسب النوع")
-summary_data = []
-for store_name in ["Noon", "Amazon", "Trendyol"]:
-    df_store = df[df["store"] == store_name]
-    if df_store.empty:
-        continue
-    type_counts = df_store.groupby("order_type").size().to_dict()
-    summary_data.append(f"**{store_name}**: " + " | ".join([f"{k}: {v}" for k,v in type_counts.items()]))
-st.markdown(" <br> ".join(summary_data), unsafe_allow_html=True)
+    df_filtered = df_filtered[df_filtered["partner_sku"].str.contains(search, case=False, na=False) |
+                              df_filtered["unified_code"].astype(str).str.contains(search)]
 
 # =========================
 # ترتيب الأكواد
 # =========================
-code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
+code_order = df_filtered.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
 # عرض الأكواد
 # =========================
 for code in code_order:
-    df_code = df[df["unified_code"] == code]
+    df_code = df_filtered[df_filtered["unified_code"] == code]
     total_orders = df_code.shape[0]
 
     color_class = "green" if total_orders >= 50 else "red"
