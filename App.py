@@ -142,10 +142,10 @@ for store_name in ["Noon","Amazon","Trendyol"]:
     df_store = df[df["store"] == store_name]
 
     if store_name == "Amazon":
-        # استخدم عمود "رقم الطلب" لحساب العدد الفعلي
-        total = df_store["رقم الطلب"].nunique()
-        normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")]["رقم الطلب"].nunique()
-        storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")]["رقم الطلب"].nunique()
+        # استخدم عمود "رقم الطلب من أمازون" لحساب العدد الفعلي
+        total = df_store["رقم الطلب من أمازون"].nunique()
+        normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")]["رقم الطلب من أمازون"].nunique()
+        storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")]["رقم الطلب من أمازون"].nunique()
     else:
         total = df_store.shape[0]
         normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")].shape[0]
