@@ -69,12 +69,11 @@ def classify_noon_order(row):
     fbn = str(row.get("is_fbn","")).strip().lower()
     if "fulfilled by noon" in fbn:
         return "تخزين (FBN)"
-    elif "supermall" in fbn:
-        return "سوبر مول (FBN)"
     elif "fulfilled by partner" in fbn:
         return "طلب عادي (FBP)"
     else:
-        return "غير محدد"
+        # أي حالة أخرى (بما فيها Supermall) تعتبر تخزين
+        return "تخزين (FBN)"
 df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
 
 # =========================
