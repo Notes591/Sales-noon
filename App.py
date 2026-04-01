@@ -76,11 +76,23 @@ try:
     df_amazon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Amazon").get_all_records())
     df_amazon = df_amazon.rename(columns={
         "ASIN": "partner_sku",
-        "مبلغ المنتج": "invoice_price"
+        "مبلغ المنتج": "invoice_price",
+        "حاوية كاملة الحمولة": "full_container"
     })
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
-    df_amazon["order_type"] = "عادي"
+
+    # =========================
+    # تصنيف الطلبات لأمازون
+    # =========================
+    def classify_amazon_order(row):
+        fc = str(row.get("full_container","")).strip().upper()
+        if fc == "FSAB":
+            return "عادي"
+        else:
+            return "تخزين (FBA)"
+
+    df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
 except:
     df_amazon = pd.DataFrame()
 
@@ -110,73 +122,64 @@ coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
-# تنظيف البيانات قبل الملخص
-# =========================
-df_clean = df.copy()
-df_clean = df_clean.dropna(subset=["partner_sku", "unified_code", "store"])
-
-# =========================
-# 🏆 ملخص إجمالي الطلبات لكل متجر حسب النوع (بعد التنظيف)
-# =========================
-st.markdown("## 🏆 إجمالي الطلبات لكل متجر حسب النوع")
-
-summary_data = []
-for store_name in ["Noon", "Amazon", "Trendyol"]:
-    df_store = df_clean[df_clean["store"] == store_name]
-    if df_store.empty:
-        continue
-    if "order_type" not in df_store.columns:
-        df_store["order_type"] = "عادي"
-    type_counts = df_store.groupby("order_type").size().to_dict()
-    summary_data.append(f"**{store_name}**: " + " | ".join([f"{k}: {v}" for k,v in type_counts.items()]))
-
-st.markdown(" <br> ".join(summary_data), unsafe_allow_html=True)
-
-# =========================
 # 🔍 بحث
 # =========================
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
-df_filtered = df_clean.copy()
 if search:
-    df_filtered = df_filtered[df_filtered["partner_sku"].str.contains(search, case=False, na=False) |
-                              df_filtered["unified_code"].astype(str).str.contains(search)]
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
+            df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
 # ترتيب الأكواد
 # =========================
-code_order = df_filtered.groupby("unified_code").size().sort_values(ascending=False).index
+code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
 # عرض الأكواد
 # =========================
 for code in code_order:
-    df_code = df_filtered[df_filtered["unified_code"] == code]
+    df_code = df[df["unified_code"] == code]
     total_orders = df_code.shape[0]
 
+    # =========================
+    # إجمالي الطلبات لكل متجر ونوع
+    # =========================
+    summary = {}
+    for store_name in ["Noon","Amazon","Trendyol"]:
+        df_store = df_code[df_code["store"] == store_name]
+        type_counts = df_store.groupby("order_type").size().to_dict()
+        summary[store_name] = type_counts
+
     color_class = "green" if total_orders >= 50 else "red"
+
     img = df_code["image_url"].dropna()
     main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
+
+    # =========================
+    # عرض الملخص أعلى كل كود
+    # =========================
+    summary_html = ""
+    for store, types in summary.items():
+        type_str = " | ".join([f"{t}: {c}" for t,c in types.items()])
+        summary_html += f"<div>🟡 {store}: {type_str}</div>"
 
     st.markdown(f"""
     <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
-        <div style="display:flex; gap:20px; margin-top:10px;">
-            <div>🟡 Noon: <b>{df_code[df_code['store']=='Noon'].shape[0]}</b></div>
-            <div>🔵 Amazon: <b>{df_code[df_code['store']=='Amazon'].shape[0]}</b></div>
-            <div>🟣 Trendyol: <b>{df_code[df_code['store']=='Trendyol'].shape[0]}</b></div>
-        </div>
+        {summary_html}
     </div>
     """, unsafe_allow_html=True)
 
     col1, col2 = st.columns([1,4])
     with col1:
         st.image(main_img, width=200)
-    
+
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
         if df_store.empty:
             continue
+
         with col2:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
