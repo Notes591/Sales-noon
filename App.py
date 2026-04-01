@@ -127,13 +127,23 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# ====== لوحة ملخص إجمالي الطلبات لكل متجر + نوع
+# ====== لوحة ملخص إجمالي الطلبات لكل متجر + نوع (تعديل الكميات لأمازون وتريندول)
 # =========================
 st.markdown("## 📊 ملخص إجمالي الطلبات لكل متجر")
 total_summary_html = ""
 for store_name in ["Noon","Amazon","Trendyol"]:
-    df_store = df[df["store"] == store_name]
-    type_counts = df_store.groupby("order_type").size().to_dict()
+    df_store = df[df["store"] == store_name].copy()
+    
+    if store_name == "Noon":
+        # نون كما هو
+        type_counts = df_store.groupby("order_type").size().to_dict()
+    else:
+        # أمازون وتريندول حسب عمود Quantity
+        qty_col = "Quantity"
+        df_store[qty_col] = pd.to_numeric(df_store.get(qty_col, 0), errors="coerce").fillna(0)
+        type_counts = df_store.groupby("order_type")[qty_col].sum().to_dict()
+        type_counts = {k:int(v) for k,v in type_counts.items()}
+    
     type_str = " | ".join([f"{t}: {c}" for t,c in type_counts.items()])
     total_summary_html += f"<div>🟡 {store_name}: {type_str}</div>"
 
