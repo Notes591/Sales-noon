@@ -110,13 +110,19 @@ coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
-# 🏆 ملخص إجمالي الطلبات لكل متجر حسب النوع (قبل البحث)
+# تنظيف البيانات قبل الملخص
+# =========================
+df_clean = df.copy()
+df_clean = df_clean.dropna(subset=["partner_sku", "unified_code", "store"])
+
+# =========================
+# 🏆 ملخص إجمالي الطلبات لكل متجر حسب النوع (بعد التنظيف)
 # =========================
 st.markdown("## 🏆 إجمالي الطلبات لكل متجر حسب النوع")
 
 summary_data = []
 for store_name in ["Noon", "Amazon", "Trendyol"]:
-    df_store = df[df["store"] == store_name].copy()
+    df_store = df_clean[df_clean["store"] == store_name]
     if df_store.empty:
         continue
     if "order_type" not in df_store.columns:
@@ -130,7 +136,7 @@ st.markdown(" <br> ".join(summary_data), unsafe_allow_html=True)
 # 🔍 بحث
 # =========================
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
-df_filtered = df.copy()
+df_filtered = df_clean.copy()
 if search:
     df_filtered = df_filtered[df_filtered["partner_sku"].str.contains(search, case=False, na=False) |
                               df_filtered["unified_code"].astype(str).str.contains(search)]
