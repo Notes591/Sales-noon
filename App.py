@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="📊 Advanced Product Dashboard", layout="wide")
 
 # =========================
-# CSS احترافي
+# CSS
 # =========================
 st.markdown("""
 <style>
@@ -60,11 +60,13 @@ creds = Credentials.from_service_account_info(
 client = gspread.authorize(creds)
 
 # =========================
-# Load Noon
+# Load Noon (🔥 اعتماد رسمي على base_price)
 # =========================
 df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
-if "base_price" in df_noon.columns:
-    df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
+
+df_noon["base_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
+df_noon["invoice_price"] = df_noon["base_price"]  # ✅ ده الأساس
+
 df_noon["store"] = "Noon"
 df_noon["sku"] = df_noon["sku"].astype(str)
 
@@ -89,6 +91,7 @@ try:
         "ASIN": "partner_sku",
         "مبلغ المنتج": "invoice_price"
     })
+    df_amazon["invoice_price"] = pd.to_numeric(df_amazon["invoice_price"], errors="coerce")
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
     df_amazon["order_type"] = "عادي"
@@ -114,6 +117,12 @@ except:
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 
 # =========================
+# 🔥 تنظيف نهائي يمنع أي Error
+# =========================
+df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce")
+df["invoice_price"] = df["invoice_price"].fillna(0)
+
+# =========================
 # Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
@@ -121,7 +130,7 @@ coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
-# 🔥 ANALYTICS
+# Analytics
 # =========================
 total_orders = len(df)
 total_revenue = df["invoice_price"].sum()
@@ -133,7 +142,6 @@ store_perf = df.groupby("store").agg(
 
 top_store = store_perf.index[0] if not store_perf.empty else "-"
 top_product = df["unified_code"].value_counts().idxmax() if "unified_code" in df else "-"
-
 avg_price = df["invoice_price"].mean()
 
 # =========================
@@ -143,20 +151,11 @@ st.subheader("📊 Analytics Overview")
 
 c1, c2, c3, c4, c5 = st.columns(5)
 
-with c1:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>إجمالي الطلبات</div><div class='metric-value'>{total_orders}</div></div>", unsafe_allow_html=True)
-
-with c2:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>الإيرادات</div><div class='metric-value'>{total_revenue:.0f} SAR</div></div>", unsafe_allow_html=True)
-
-with c3:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>أفضل Store</div><div class='metric-value'>{top_store}</div></div>", unsafe_allow_html=True)
-
-with c4:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>أفضل كود</div><div class='metric-value'>{top_product}</div></div>", unsafe_allow_html=True)
-
-with c5:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>متوسط السعر</div><div class='metric-value'>{avg_price:.1f}</div></div>", unsafe_allow_html=True)
+c1.metric("إجمالي الطلبات", total_orders)
+c2.metric("الإيرادات", f"{total_revenue:.0f} SAR")
+c3.metric("أفضل Store", top_store)
+c4.metric("أفضل كود", top_product)
+c5.metric("متوسط السعر", f"{avg_price:.1f}")
 
 # =========================
 # 🔍 بحث
@@ -172,7 +171,7 @@ if search:
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
-# عرض الأكواد (نفس كودك بدون تغيير)
+# عرض الأكواد (نفس تصميمك)
 # =========================
 for code in code_order:
     df_code = df[df["unified_code"] == code]
@@ -211,6 +210,7 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
             displayed_skus = set()
+
             df_store_grouped = df_store.groupby(["partner_sku","invoice_price","order_type"]).agg(
                 orders=("partner_sku","count"),
                 image=("image_url","first")
@@ -220,14 +220,19 @@ for code in code_order:
                 sku = row['partner_sku']
                 image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
                 order_type = row["order_type"]
+
                 if sku not in displayed_skus:
                     displayed_skus.add(sku)
+
                     with cols[i % 4]:
                         st.markdown(f"<div class='card'>", unsafe_allow_html=True)
                         st.image(image, width=80)
                         st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                         st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
+
                         sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
+
                         for _, r in sku_prices.iterrows():
                             st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
+
                         st.markdown("</div>", unsafe_allow_html=True)
