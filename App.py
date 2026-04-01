@@ -32,7 +32,6 @@ st.markdown("""
 .title {font-weight: bold; font-size: 14px;}
 .small {color: gray; font-size: 12px;}
 .order-type {font-size:12px; color:#555;}
-
 .divider {
     border-top: 1px solid #ccc;
     margin: 10px 0;
@@ -83,7 +82,6 @@ try:
         "مبلغ المنتج": "invoice_price"
     })
     df_amazon["store"] = "Amazon"
-    # استخدام العمود الموجود في الشيت لجلب الصور
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
     def classify_amazon_order(row):
@@ -93,7 +91,6 @@ try:
         else:
             return "تخزين"
     df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
-
 except:
     df_amazon = pd.DataFrame()
 
@@ -163,7 +160,6 @@ for code in code_order:
     """, unsafe_allow_html=True)
 
     col1, col2 = st.columns([1,4])
-
     with col1:
         st.image(main_img, width=200)
 
