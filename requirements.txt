@@ -7,3 +7,4 @@ openpyxl
 matplotlib
 beautifulsoup4
 requests
+validators
