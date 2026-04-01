@@ -5,3 +5,5 @@ google-auth
 plotly
 openpyxl
 matplotlib
+beautifulsoup4
+requests
