@@ -6,7 +6,7 @@ from google.oauth2.service_account import Credentials
 # =========================
 # إعداد الصفحة
 # =========================
-st.set_page_config(page_title="📊 Pro Dashboard", layout="wide")
+st.set_page_config(page_title="📊 Advanced Product Dashboard", layout="wide")
 
 # =========================
 # CSS احترافي
@@ -32,18 +32,14 @@ st.markdown("""
 .title {font-weight: bold; font-size: 14px;}
 .small {color: gray; font-size: 12px;}
 .order-type {font-size:12px; color:#555;}
-
-.divider {
-    border-top: 1px solid #ccc;
-    margin: 10px 0;
-}
+.divider {border-top: 1px solid #ccc; margin: 10px 0;}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🚀 Advanced Product Dashboard")
 
 # =========================
-# Auth Google Sheets
+# Auth
 # =========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
 
@@ -71,6 +67,7 @@ def classify_noon_order(row):
     else:
         return "تخزين (FBN)"
 df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
+df_noon["partner_sku"] = df_noon["sku"]
 
 # =========================
 # Load Amazon
@@ -82,15 +79,8 @@ try:
         "مبلغ المنتج": "invoice_price"
     })
     df_amazon["store"] = "Amazon"
-    df_amazon["image_url"] = None
-
-    def classify_amazon_order(row):
-        container = str(row.get("حاوية كاملة الحمولة","")).strip().upper()
-        if container == "FSAB":
-            return "طلب عادي"
-        else:
-            return "تخزين"
-    df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+    df_amazon["image_url"] = df_amazon.get("image_url", None)
+    df_amazon["order_type"] = "عادي"
 except:
     df_amazon = pd.DataFrame()
 
@@ -99,27 +89,24 @@ except:
 # =========================
 try:
     df_trendyol = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Trendyol").get_all_records())
-    df_trendyol = df_trendyol.rename(columns={
-        "Barcode":"partner_sku",
-        "Unit Price":"invoice_price"
-    })
     df_trendyol["store"] = "Trendyol"
+    df_trendyol["partner_sku"] = df_trendyol["Barcode"].astype(str).str.strip()
+    df_trendyol["invoice_price"] = pd.to_numeric(df_trendyol["Unit Price"], errors="coerce")
+    df_trendyol["image_url"] = df_trendyol.get("image_url", None)
     df_trendyol["order_type"] = "عادي"
-    df_trendyol["image_url"] = df_trendyol["image_url"].fillna("https://via.placeholder.com/80")
 except:
     df_trendyol = pd.DataFrame()
 
 # =========================
-# Merge All
+# Merge all stores
 # =========================
-df_noon["partner_sku"] = df_noon["sku"]
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 
 # =========================
 # Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
-coding["partner_sku"] = coding["partner_sku"].astype(str)
+coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
@@ -146,6 +133,7 @@ for code in code_order:
     trendyol_orders = df_code[df_code["store"] == "Trendyol"].shape[0]
 
     color_class = "green" if total_orders >= 50 else "red"
+
     img = df_code["image_url"].dropna()
     main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
 
@@ -162,36 +150,35 @@ for code in code_order:
     """, unsafe_allow_html=True)
 
     col1, col2 = st.columns([1,4])
-
-    # صورة كبيرة
     with col1:
         st.image(main_img, width=200)
 
-    # عرض SKU Cards لكل متجر بدون تكرار الأسعار
-    with col2:
-        for store_name in ["Noon","Amazon","Trendyol"]:
-            df_store = df_code[df_code["store"] == store_name]
-            if df_store.empty:
-                continue
+    for store_name in ["Noon","Amazon","Trendyol"]:
+        df_store = df_code[df_code["store"] == store_name]
+        if df_store.empty:
+            continue
 
+        with col2:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
             displayed_skus = set()
-            df_store_grouped = df_store.groupby(["partner_sku","invoice_price"]).agg(
+            df_store_grouped = df_store.groupby(["partner_sku","invoice_price","order_type"]).agg(
                 orders=("partner_sku","count"),
                 image=("image_url","first")
             ).reset_index().sort_values(by="orders", ascending=False)
 
-            for i, row_sku in df_store_grouped.iterrows():
-                sku = row_sku['partner_sku']
-                image = row_sku["image"] if pd.notna(row_sku["image"]) else "https://via.placeholder.com/80"
+            for i, row in df_store_grouped.iterrows():
+                sku = row['partner_sku']
+                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
+                order_type = row["order_type"]
                 if sku not in displayed_skus:
                     displayed_skus.add(sku)
                     with cols[i % 4]:
                         st.markdown(f"<div class='card'>", unsafe_allow_html=True)
                         st.image(image, width=80)
                         st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
-                        if store_name != "Trendyol":  # Noon & Amazon يظهر order_type
-                            st.markdown(f"<div class='order-type'>{df_store[df_store['partner_sku']==sku]['order_type'].iloc[0]}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='small'>💰 {row_sku['invoice_price']:.2f} | 📦 {row_sku['orders']} طلب</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
+                        sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
+                        for _, r in sku_prices.iterrows():
+                            st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
                         st.markdown("</div>", unsafe_allow_html=True)
