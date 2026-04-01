@@ -27,7 +27,7 @@ creds = Credentials.from_service_account_info(
 client = gspread.authorize(creds)
 
 # =========================
-# Load Noon Sales
+# Load Noon
 # =========================
 sales_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_SALES)
 df_noon = pd.DataFrame(sales_ws.get_all_records())
@@ -37,7 +37,7 @@ if df_noon.empty:
     st.error("📭 Sheet Sales فارغ")
     st.stop()
 
-# ✅ توحيد السعر (Noon = base_price)
+# ✅ توحيد السعر
 if "base_price" in df_noon.columns:
     df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
 else:
@@ -48,7 +48,7 @@ df_noon["partner_sku"] = df_noon["partner_sku"].astype(str).str.strip()
 df_noon["is_fbn"] = df_noon.get("is_fbn", "FBN")
 
 # =========================
-# Load Amazon Sheet
+# Load Amazon
 # =========================
 try:
     amazon_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_AMAZON)
@@ -117,32 +117,53 @@ for code in df["unified_code"].dropna().unique():
     col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
 
     # =========================
-    # SKU Distribution + PRICE
+    # صورة المنتج الأساسية
     # =========================
-    st.markdown("### 📋 توزيع الطلبات + سعر البيع")
+    st.markdown("### 🖼️ صورة المنتج")
+    img_url = df_code["image_url"].dropna()
+    if not img_url.empty:
+        st.image(img_url.iloc[0], width=150)
+    else:
+        st.info("🚫 لا يوجد صورة")
+
+    # =========================
+    # توزيع SKU + صورة + سعر
+    # =========================
+    st.markdown("### 📋 توزيع الطلبات + السعر + صورة")
 
     sku_stats = df_code.groupby(["store", "partner_sku"]).agg(
         orders=("partner_sku", "count"),
-        avg_price=("invoice_price", "mean")
+        avg_price=("invoice_price", "mean"),
+        image=("image_url", "first")
     ).reset_index()
 
     store_list = sku_stats["store"].unique()
-
     cols = st.columns(len(store_list))
 
     for i, store_name in enumerate(store_list):
         with cols[i]:
             st.markdown(f"### 🏪 {store_name}")
+
             store_df = sku_stats[sku_stats["store"] == store_name]
 
             for _, row in store_df.iterrows():
-                st.metric(
-                    label=row["partner_sku"],
-                    value=f"{row['orders']} طلب",
-                    delta=f"{row['avg_price']:.2f} SAR"
-                )
 
-    st.markdown("---")
+                c1, c2 = st.columns([1, 3])
+
+                # 🖼️ صورة صغيرة
+                with c1:
+                    if pd.notna(row["image"]):
+                        st.image(row["image"], width=70)
+                    else:
+                        st.write("📦")
+
+                # 📊 بيانات
+                with c2:
+                    st.markdown(f"**SKU:** {row['partner_sku']}")
+                    st.markdown(f"📦 طلبات: {row['orders']}")
+                    st.markdown(f"💰 سعر: {row['avg_price']:.2f} SAR")
+
+                st.markdown("---")
 
 # =========================
 # Raw Data
