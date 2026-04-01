@@ -76,20 +76,11 @@ try:
     df_amazon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Amazon").get_all_records())
     df_amazon = df_amazon.rename(columns={
         "ASIN": "partner_sku",
-        "مبلغ المنتج": "invoice_price",
-        "حاوية كاملة الحمولة": "full_container"
+        "مبلغ المنتج": "invoice_price"
     })
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
-
-    def classify_amazon_order(row):
-        fc = str(row.get("full_container","")).strip().upper()
-        if fc == "FSAB":
-            return "عادي"
-        else:
-            return "تخزين (FBA)"
-
-    df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+    df_amazon["order_type"] = "عادي"
 except:
     df_amazon = pd.DataFrame()
 
@@ -127,29 +118,6 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# ====== لوحة ملخص إجمالي الطلبات لكل متجر + نوع (تعديل الكميات لأمازون وتريندول)
-# =========================
-st.markdown("## 📊 ملخص إجمالي الطلبات لكل متجر")
-total_summary_html = ""
-for store_name in ["Noon","Amazon","Trendyol"]:
-    df_store = df[df["store"] == store_name].copy()
-    
-    if store_name == "Noon":
-        # نون كما هو
-        type_counts = df_store.groupby("order_type").size().to_dict()
-    else:
-        # أمازون وتريندول حسب عمود Quantity
-        qty_col = "Quantity"
-        df_store[qty_col] = pd.to_numeric(df_store.get(qty_col, 0), errors="coerce").fillna(0)
-        type_counts = df_store.groupby("order_type")[qty_col].sum().to_dict()
-        type_counts = {k:int(v) for k,v in type_counts.items()}
-    
-    type_str = " | ".join([f"{t}: {c}" for t,c in type_counts.items()])
-    total_summary_html += f"<div>🟡 {store_name}: {type_str}</div>"
-
-st.markdown(f"<div class='big-card green'>{total_summary_html}</div>", unsafe_allow_html=True)
-
-# =========================
 # ترتيب الأكواد
 # =========================
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
@@ -160,31 +128,24 @@ code_order = df.groupby("unified_code").size().sort_values(ascending=False).inde
 for code in code_order:
     df_code = df[df["unified_code"] == code]
     total_orders = df_code.shape[0]
-
-    # =========================
-    # إجمالي الطلبات لكل متجر ونوع لكل كود
-    # =========================
-    summary = {}
-    for store_name in ["Noon","Amazon","Trendyol"]:
-        df_store = df_code[df_code["store"] == store_name]
-        type_counts = df_store.groupby("order_type").size().to_dict()
-        summary[store_name] = type_counts
+    noon_orders = df_code[df_code["store"] == "Noon"].shape[0]
+    amazon_orders = df_code[df_code["store"] == "Amazon"].shape[0]
+    trendyol_orders = df_code[df_code["store"] == "Trendyol"].shape[0]
 
     color_class = "green" if total_orders >= 50 else "red"
 
     img = df_code["image_url"].dropna()
     main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
 
-    summary_html = ""
-    for store, types in summary.items():
-        type_str = " | ".join([f"{t}: {c}" for t,c in types.items()])
-        summary_html += f"<div>🟡 {store}: {type_str}</div>"
-
     st.markdown(f"""
     <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
-        {summary_html}
+        <div style="display:flex; gap:20px; margin-top:10px;">
+            <div>🟡 Noon: <b>{noon_orders}</b></div>
+            <div>🔵 Amazon: <b>{amazon_orders}</b></div>
+            <div>🟣 Trendyol: <b>{trendyol_orders}</b></div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
