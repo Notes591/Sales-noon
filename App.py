@@ -2,47 +2,41 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+import matplotlib.pyplot as plt
 
 # =========================
 # إعداد الصفحة
 # =========================
-st.set_page_config(page_title="📊 Dashboard", layout="wide")
+st.set_page_config(page_title="📊 Pro Dashboard", layout="wide")
 
-# 🎨 CSS
+# =========================
+# CSS احترافي
+# =========================
 st.markdown("""
 <style>
-.card {
-    background-color: #ffffff;
-    padding: 15px;
-    border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-    margin-bottom: 15px;
-}
 .big-card {
-    background-color: #f8f9fa;
     padding: 20px;
     border-radius: 15px;
-    margin-bottom: 25px;
+    margin-bottom: 20px;
 }
-.title {
-    font-weight: bold;
-    font-size: 18px;
+.green {background-color: #e8f5e9;}
+.red {background-color: #ffebee;}
+
+.card {
+    background-color: white;
+    padding: 10px;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
 }
-.small {
-    color: gray;
-    font-size: 13px;
-}
-.price {
-    color: #2E7D32;
-    font-weight: bold;
-}
+.title {font-weight: bold;}
+.small {color: gray; font-size: 13px;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Product Dashboard")
+st.title("🚀 Advanced Product Dashboard")
 
 # =========================
-# Google Sheets
+# Auth
 # =========================
 SHEET_ID = "1EIgmqX2Ku_0_tfULUc8IfvNELFj96WGz_aLoIekfluk"
 
@@ -56,8 +50,6 @@ client = gspread.authorize(creds)
 # Load Noon
 # =========================
 df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
-df_noon.columns = df_noon.columns.str.strip()
-
 if "base_price" in df_noon.columns:
     df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
 
@@ -73,7 +65,6 @@ try:
         "ASIN": "partner_sku",
         "مبلغ المنتج": "invoice_price"
     })
-    df_amazon["invoice_price"] = pd.to_numeric(df_amazon["invoice_price"], errors="coerce")
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = None
 except:
@@ -93,9 +84,29 @@ coding["partner_sku"] = coding["partner_sku"].astype(str)
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
-# ترتيب الأكواد تنازلي
+# 🔍 بحث
+# =========================
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+
+if search:
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
+            df["unified_code"].astype(str).str.contains(search)]
+
+# =========================
+# ترتيب الأكواد
 # =========================
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
+
+# =========================
+# رسم بياني عام
+# =========================
+st.subheader("📈 المبيعات العامة")
+
+sales_chart = df.groupby("store").size()
+
+fig, ax = plt.subplots()
+ax.bar(sales_chart.index, sales_chart.values)
+st.pyplot(fig)
 
 # =========================
 # عرض
@@ -105,59 +116,51 @@ for code in code_order:
     df_code = df[df["unified_code"] == code]
 
     total_orders = df_code.shape[0]
+    noon_orders = df_code[df_code["store"] == "Noon"].shape[0]
+    amazon_orders = df_code[df_code["store"] == "Amazon"].shape[0]
 
-    amazon_sales = df_code[df_code["store"] == "Amazon"]["invoice_price"].sum()
-    noon_sales = df_code[df_code["store"] == "Noon"]["invoice_price"].sum()
-    total_sales = df_code["invoice_price"].sum()
+    # لون حسب الأداء
+    if total_orders >= 50:
+        color_class = "green"
+    else:
+        color_class = "red"
 
-    # صورة كبيرة للكود
+    # صورة الكود
     img = df_code["image_url"].dropna()
     main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
 
     st.markdown(f"""
-    <div class="big-card">
+    <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
-        <div class="small">📦 {total_orders} طلب</div>
-        <div class="price">💰 إجمالي: {total_sales:,.0f} SAR</div>
-        <div class="small">🟡 Noon: {noon_sales:,.0f} SAR | 🔵 Amazon: {amazon_sales:,.0f} SAR</div>
+        <div>📦 إجمالي الطلبات: {total_orders}</div>
+        <div>🟡 Noon: {noon_orders} طلب | 🔵 Amazon: {amazon_orders} طلب</div>
     </div>
     """, unsafe_allow_html=True)
 
-    col_img, col_grid = st.columns([1, 4])
+    col1, col2 = st.columns([1,4])
 
-    with col_img:
-        st.image(main_img, width=180)
+    # صورة كبيرة
+    with col1:
+        st.image(main_img, width=200)
 
-    # =========================
     # SKU Cards
-    # =========================
-    sku_stats = df_code.groupby("partner_sku").agg(
-        orders=("partner_sku", "count"),
-        price=("invoice_price", "mean"),
-        image=("image_url", "first"),
-        store=("store", "first")
-    ).reset_index().sort_values(by="orders", ascending=False)
+    with col2:
+        sku_stats = df_code.groupby("partner_sku").agg(
+            orders=("partner_sku","count"),
+            image=("image_url","first")
+        ).reset_index().sort_values(by="orders", ascending=False)
 
-    with col_grid:
         cols = st.columns(4)
 
         for i, row in sku_stats.iterrows():
             with cols[i % 4]:
 
-                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/120"
+                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/100"
 
                 st.markdown(f"""
                 <div class="card">
-                    <img src="{image}" width="100%">
+                    <img src="{image}" width="80%">
                     <div class="title">{row['partner_sku']}</div>
-                    <div class="small">{row['store']}</div>
                     <div class="small">📦 {row['orders']} طلب</div>
-                    <div class="price">💰 {row['price']:.0f} SAR</div>
                 </div>
                 """, unsafe_allow_html=True)
-
-# =========================
-# Raw Data
-# =========================
-with st.expander("📜 البيانات"):
-    st.dataframe(df)
