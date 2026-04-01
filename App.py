@@ -33,6 +33,7 @@ st.markdown("""
 .small {color: gray; font-size: 12px;}
 .order-type {font-size:12px; color:#555;}
 .divider {border-top: 1px solid #ccc; margin: 10px 0;}
+.summary {font-size:14px; font-weight:bold; margin-bottom:20px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,7 +82,6 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
-    # تصنيف الطلبات بناء على عمود "حاوية كاملة الحمولة"
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
         if container == "FSAB":
@@ -125,6 +125,19 @@ search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
 if search:
     df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
             df["unified_code"].astype(str).str.contains(search)]
+
+# =========================
+# ملخص إجمالي الطلبات لكل متجر
+# =========================
+summary = []
+for store_name in ["Noon","Amazon","Trendyol"]:
+    df_store = df[df["store"] == store_name]
+    total = df_store.shape[0]
+    normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")].shape[0]
+    storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")].shape[0]
+    summary.append(f"{store_name}: {total} | عادي: {normal} | تخزين: {storage}")
+
+st.markdown("<div class='summary'>" + " &nbsp; &nbsp; ".join(summary) + "</div>", unsafe_allow_html=True)
 
 # =========================
 # ترتيب الأكواد
