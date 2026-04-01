@@ -60,7 +60,7 @@ df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_r
 if "base_price" in df_noon.columns:
     df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
 df_noon["store"] = "Noon"
-df_noon["partner_sku"] = df_noon["partner_sku"].astype(str)
+df_noon["sku"] = df_noon["sku"].astype(str)  # اعتماد على sku بدل partner_sku
 
 # =========================
 # تمييز نوع الطلب في Noon
@@ -105,6 +105,8 @@ except:
 # =========================
 # Merge
 # =========================
+# قبل الدمج، نعطي Noon عمود partner_sku مؤقت مساوي للـ sku ليتوافق مع الكود الحالي
+df_noon["partner_sku"] = df_noon["sku"]
 df = pd.concat([df_noon, df_amazon], ignore_index=True)
 
 # =========================
