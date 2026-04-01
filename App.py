@@ -138,16 +138,15 @@ for code in code_order:
     # SKU Cards
     with col2:
         # =========================
-        # دمج نفس الـ SKU مع أسعار مختلفة وجمع الطلبات
+        # نعرض كل نسخة من SKU مع سعرها وعدد الطلبات
         # =========================
-        df_code_grouped = df_code.groupby(["store","partner_sku"]).agg(
-            orders=("partner_sku","count"),
-            invoice_price=("invoice_price","mean"),  # أو first() لو تحب
-            image=("image_url","first")
-        ).reset_index().sort_values(by="orders", ascending=False)
+        df_code["invoice_price"] = pd.to_numeric(df_code["invoice_price"], errors="coerce")
+        sku_stats = df_code.groupby(["store","partner_sku","invoice_price"]).size().reset_index(name="orders")
+        sku_stats["image"] = df_code.groupby(["store","partner_sku","invoice_price"])["image_url"].first().values
+        sku_stats = sku_stats.sort_values(by="orders", ascending=False)
 
         for store_name in ["Noon","Amazon"]:
-            df_store = df_code_grouped[df_code_grouped["store"] == store_name]
+            df_store = sku_stats[sku_stats["store"] == store_name]
             if not df_store.empty:
                 st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
                 cols = st.columns(4)
@@ -158,6 +157,6 @@ for code in code_order:
                         <div class="card">
                             <img src="{image}" width="60%">
                             <div class="title">{row['partner_sku']}</div>
-                            <div class="small">📦 {row['orders']} طلب | 💰 {row['invoice_price']:.2f}</div>
+                            <div class="small">📦 {row['orders']} طلب | 💰 {row['invoice_price']}</div>
                         </div>
                         """, unsafe_allow_html=True)
