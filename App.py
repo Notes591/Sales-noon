@@ -37,10 +37,15 @@ if df_noon.empty:
     st.error("📭 Sheet Sales فارغ")
     st.stop()
 
-df_noon["invoice_price"] = pd.to_numeric(df_noon["invoice_price"], errors="coerce")
+# ✅ توحيد السعر (Noon = base_price)
+if "base_price" in df_noon.columns:
+    df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
+else:
+    df_noon["invoice_price"] = pd.to_numeric(df_noon.get("invoice_price"), errors="coerce")
+
 df_noon["store"] = "Noon"
 df_noon["partner_sku"] = df_noon["partner_sku"].astype(str).str.strip()
-df_noon["is_fbn"] = df_noon.get("is_fbn", "FBN")  # Default Noon = FBN
+df_noon["is_fbn"] = df_noon.get("is_fbn", "FBN")
 
 # =========================
 # Load Amazon Sheet
@@ -55,51 +60,45 @@ try:
             "ASIN": "partner_sku",
             "مبلغ المنتج": "invoice_price"
         })
+
         amazon_df["invoice_price"] = pd.to_numeric(amazon_df["invoice_price"], errors="coerce")
-        amazon_df["is_fbn"] = "AMAZON"
         amazon_df["store"] = "Amazon"
+        amazon_df["is_fbn"] = "AMAZON"
         amazon_df["image_url"] = None
         amazon_df["partner_sku"] = amazon_df["partner_sku"].astype(str).str.strip()
     else:
         amazon_df = pd.DataFrame()
+
 except:
     st.warning("⚠️ لا يوجد Sheet باسم Amazon")
     amazon_df = pd.DataFrame()
 
 # =========================
-# Merge Noon + Amazon
+# Merge
 # =========================
 df = pd.concat([df_noon, amazon_df], ignore_index=True, sort=False)
 
 # =========================
-# Load Coding Sheet
+# Load Coding
 # =========================
 coding_ws = client.open_by_key(SHEET_ID).worksheet(SHEET_CODING)
 coding_df = pd.DataFrame(coding_ws.get_all_records())
-coding_df.columns = coding_df.columns.str.strip().str.replace("\u200f", "").str.replace("\xa0", "")
-
-required_cols = {"partner_sku", "unified_code"}
-if not required_cols.issubset(coding_df.columns):
-    st.error(f"⚠️ جدول Coding يجب أن يحتوي الأعمدة التالية: {required_cols}")
-    st.stop()
+coding_df.columns = coding_df.columns.str.strip()
 
 coding_df["partner_sku"] = coding_df["partner_sku"].astype(str).str.strip()
+
 df = df.merge(coding_df, on="partner_sku", how="left")
 
 # =========================
 # Normalize Fulfillment
 # =========================
-df["is_fbn"] = df["is_fbn"].astype(str).str.replace("\u200f", "", regex=False).str.replace("\xa0", "", regex=False).str.strip().str.lower()
-df.loc[df["is_fbn"].str.contains("noon"), "is_fbn"] = "FBN"
+df["is_fbn"] = df["is_fbn"].astype(str).str.strip().str.lower()
 df.loc[df["is_fbn"].str.contains("fbn"), "is_fbn"] = "FBN"
-df.loc[df["is_fbn"].str.contains("partner"), "is_fbn"] = "FBP"
 df.loc[df["is_fbn"].str.contains("fbp"), "is_fbn"] = "FBP"
-df.loc[df["is_fbn"].str.contains("supermall"), "is_fbn"] = "Supermall"
 df.loc[df["is_fbn"].str.contains("amazon"), "is_fbn"] = "AMAZON"
-df["is_fbn"] = df["is_fbn"].fillna("Unknown")
 
 # =========================
-# Cards: Orders & Revenue per Unified Code
+# Dashboard
 # =========================
 st.subheader("🟢 تحليل حسب الكود الموحد")
 
@@ -117,49 +116,31 @@ for code in df["unified_code"].dropna().unique():
     col2.metric("💰 إجمالي الإيرادات", f"{total_revenue:,.2f} SAR")
     col3.metric("💳 متوسط السعر", f"{avg_price:,.2f} SAR")
 
-    # 🚚 حسب نوع الشحن
-    st.markdown("### 🚚 حسب نوع الشحن")
+    # =========================
+    # SKU Distribution + PRICE
+    # =========================
+    st.markdown("### 📋 توزيع الطلبات + سعر البيع")
 
-    types_to_show = ["FBP", "FBN", "Supermall", "AMAZON"]
-    available_types = [t for t in types_to_show if t.lower() in df_code["is_fbn"].values]
+    sku_stats = df_code.groupby(["store", "partner_sku"]).agg(
+        orders=("partner_sku", "count"),
+        avg_price=("invoice_price", "mean")
+    ).reset_index()
 
-    if available_types:
-        cols = st.columns(len(available_types))
-        for col, ftype in zip(cols, available_types):
-            sub = df_code[df_code["is_fbn"] == ftype.lower()]
-            orders_count = sub.shape[0]
-            revenue_sum = sub["invoice_price"].sum()
-            col.metric(f"{ftype} طلبات", orders_count)
-            col.metric(f"{ftype} إيراد", f"{revenue_sum:,.2f} SAR")
-    else:
-        st.info("لا توجد بيانات لأنواع الشحن")
+    store_list = sku_stats["store"].unique()
 
-    # 🖼️ صورة المنتج
-    st.markdown("### 🖼️ صورة المنتج")
-    img_url = df_code["image_url"].dropna()
-    if not img_url.empty:
-        st.image(img_url.iloc[0], width=120)
-    else:
-        st.info("🚫 لا يوجد صورة")
+    cols = st.columns(len(store_list))
 
-    # 📋 توزيع الطلبات لكل SKU حسب المتجر
-    st.markdown("### 📋 توزيع الطلبات لكل SKU حسب المتجر")
-    sku_counts = df_code.groupby(["store", "partner_sku"]) \
-        .size() \
-        .reset_index(name="عدد الطلبات") \
-        .sort_values(by="عدد الطلبات", ascending=False)
+    for i, store_name in enumerate(store_list):
+        with cols[i]:
+            st.markdown(f"### 🏪 {store_name}")
+            store_df = sku_stats[sku_stats["store"] == store_name]
 
-    store_list = sku_counts["store"].unique()
-    if store_list.size > 0:
-        cols = st.columns(len(store_list))
-        for i, store_name in enumerate(store_list):
-            with cols[i]:
-                st.markdown(f"### 🏪 {store_name}")
-                store_df = sku_counts[sku_counts["store"] == store_name]
-                for _, row in store_df.iterrows():
-                    st.metric(label=row["partner_sku"], value=row["عدد الطلبات"])
-    else:
-        st.info("لا توجد بيانات SKU")
+            for _, row in store_df.iterrows():
+                st.metric(
+                    label=row["partner_sku"],
+                    value=f"{row['orders']} طلب",
+                    delta=f"{row['avg_price']:.2f} SAR"
+                )
 
     st.markdown("---")
 
