@@ -80,7 +80,16 @@ try:
     })
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
-    df_amazon["order_type"] = "عادي"
+
+    # تصنيف الطلبات بناء على عمود "حاوية كاملة"
+    def classify_amazon_order(row):
+        container = str(row.get("حاوية كاملة", "")).strip().upper()
+        if container in ["FSAB", "حاوية كاملة"]:
+            return "عادي"
+        else:
+            return "تخزين"
+    df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+
 except:
     df_amazon = pd.DataFrame()
 
