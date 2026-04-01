@@ -137,14 +137,17 @@ for code in code_order:
 
     # SKU Cards
     with col2:
-        # ترتيب تنازلي حسب عدد الطلبات
-        sku_stats = df_code.groupby(["store","partner_sku","invoice_price"]).agg(
+        # =========================
+        # دمج نفس الـ SKU مع أسعار مختلفة وجمع الطلبات
+        # =========================
+        df_code_grouped = df_code.groupby(["store","partner_sku"]).agg(
             orders=("partner_sku","count"),
+            invoice_price=("invoice_price","mean"),  # أو first() لو تحب
             image=("image_url","first")
         ).reset_index().sort_values(by="orders", ascending=False)
 
         for store_name in ["Noon","Amazon"]:
-            df_store = sku_stats[sku_stats["store"] == store_name]
+            df_store = df_code_grouped[df_code_grouped["store"] == store_name]
             if not df_store.empty:
                 st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
                 cols = st.columns(4)
@@ -155,6 +158,6 @@ for code in code_order:
                         <div class="card">
                             <img src="{image}" width="60%">
                             <div class="title">{row['partner_sku']}</div>
-                            <div class="small">📦 {row['orders']} طلب | 💰 {row['invoice_price']}</div>
+                            <div class="small">📦 {row['orders']} طلب | 💰 {row['invoice_price']:.2f}</div>
                         </div>
                         """, unsafe_allow_html=True)
