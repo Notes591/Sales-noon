@@ -23,19 +23,16 @@ st.markdown("""
 
 .card {
     background-color: white;
-    padding: 5px;
+    padding: 10px;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    text-align: center;
-    margin-bottom: 5px;
+    margin-bottom: 10px;
 }
 .title {font-weight: bold; font-size: 14px;}
 .small {color: gray; font-size: 12px;}
-
-.divider {
-    border-top: 1px solid #ccc;
-    margin: 10px 0;
-}
+.divider {border-top: 1px solid #ccc; margin: 10px 0;}
+.price-list {margin-top: 5px; font-size: 13px; color: #333;}
+.price-list div {margin-bottom: 3px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -93,7 +90,6 @@ df = df.merge(coding, on="partner_sku", how="left")
 # 🔍 بحث
 # =========================
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
-
 if search:
     df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
             df["unified_code"].astype(str).str.contains(search)]
@@ -109,7 +105,6 @@ code_order = df.groupby("unified_code").size().sort_values(ascending=False).inde
 for code in code_order:
 
     df_code = df[df["unified_code"] == code]
-
     total_orders = df_code.shape[0]
     noon_orders = df_code[df_code["store"] == "Noon"].shape[0]
     amazon_orders = df_code[df_code["store"] == "Amazon"].shape[0]
@@ -125,7 +120,7 @@ for code in code_order:
     <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
-        <div>🟡 Noon: {noon_orders} طلب | 🔵 Amazon: {amazon_orders} طلب</div>
+        <div>🟡 Noon: {noon_orders} | 🔵 Amazon: {amazon_orders}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -135,28 +130,29 @@ for code in code_order:
     with col1:
         st.image(main_img, width=200)
 
-    # SKU Cards
+    # =========================
+    # SKU Cards مع جميع الأسعار
+    # =========================
     with col2:
-        # =========================
-        # نعرض كل نسخة من SKU مع سعرها وعدد الطلبات
-        # =========================
-        df_code["invoice_price"] = pd.to_numeric(df_code["invoice_price"], errors="coerce")
-        sku_stats = df_code.groupby(["store","partner_sku","invoice_price"]).size().reset_index(name="orders")
-        sku_stats["image"] = df_code.groupby(["store","partner_sku","invoice_price"])["image_url"].first().values
-        sku_stats = sku_stats.sort_values(by="orders", ascending=False)
-
         for store_name in ["Noon","Amazon"]:
-            df_store = sku_stats[sku_stats["store"] == store_name]
+            df_store = df_code[df_code["store"] == store_name]
             if not df_store.empty:
                 st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+
+                # group by SKU و invoice_price لحساب عدد الطلبات لكل سعر
+                price_group = df_store.groupby(["partner_sku","invoice_price"]).size().reset_index(name="orders")
+                images = df_store.groupby(["partner_sku","invoice_price"])["image_url"].first().to_dict()
+
                 cols = st.columns(4)
-                for i, row in df_store.iterrows():
+                for i, row in price_group.iterrows():
                     with cols[i % 4]:
-                        image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
+                        image = images.get((row["partner_sku"], row["invoice_price"]), "https://via.placeholder.com/80")
                         st.markdown(f"""
                         <div class="card">
                             <img src="{image}" width="60%">
                             <div class="title">{row['partner_sku']}</div>
-                            <div class="small">📦 {row['orders']} طلب | 💰 {row['invoice_price']}</div>
+                            <div class="small price-list">
+                                📦 {row['orders']} طلب | 💰 {row['invoice_price']}
+                            </div>
                         </div>
                         """, unsafe_allow_html=True)
