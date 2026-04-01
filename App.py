@@ -77,7 +77,6 @@ try:
     df_amazon["invoice_price"] = pd.to_numeric(df_amazon["invoice_price"], errors="coerce")
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
-    df_amazon["order_type"] = "عادي"
 except:
     df_amazon = pd.DataFrame()
 
@@ -90,7 +89,6 @@ try:
     df_trendyol["partner_sku"] = df_trendyol["Barcode"].astype(str).str.strip()
     df_trendyol["invoice_price"] = pd.to_numeric(df_trendyol["Unit Price"], errors="coerce")
     df_trendyol["image_url"] = df_trendyol.get("image_url", None)
-    df_trendyol["order_type"] = "عادي"
 except:
     df_trendyol = pd.DataFrame()
 
@@ -118,12 +116,26 @@ if search:
 # =========================
 # === إجمالي المبيعات حسب المتجر والنوع ===
 # =========================
+# Noon
 noon_fbn = df_noon[df_noon["order_type"] == "تخزين (FBN)"].shape[0]
 noon_fbp = df_noon[df_noon["order_type"] == "طلب عادي (FBP)"].shape[0]
-amazon_storage = df_amazon[df_amazon["order_type"] == "تخزين (FBN)"].shape[0]  # لو عندك أنواع FBN
-amazon_regular = df_amazon[df_amazon["order_type"] == "عادي"].shape[0]
-trendyol_total = df_trendyol.shape[0]
 
+# Amazon حسب حاوية كاملة الحمولة
+if not df_amazon.empty:
+    df_amazon["order_type_storage"] = df_amazon["حاوية كاملة الحمولة"].apply(lambda x: "تخزين" if str(x).strip() == "FSAB" else "عادي")
+    amazon_storage = df_amazon[df_amazon["order_type_storage"] == "تخزين"]["الكمية"].sum()
+    amazon_regular = df_amazon[df_amazon["order_type_storage"] == "عادي"]["الكمية"].sum()
+else:
+    amazon_storage = 0
+    amazon_regular = 0
+
+# Trendyol حسب Quantity
+if not df_trendyol.empty:
+    trendyol_total = df_trendyol["Quantity"].sum()
+else:
+    trendyol_total = 0
+
+# عرض النتائج
 st.markdown(f"""
 <div class="total-sales">
     <div>🟡 Noon - FBN: <b>{noon_fbn} طلب</b></div>
@@ -172,7 +184,7 @@ for code in code_order:
         st.image(main_img, width=200)
 
     # =========================
-    # 🔥 تحليل لكل كود (نهائي + ألوان + بولد + عدد الطلبات)
+    # 🔥 تحليل لكل كود
     # =========================
     min_price = df_code["invoice_price"].min()
     max_price = df_code["invoice_price"].max()
