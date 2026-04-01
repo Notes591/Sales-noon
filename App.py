@@ -33,7 +33,6 @@ st.markdown("""
 .small {color: gray; font-size: 12px;}
 .order-type {font-size:12px; color:#555;}
 .divider {border-top: 1px solid #ccc; margin: 10px 0;}
-.summary {font-size:14px; font-weight:bold; margin-bottom:20px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -82,6 +81,7 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
+    # تصنيف الطلبات بناء على عمود "حاوية كاملة الحمولة"
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
         if container == "FSAB":
@@ -107,19 +107,12 @@ except:
     df_trendyol = pd.DataFrame()
 
 # =========================
-# إزالة التكرارات لأمازون وتريندول قبل دمج Coding
+# Merge all stores
 # =========================
-df_amazon_unique = df_amazon.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
-df_trendyol_unique = df_trendyol.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
-df_noon_only = df_noon
+df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 
 # =========================
-# دمج كل المتاجر
-# =========================
-df = pd.concat([df_noon_only, df_amazon_unique, df_trendyol_unique], ignore_index=True)
-
-# =========================
-# دمج Coding
+# Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
 coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
@@ -132,28 +125,6 @@ search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
 if search:
     df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
             df["unified_code"].astype(str).str.contains(search)]
-
-# =========================
-# ملخص إجمالي الطلبات لكل متجر
-# =========================
-summary = []
-
-for store_name in ["Noon","Amazon","Trendyol"]:
-    df_store = df[df["store"] == store_name]
-
-    if store_name == "Amazon":
-        # استخدم عمود "رقم الطلب من أمازون" لحساب العدد الفعلي
-        total = df_store["رقم الطلب من أمازون"].nunique()
-        normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")]["رقم الطلب من أمازون"].nunique()
-        storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")]["رقم الطلب من أمازون"].nunique()
-    else:
-        total = df_store.shape[0]
-        normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")].shape[0]
-        storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")].shape[0]
-
-    summary.append(f"{store_name}: {total} | عادي: {normal} | تخزين: {storage}")
-
-st.markdown("<div class='summary'>" + " &nbsp; &nbsp; ".join(summary) + "</div>", unsafe_allow_html=True)
 
 # =========================
 # ترتيب الأكواد
