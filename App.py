@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-import matplotlib.pyplot as plt
 
 # =========================
 # إعداد الصفحة
@@ -105,17 +104,6 @@ if search:
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
-# رسم بياني عام
-# =========================
-st.subheader("📈 المبيعات العامة")
-
-sales_chart = df.groupby("store").size()
-
-fig, ax = plt.subplots()
-ax.bar(sales_chart.index, sales_chart.values)
-st.pyplot(fig)
-
-# =========================
 # عرض الأكواد
 # =========================
 for code in code_order:
@@ -150,7 +138,7 @@ for code in code_order:
     # SKU Cards
     with col2:
         # ترتيب تنازلي حسب عدد الطلبات
-        sku_stats = df_code.groupby(["store","partner_sku"]).agg(
+        sku_stats = df_code.groupby(["store","partner_sku","invoice_price"]).agg(
             orders=("partner_sku","count"),
             image=("image_url","first")
         ).reset_index().sort_values(by="orders", ascending=False)
@@ -167,6 +155,6 @@ for code in code_order:
                         <div class="card">
                             <img src="{image}" width="60%">
                             <div class="title">{row['partner_sku']}</div>
-                            <div class="small">📦 {row['orders']} طلب</div>
+                            <div class="small">📦 {row['orders']} طلب | 💰 {row['invoice_price']}</div>
                         </div>
                         """, unsafe_allow_html=True)
