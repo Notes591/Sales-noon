@@ -86,7 +86,9 @@ try:
         "مبلغ المنتج": "invoice_price"
     })
     df_amazon["store"] = "Amazon"
-    df_amazon["image_url"] = None
+    # العمود image_url موجود الآن في Excel
+    if "image_url" not in df_amazon.columns:
+        df_amazon["image_url"] = None
 
     # =========================
     # تمييز نوع الطلب في Amazon
