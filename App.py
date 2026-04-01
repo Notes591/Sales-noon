@@ -107,7 +107,7 @@ except:
     df_trendyol = pd.DataFrame()
 
 # =========================
-# إزالة التكرارات قبل دمج Coding
+# إزالة التكرارات لأمازون وتريندول قبل دمج Coding
 # =========================
 df_amazon_unique = df_amazon.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
 df_trendyol_unique = df_trendyol.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
@@ -134,20 +134,23 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# ملخص إجمالي الطلبات لكل متجر بعد إزالة التكرارات
+# ملخص إجمالي الطلبات لكل متجر
 # =========================
 summary = []
 
 for store_name in ["Noon","Amazon","Trendyol"]:
     df_store = df[df["store"] == store_name]
 
-    # إزالة التكرارات فقط لأمازون وتريندول (مرة واحدة)
-    if store_name in ["Amazon","Trendyol"]:
-        df_store = df_store.drop_duplicates(subset=["partner_sku", "invoice_price", "order_type"])
+    if store_name == "Amazon":
+        # استخدم عمود "رقم الطلب" لحساب العدد الفعلي
+        total = df_store["رقم الطلب"].nunique()
+        normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")]["رقم الطلب"].nunique()
+        storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")]["رقم الطلب"].nunique()
+    else:
+        total = df_store.shape[0]
+        normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")].shape[0]
+        storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")].shape[0]
 
-    total = df_store.shape[0]
-    normal = df_store[df_store["order_type"].str.lower().str.contains("عادي")].shape[0]
-    storage = df_store[df_store["order_type"].str.lower().str.contains("تخزين")].shape[0]
     summary.append(f"{store_name}: {total} | عادي: {normal} | تخزين: {storage}")
 
 st.markdown("<div class='summary'>" + " &nbsp; &nbsp; ".join(summary) + "</div>", unsafe_allow_html=True)
