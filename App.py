@@ -23,16 +23,19 @@ st.markdown("""
 
 .card {
     background-color: white;
-    padding: 10px;
+    padding: 5px;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    margin-bottom: 10px;
+    text-align: center;
+    margin-bottom: 5px;
 }
 .title {font-weight: bold; font-size: 14px;}
 .small {color: gray; font-size: 12px;}
-.divider {border-top: 1px solid #ccc; margin: 10px 0;}
-.price-list {margin-top: 5px; font-size: 13px; color: #333;}
-.price-list div {margin-bottom: 3px;}
+
+.divider {
+    border-top: 1px solid #ccc;
+    margin: 10px 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -55,7 +58,6 @@ client = gspread.authorize(creds)
 df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
 if "base_price" in df_noon.columns:
     df_noon["invoice_price"] = pd.to_numeric(df_noon["base_price"], errors="coerce")
-
 df_noon["store"] = "Noon"
 df_noon["partner_sku"] = df_noon["partner_sku"].astype(str)
 
@@ -103,7 +105,6 @@ code_order = df.groupby("unified_code").size().sort_values(ascending=False).inde
 # عرض الأكواد
 # =========================
 for code in code_order:
-
     df_code = df[df["unified_code"] == code]
     total_orders = df_code.shape[0]
     noon_orders = df_code[df_code["store"] == "Noon"].shape[0]
@@ -120,7 +121,7 @@ for code in code_order:
     <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
-        <div>🟡 Noon: {noon_orders} | 🔵 Amazon: {amazon_orders}</div>
+        <div>🟡 Noon: {noon_orders} طلب | 🔵 Amazon: {amazon_orders} طلب</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -131,28 +132,33 @@ for code in code_order:
         st.image(main_img, width=200)
 
     # =========================
-    # SKU Cards مع جميع الأسعار
+    # عرض SKU Cards مع دمج الأسعار المختلفة تحت نفس الصورة
     # =========================
     with col2:
         for store_name in ["Noon","Amazon"]:
             df_store = df_code[df_code["store"] == store_name]
-            if not df_store.empty:
-                st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+            if df_store.empty:
+                continue
 
-                # group by SKU و invoice_price لحساب عدد الطلبات لكل سعر
-                price_group = df_store.groupby(["partner_sku","invoice_price"]).size().reset_index(name="orders")
-                images = df_store.groupby(["partner_sku","invoice_price"])["image_url"].first().to_dict()
+            st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+            cols = st.columns(4)
+            displayed_skus = set()
+            df_store_grouped = df_store.groupby(["partner_sku","invoice_price"]).agg(
+                orders=("partner_sku","count"),
+                image=("image_url","first")
+            ).reset_index().sort_values(by="orders", ascending=False)
 
-                cols = st.columns(4)
-                for i, row in price_group.iterrows():
+            for i, row in df_store_grouped.iterrows():
+                sku = row['partner_sku']
+                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
+                if sku not in displayed_skus:
+                    displayed_skus.add(sku)
                     with cols[i % 4]:
-                        image = images.get((row["partner_sku"], row["invoice_price"]), "https://via.placeholder.com/80")
-                        st.markdown(f"""
-                        <div class="card">
-                            <img src="{image}" width="60%">
-                            <div class="title">{row['partner_sku']}</div>
-                            <div class="small price-list">
-                                📦 {row['orders']} طلب | 💰 {row['invoice_price']}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+                        st.image(image, width=80)
+                        st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
+                        # كل الأسعار المختلفة تحت الصورة
+                        sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
+                        for _, r in sku_prices.iterrows():
+                            st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
