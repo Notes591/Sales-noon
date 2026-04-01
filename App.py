@@ -33,6 +33,16 @@ st.markdown("""
 .small {color: gray; font-size: 12px;}
 .order-type {font-size:12px; color:#555;}
 .divider {border-top: 1px solid #ccc; margin: 10px 0;}
+
+.metric-card {
+    background: white;
+    padding:15px;
+    border-radius:12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    text-align:center;
+}
+.metric-title {font-size:13px; color:gray;}
+.metric-value {font-size:22px; font-weight:bold;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -66,6 +76,7 @@ def classify_noon_order(row):
         return "طلب عادي (FBP)"
     else:
         return "تخزين (FBN)"
+
 df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
 df_noon["partner_sku"] = df_noon["sku"]
 
@@ -98,7 +109,7 @@ except:
     df_trendyol = pd.DataFrame()
 
 # =========================
-# Merge all stores
+# Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 
@@ -108,6 +119,44 @@ df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
 coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
 df = df.merge(coding, on="partner_sku", how="left")
+
+# =========================
+# 🔥 ANALYTICS
+# =========================
+total_orders = len(df)
+total_revenue = df["invoice_price"].sum()
+
+store_perf = df.groupby("store").agg(
+    orders=("store","count"),
+    revenue=("invoice_price","sum")
+).sort_values(by="orders", ascending=False)
+
+top_store = store_perf.index[0] if not store_perf.empty else "-"
+top_product = df["unified_code"].value_counts().idxmax() if "unified_code" in df else "-"
+
+avg_price = df["invoice_price"].mean()
+
+# =========================
+# عرض التحليلات
+# =========================
+st.subheader("📊 Analytics Overview")
+
+c1, c2, c3, c4, c5 = st.columns(5)
+
+with c1:
+    st.markdown(f"<div class='metric-card'><div class='metric-title'>إجمالي الطلبات</div><div class='metric-value'>{total_orders}</div></div>", unsafe_allow_html=True)
+
+with c2:
+    st.markdown(f"<div class='metric-card'><div class='metric-title'>الإيرادات</div><div class='metric-value'>{total_revenue:.0f} SAR</div></div>", unsafe_allow_html=True)
+
+with c3:
+    st.markdown(f"<div class='metric-card'><div class='metric-title'>أفضل Store</div><div class='metric-value'>{top_store}</div></div>", unsafe_allow_html=True)
+
+with c4:
+    st.markdown(f"<div class='metric-card'><div class='metric-title'>أفضل كود</div><div class='metric-value'>{top_product}</div></div>", unsafe_allow_html=True)
+
+with c5:
+    st.markdown(f"<div class='metric-card'><div class='metric-title'>متوسط السعر</div><div class='metric-value'>{avg_price:.1f}</div></div>", unsafe_allow_html=True)
 
 # =========================
 # 🔍 بحث
@@ -123,7 +172,7 @@ if search:
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
-# عرض الأكواد
+# عرض الأكواد (نفس كودك بدون تغيير)
 # =========================
 for code in code_order:
     df_code = df[df["unified_code"] == code]
