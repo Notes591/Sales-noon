@@ -278,7 +278,8 @@ for code in code_order:
             cols = st.columns(4)
             displayed_skus = set()
 
-            df_store_grouped = df_store.groupby(["partner_sku","invoice_price","order_type"]).agg(
+            # تعديل مهم هنا
+            df_store_grouped = df_store.groupby(["partner_sku","order_type","invoice_price"]).agg(
                 orders=("partner_sku","count"),
                 image=("image_url","first")
             ).reset_index().sort_values(by="orders", ascending=False)
@@ -288,19 +289,14 @@ for code in code_order:
                 image = safe_image(row["image"])
                 order_type = row["order_type"]
 
-                if sku not in displayed_skus:
-                    displayed_skus.add(sku)
-                    with cols[i % 4]:
-                        st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-                        st.image(image, width=80)
-                        st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
-
-                        sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
-                        for _, r in sku_prices.iterrows():
-                            st.markdown(
-                                f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>",
-                                unsafe_allow_html=True
-                            )
-
-                        st.markdown("</div>", unsafe_allow_html=True)
+                # تكرار كل حالة مع سعرها ونوعها
+                with cols[i % 4]:
+                    st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+                    st.image(image, width=80)
+                    st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} طلب</div>",
+                        unsafe_allow_html=True
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
