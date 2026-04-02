@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+import requests
 
 # =========================
 # إعداد الصفحة
@@ -37,6 +38,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🚀 Advanced Product Dashboard")
+
+# =========================
+# ✅ Safe Image Function
+# =========================
+def safe_image(url):
+    placeholder = "https://via.placeholder.com/250"
+    try:
+        if not url or str(url).strip() == "":
+            return placeholder
+
+        # اختبار الرابط بسرعة
+        response = requests.head(url, timeout=3)
+        if response.status_code == 200:
+            return url
+        else:
+            return placeholder
+    except:
+        return placeholder
 
 # =========================
 # Auth
@@ -81,7 +100,6 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
-    # تصنيف الطلبات بناء على عمود "حاوية كاملة الحمولة"
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
         if container == "FSAB":
@@ -144,7 +162,7 @@ for code in code_order:
     color_class = "green" if total_orders >= 50 else "red"
 
     img = df_code["image_url"].dropna()
-    main_img = img.iloc[0] if not img.empty else "https://via.placeholder.com/250"
+    main_img = safe_image(img.iloc[0]) if not img.empty else "https://via.placeholder.com/250"
 
     st.markdown(f"""
     <div class="big-card {color_class}">
@@ -171,6 +189,7 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
             displayed_skus = set()
+
             df_store_grouped = df_store.groupby(["partner_sku","invoice_price","order_type"]).agg(
                 orders=("partner_sku","count"),
                 image=("image_url","first")
@@ -178,8 +197,9 @@ for code in code_order:
 
             for i, row in df_store_grouped.iterrows():
                 sku = row['partner_sku']
-                image = row["image"] if pd.notna(row["image"]) else "https://via.placeholder.com/80"
+                image = safe_image(row["image"])
                 order_type = row["order_type"]
+
                 if sku not in displayed_skus:
                     displayed_skus.add(sku)
                     with cols[i % 4]:
@@ -187,7 +207,9 @@ for code in code_order:
                         st.image(image, width=80)
                         st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                         st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
+
                         sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
                         for _, r in sku_prices.iterrows():
                             st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
+
                         st.markdown("</div>", unsafe_allow_html=True)
