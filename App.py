@@ -34,13 +34,19 @@ st.markdown("""
 .small {color: gray; font-size: 12px;}
 .order-type {font-size:12px; color:#555;}
 .divider {border-top: 1px solid #ccc; margin: 10px 0;}
+.summary {
+    padding:15px;
+    border-radius:12px;
+    background:#f5f5f5;
+    margin-bottom:20px;
+}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🚀 Advanced Product Dashboard")
 
 # =========================
-# ✅ Safe Image Function
+# Safe Image
 # =========================
 def safe_image(url):
     placeholder = "https://via.placeholder.com/250"
@@ -78,11 +84,11 @@ df_noon["sku"] = df_noon["sku"].astype(str)
 def classify_noon_order(row):
     fbn = str(row.get("is_fbn","")).strip().lower()
     if "fulfilled by noon" in fbn:
-        return "تخزين (FBN)"
+        return "تخزين"
     elif "fulfilled by partner" in fbn:
-        return "طلب عادي (FBP)"
+        return "عادي"
     else:
-        return "تخزين (FBN)"
+        return "تخزين"
 df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
 df_noon["partner_sku"] = df_noon["sku"]
 
@@ -123,14 +129,39 @@ except:
     df_trendyol = pd.DataFrame()
 
 # =========================
-# Merge all stores
+# Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 
-# =========================
-# ✅ تنظيف الأسعار
-# =========================
+# تنظيف الأسعار
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
+
+# =========================
+# 🔥 ملخص عام
+# =========================
+summary_data = []
+
+for store in ["Noon","Amazon","Trendyol"]:
+    df_store = df[df["store"] == store]
+    total = df_store.shape[0]
+    normal = df_store[df_store["order_type"].str.contains("عادي")].shape[0]
+    storage = df_store[df_store["order_type"].str.contains("تخزين")].shape[0]
+
+    summary_data.append((store, total, normal, storage))
+
+st.markdown("<div class='summary'><b>📊 ملخص عام:</b></div>", unsafe_allow_html=True)
+
+cols = st.columns(3)
+for i, (store, total, normal, storage) in enumerate(summary_data):
+    with cols[i]:
+        st.markdown(f"""
+        <div class="card">
+            <div class="title">{store}</div>
+            <div>📦 إجمالي: {total}</div>
+            <div class="small">عادي: {normal}</div>
+            <div class="small">تخزين: {storage}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # =========================
 # Coding
@@ -153,25 +184,22 @@ if search:
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
-# عرض الأكواد
+# عرض الأكواد (زي ما هو بدون تغيير)
 # =========================
 for code in code_order:
     df_code = df[df["unified_code"] == code]
     total_orders = df_code.shape[0]
 
-    # Noon
     df_noon_store = df_code[df_code["store"] == "Noon"]
     noon_orders = df_noon_store.shape[0]
     noon_normal = df_noon_store[df_noon_store["order_type"].str.contains("عادي")].shape[0]
     noon_storage = df_noon_store[df_noon_store["order_type"].str.contains("تخزين")].shape[0]
 
-    # Amazon
     df_amazon_store = df_code[df_code["store"] == "Amazon"]
     amazon_orders = df_amazon_store.shape[0]
     amazon_normal = df_amazon_store[df_amazon_store["order_type"].str.contains("عادي")].shape[0]
     amazon_storage = df_amazon_store[df_amazon_store["order_type"].str.contains("تخزين")].shape[0]
 
-    # Trendyol
     df_trendyol_store = df_code[df_code["store"] == "Trendyol"]
     trendyol_orders = df_trendyol_store.shape[0]
     trendyol_normal = df_trendyol_store[df_trendyol_store["order_type"].str.contains("عادي")].shape[0]
