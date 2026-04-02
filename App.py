@@ -47,7 +47,6 @@ def safe_image(url):
     try:
         if not url or str(url).strip() == "":
             return placeholder
-
         response = requests.head(url, timeout=3)
         if response.status_code == 200:
             return url
@@ -129,7 +128,7 @@ except:
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 
 # =========================
-# ✅ تنظيف الأسعار (حل المشكلة نهائي)
+# ✅ تنظيف الأسعار
 # =========================
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
@@ -159,9 +158,24 @@ code_order = df.groupby("unified_code").size().sort_values(ascending=False).inde
 for code in code_order:
     df_code = df[df["unified_code"] == code]
     total_orders = df_code.shape[0]
-    noon_orders = df_code[df_code["store"] == "Noon"].shape[0]
-    amazon_orders = df_code[df_code["store"] == "Amazon"].shape[0]
-    trendyol_orders = df_code[df_code["store"] == "Trendyol"].shape[0]
+
+    # Noon
+    df_noon_store = df_code[df_code["store"] == "Noon"]
+    noon_orders = df_noon_store.shape[0]
+    noon_normal = df_noon_store[df_noon_store["order_type"].str.contains("عادي")].shape[0]
+    noon_storage = df_noon_store[df_noon_store["order_type"].str.contains("تخزين")].shape[0]
+
+    # Amazon
+    df_amazon_store = df_code[df_code["store"] == "Amazon"]
+    amazon_orders = df_amazon_store.shape[0]
+    amazon_normal = df_amazon_store[df_amazon_store["order_type"].str.contains("عادي")].shape[0]
+    amazon_storage = df_amazon_store[df_amazon_store["order_type"].str.contains("تخزين")].shape[0]
+
+    # Trendyol
+    df_trendyol_store = df_code[df_code["store"] == "Trendyol"]
+    trendyol_orders = df_trendyol_store.shape[0]
+    trendyol_normal = df_trendyol_store[df_trendyol_store["order_type"].str.contains("عادي")].shape[0]
+    trendyol_storage = df_trendyol_store[df_trendyol_store["order_type"].str.contains("تخزين")].shape[0]
 
     color_class = "green" if total_orders >= 50 else "red"
 
@@ -173,9 +187,9 @@ for code in code_order:
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
         <div style="display:flex; gap:20px; margin-top:10px;">
-            <div>🟡 Noon: <b>{noon_orders}</b></div>
-            <div>🔵 Amazon: <b>{amazon_orders}</b></div>
-            <div>🟣 Trendyol: <b>{trendyol_orders}</b></div>
+            <div>🟡 Noon: <b>{noon_orders}</b> (عادي: {noon_normal} | تخزين: {noon_storage})</div>
+            <div>🔵 Amazon: <b>{amazon_orders}</b> (عادي: {amazon_normal} | تخزين: {amazon_storage})</div>
+            <div>🟣 Trendyol: <b>{trendyol_orders}</b> (عادي: {trendyol_normal} | تخزين: {trendyol_storage})</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
