@@ -184,7 +184,7 @@ if search:
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
 
 # =========================
-# عرض الأكواد (زي ما هو بدون تغيير)
+# عرض الأكواد
 # =========================
 for code in code_order:
     df_code = df[df["unified_code"] == code]
@@ -222,9 +222,51 @@ for code in code_order:
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns([1,4])
+    # 🔥 هنا التعديل فقط
+    col1, col2, col3 = st.columns([1,3,2])
+
     with col1:
         st.image(main_img, width=200)
+
+    with col3:
+        try:
+            top_store = df_code["store"].value_counts().idxmax()
+        except:
+            top_store = "-"
+
+        try:
+            min_row = df_code.loc[df_code["invoice_price"].idxmin()]
+            min_text = f"{min_row['invoice_price']:.2f} ({min_row['store']} - {min_row['partner_sku']})"
+        except:
+            min_text = "-"
+
+        try:
+            max_row = df_code.loc[df_code["invoice_price"].idxmax()]
+            max_text = f"{max_row['invoice_price']:.2f} ({max_row['store']} - {max_row['partner_sku']})"
+        except:
+            max_text = "-"
+
+        try:
+            best_sku = df_code["partner_sku"].value_counts().idxmax()
+        except:
+            best_sku = "-"
+
+        try:
+            avg_price = df_code["invoice_price"].mean()
+            avg_price = f"{avg_price:.2f}"
+        except:
+            avg_price = "-"
+
+        st.markdown(f"""
+        <div class="card">
+            <div class="title">📊 تحليل</div>
+            <div class="small">🏆 أكتر متجر: {top_store}</div>
+            <div class="small">💰 أقل سعر: {min_text}</div>
+            <div class="small">💎 أعلى سعر: {max_text}</div>
+            <div class="small">📦 أقوى SKU: {best_sku}</div>
+            <div class="small">📊 متوسط السعر: {avg_price}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
