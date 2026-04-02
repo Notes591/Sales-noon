@@ -48,7 +48,6 @@ def safe_image(url):
         if not url or str(url).strip() == "":
             return placeholder
 
-        # اختبار الرابط بسرعة
         response = requests.head(url, timeout=3)
         if response.status_code == 200:
             return url
@@ -128,6 +127,11 @@ except:
 # Merge all stores
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
+
+# =========================
+# ✅ تنظيف الأسعار (حل المشكلة نهائي)
+# =========================
+df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
 # Coding
@@ -210,6 +214,9 @@ for code in code_order:
 
                         sku_prices = df_store_grouped[df_store_grouped["partner_sku"] == sku]
                         for _, r in sku_prices.iterrows():
-                            st.markdown(f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>", unsafe_allow_html=True)
+                            st.markdown(
+                                f"<div class='small'>💰 {r['invoice_price']:.2f} | 📦 {r['orders']} طلب</div>",
+                                unsafe_allow_html=True
+                            )
 
                         st.markdown("</div>", unsafe_allow_html=True)
