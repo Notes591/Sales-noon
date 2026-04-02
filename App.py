@@ -36,6 +36,12 @@ st.markdown("""
     border-radius:12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
+.summary {
+    padding:15px;
+    border-radius:12px;
+    background:#f5f5f5;
+    margin-bottom:20px;
+}
 .title {font-weight: bold; font-size: 14px;}
 .small {color: gray; font-size: 12px;}
 .order-type {font-size:12px; color:#555;}
@@ -117,6 +123,31 @@ df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
+# 🔥 ملخص عام
+# =========================
+summary_data = []
+for store in ["Noon","Amazon","Trendyol"]:
+    df_store = df[df["store"] == store]
+    total = df_store.shape[0]
+    normal = df_store[df_store["order_type"].str.contains("عادي")].shape[0]
+    storage = df_store[df_store["order_type"].str.contains("تخزين")].shape[0]
+    summary_data.append((store, total, normal, storage))
+
+st.markdown("<div class='summary'><b>📊 ملخص عام:</b></div>", unsafe_allow_html=True)
+
+cols = st.columns(3)
+for i, (store, total, normal, storage) in enumerate(summary_data):
+    with cols[i]:
+        st.markdown(f"""
+        <div class="card">
+            <div class="title">{store}</div>
+            <div>📦 إجمالي: {total}</div>
+            <div class="small">عادي: {normal}</div>
+            <div class="small">تخزين: {storage}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# =========================
 # Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
@@ -144,16 +175,11 @@ for code in code_order:
 
     total_orders = df_code.shape[0]
 
-    # تحليل عام
     top_store = df_code["store"].value_counts().idxmax()
-
     min_row = df_code.loc[df_code["invoice_price"].idxmin()]
     max_row = df_code.loc[df_code["invoice_price"].idxmax()]
-
     best_sku = df_code["partner_sku"].value_counts().idxmax()
     avg_price = df_code["invoice_price"].mean()
-
-    insight = "🔥 المنتج قوي" if total_orders > 50 else "⚠️ محتاج تحسين مبيعات"
 
     color_class = "green" if total_orders >= 50 else "red"
 
@@ -169,11 +195,9 @@ for code in code_order:
 
     col1, col2 = st.columns([1,3])
 
-    # صورة
     with col1:
         st.image(main_img, width=200)
 
-    # 🔥 التحليل هنا
     with col2:
         st.markdown(f"""
         <div class="analysis">
@@ -184,15 +208,10 @@ for code in code_order:
         💎 أعلى سعر: <b>{max_row['invoice_price']:.2f}</b> ({max_row['store']} - {max_row['partner_sku']})<br>
 
         📦 أقوى SKU: <b>{best_sku}</b><br>
-        📊 متوسط السعر: <b>{avg_price:.2f}</b><br><br>
-
-        {insight}
+        📊 متوسط السعر: <b>{avg_price:.2f}</b><br>
         </div>
         """, unsafe_allow_html=True)
 
-    # =========================
-    # باقي العرض زي ما هو
-    # =========================
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
         if df_store.empty:
