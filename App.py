@@ -220,9 +220,8 @@ for code in code_order:
             <div>🟣 Trendyol: <b>{trendyol_orders}</b> (عادي: {trendyol_normal} | تخزين: {trendyol_storage})</div>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """ , unsafe_allow_html=True)
 
-    # 🔥 هنا التعديل فقط
     col1, col2, col3 = st.columns([1,3,2])
 
     with col1:
@@ -278,18 +277,22 @@ for code in code_order:
             cols = st.columns(4)
             displayed_skus = set()
 
-            # تعديل مهم هنا
+            # تعديل مهم: ترتيب "عادي" ثم "تخزين"
             df_store_grouped = df_store.groupby(["partner_sku","order_type","invoice_price"]).agg(
                 orders=("partner_sku","count"),
                 image=("image_url","first")
             ).reset_index().sort_values(by="orders", ascending=False)
+
+            df_store_grouped = pd.concat([
+                df_store_grouped[df_store_grouped["order_type"] == "عادي"],
+                df_store_grouped[df_store_grouped["order_type"] == "تخزين"]
+            ], ignore_index=True)
 
             for i, row in df_store_grouped.iterrows():
                 sku = row['partner_sku']
                 image = safe_image(row["image"])
                 order_type = row["order_type"]
 
-                # تكرار كل حالة مع سعرها ونوعها
                 with cols[i % 4]:
                     st.markdown(f"<div class='card'>", unsafe_allow_html=True)
                     st.image(image, width=80)
