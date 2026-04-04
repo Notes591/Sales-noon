@@ -73,6 +73,16 @@ creds = Credentials.from_service_account_info(
 client = gspread.authorize(creds)
 
 # =========================
+# 🔥 NEW: Load Stock
+# =========================
+try:
+    df_stock = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Stock").get_all_records())
+    df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
+    df_stock["STOCK"] = pd.to_numeric(df_stock["STOCK"], errors="coerce").fillna(0)
+except:
+    df_stock = pd.DataFrame(columns=["SKU","STOCK"])
+
+# =========================
 # Load Noon
 # =========================
 df_noon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Sales").get_all_records())
@@ -135,65 +145,57 @@ df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
-# ✅ تحميل المخزون (إضافة فقط)
+# 🔥 NEW: Merge Stock
 # =========================
-try:
-    stock_df = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Stock").get_all_records())
-    stock_df.columns = ["partner_sku", "stock"]
-    stock_df["partner_sku"] = stock_df["partner_sku"].astype(str).str.strip()
-    stock_df["stock"] = pd.to_numeric(stock_df["stock"], errors="coerce").fillna(0)
-except:
-    stock_df = pd.DataFrame(columns=["partner_sku","stock"])
-
-df = df.merge(stock_df, on="partner_sku", how="left")
-df["stock"] = df["stock"].fillna(0)
+df["partner_sku"] = df["partner_sku"].astype(str).str.strip()
+df = df.merge(df_stock, left_on="partner_sku", right_on="SKU", how="left")
+df["STOCK"] = df["STOCK"].fillna(0)
 
 # =========================
-# 🚨 استخراج المنتجات الحرجة (إضافة فقط)
+# Coding
 # =========================
-critical_items = []
-
-sku_analysis = df.groupby("partner_sku").agg(
-    stock=("stock", "max"),
-    storage_orders=("order_type", lambda x: (x == "تخزين").sum()),
-    image=("image_url","first")
-).reset_index()
-
-for _, r in sku_analysis.iterrows():
-    if r["storage_orders"] > 0:
-        daily = r["storage_orders"] / 30
-        days = r["stock"] / daily if daily > 0 else 999
-
-        if days < 15:
-            critical_items.append({
-                "sku": r["partner_sku"],
-                "days": int(days),
-                "stock": int(r["stock"]),
-                "image": r["image"]
-            })
+coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
+coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
+df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
-# 🚨 Slider (إضافة فقط)
+# 🔍 بحث
 # =========================
-if critical_items:
-    st.markdown("## 🚨 منتجات تحتاج تخزين عاجل")
-
-    slider_html = '<div style="display:flex; overflow-x:auto; gap:15px;">'
-
-    for item in critical_items:
-        slider_html += f"""
-        <div style="min-width:180px; background:white; padding:10px; border-radius:10px; text-align:center;">
-            <img src="{safe_image(item['image'])}" width="120"><br>
-            <b>{item['sku']}</b><br>
-            📦 {item['stock']}<br>
-            ⏳ {item['days']} يوم
-        </div>
-        """
-
-    slider_html += "</div>"
-
-    st.markdown(slider_html, unsafe_allow_html=True)
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+if search:
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
+            df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# (باقي كودك زي ما هو 100% بدون أي تعديل)
+# عرض الأكواد
 # =========================
+code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
+
+for code in code_order:
+    df_code = df[df["unified_code"] == code]
+
+    st.markdown(f"<div class='title'>🆔 {code}</div>", unsafe_allow_html=True)
+
+    cols = st.columns(4)
+
+    df_store_grouped = df_code.groupby(
+        ["partner_sku","order_type","invoice_price","STOCK"]
+    ).agg(
+        orders=("partner_sku","count"),
+        image=("image_url","first")
+    ).reset_index()
+
+    for i, row in df_store_grouped.iterrows():
+        with cols[i % 4]:
+            st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+            st.image(safe_image(row["image"]), width=80)
+            st.markdown(f"<div class='title'>{row['partner_sku']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='order-type'>{row['order_type']}</div>", unsafe_allow_html=True)
+
+            # 🔥 إضافة المخزون هنا
+            st.markdown(
+                f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} | 🏬 Stock: {int(row['STOCK'])}</div>",
+                unsafe_allow_html=True
+            )
+
+            st.markdown("</div>", unsafe_allow_html=True)
