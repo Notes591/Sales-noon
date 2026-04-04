@@ -153,8 +153,6 @@ except:
 # Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
-
-# تنظيف الأسعار
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
@@ -167,7 +165,6 @@ for store in ["Noon","Amazon","Trendyol"]:
     total = df_store.shape[0]
     normal = df_store[df_store["order_type"].str.contains("عادي")].shape[0]
     storage = df_store[df_store["order_type"].str.contains("تخزين")].shape[0]
-
     summary_data.append((store, total, normal, storage))
 
 st.markdown("<div class='summary'><b>📊 ملخص عام:</b></div>", unsafe_allow_html=True)
@@ -289,7 +286,7 @@ for code in code_order:
         """, unsafe_allow_html=True)
 
     # =========================
-    # عرض الصور الصغيرة مع المخزون
+    # عرض الصور الصغيرة مع المخزون (من غير تكرار SKU)
     # =========================
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
@@ -300,20 +297,15 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ترتيب "عادي" ثم "تخزين" حسب عدد الطلبات
-            df_store_grouped = df_store.groupby(["partner_sku","order_type","invoice_price"]).agg(
-                orders=("partner_sku","count"),
-                image=("image_url","first")
-            ).reset_index().sort_values(by="orders", ascending=False)
+            # دمج المخزون حسب SKU لتجنب التكرار
+            df_store_unique = df_store.groupby(["partner_sku","order_type","invoice_price","image_url"]).agg(
+                total_orders=("partner_sku","count")
+            ).reset_index().sort_values(by="total_orders", ascending=False)
 
-            df_store_grouped = pd.concat([
-                df_store_grouped[df_store_grouped["order_type"] == "عادي"],
-                df_store_grouped[df_store_grouped["order_type"] == "تخزين"]
-            ], ignore_index=True)
-
-            for i, row in df_store_grouped.iterrows():
+            # عرض كل SKU مرة واحدة فقط
+            for i, row in df_store_unique.iterrows():
                 sku = row['partner_sku']
-                image = safe_image(row["image"])
+                image = safe_image(row["image_url"])
                 order_type = row["order_type"]
 
                 # stock
@@ -328,28 +320,32 @@ for code in code_order:
                     st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
                     st.markdown(
-                        f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} طلب</div>",
+                        f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['total_orders']} طلب</div>",
                         unsafe_allow_html=True
                     )
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# Stock Slider على اليمين
+# Stock Slider على اليمين (بدون تكرار SKU)
 # =========================
 st.markdown("<h3>🛒 السلع قرب المخزون ينفذ (Noon & Amazon)</h3>", unsafe_allow_html=True)
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
 
 # دمج مع المخزون
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
-slider_items["days_remaining"] = slider_items["STOCK"] / slider_items.get("daily_sales", 1)  # daily_sales يمكن إضافتها في الشيت
+slider_items["days_remaining"] = slider_items["STOCK"] / slider_items.get("daily_sales", 1)
+
+# فلترة <= 15 يوم
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 
-# ترتيب: Noon أولاً ثم Amazon، حسب الطلبات
-slider_items["orders_count"] = slider_items.groupby("partner_sku")["partner_sku"].transform("count")
-slider_items = slider_items.sort_values(["store","orders_count"], ascending=[True, False])
+# الاحتفاظ بصف واحد لكل SKU
+slider_items_unique = slider_items.groupby(["partner_sku","store","image_url","STOCK"]).first().reset_index()
+
+# ترتيب: Noon أولاً ثم Amazon
+slider_items_unique = slider_items_unique.sort_values(["store","partner_sku"], ascending=[True, True])
 
 cols = st.columns(4)
-for i, row in slider_items.iterrows():
+for i, row in slider_items_unique.iterrows():
     with cols[i % 4]:
         st.image(safe_image(row["image_url"]), width=80)
         st.markdown(f"<div class='title'>{row['partner_sku']}</div>", unsafe_allow_html=True)
