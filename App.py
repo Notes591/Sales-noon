@@ -294,10 +294,10 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ التعديل الوحيد هنا
+            # ✅ التعديل هنا فقط
             df_store_unique = df_store.groupby(["partner_sku","order_type","image_url"]).agg(
                 total_orders=("partner_sku","count"),
-                prices=("invoice_price", lambda x: list(sorted(set(x))))
+                prices=("invoice_price", lambda x: x.value_counts().to_dict())
             ).reset_index().sort_values(by="total_orders", ascending=False)
 
             for i, row in df_store_unique.iterrows():
@@ -308,7 +308,10 @@ for code in code_order:
                 stock_row = df_stock[df_stock["SKU"] == sku]
                 stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
 
-                prices_html = "<br>".join([f"💰 {p:.2f}" for p in row["prices"]])
+                prices_html = "<br>".join([
+                    f"💰 {price:.2f} ({count} طلب)"
+                    for price, count in row["prices"].items()
+                ])
 
                 with cols[i % 4]:
                     st.markdown(f"<div class='card'>", unsafe_allow_html=True)
