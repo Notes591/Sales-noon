@@ -10,7 +10,7 @@ import requests
 st.set_page_config(page_title="📊 Advanced Product Dashboard", layout="wide")
 
 # =========================
-# CSS احترافي
+# CSS
 # =========================
 st.markdown("""
 <style>
@@ -118,7 +118,6 @@ try:
     })
 
     df_amazon["store"] = "Amazon"
-    df_amazon["image_url"] = df_amazon.get("image_url", None)
 
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
@@ -139,9 +138,8 @@ try:
     df_trendyol = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Trendyol").get_all_records())
 
     df_trendyol["store"] = "Trendyol"
-    df_trendyol["partner_sku"] = df_trendyol["Barcode"].astype(str).str.strip()
+    df_trendyol["partner_sku"] = df_trendyol["Barcode"].astype(str)
     df_trendyol["invoice_price"] = pd.to_numeric(df_trendyol["Unit Price"], errors="coerce")
-    df_trendyol["image_url"] = df_trendyol.get("image_url", None)
     df_trendyol["order_type"] = "عادي"
 
 except:
@@ -152,8 +150,10 @@ except:
 # =========================
 try:
     df_stock = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Stock").get_all_records())
-    df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
+
+    df_stock["SKU"] = df_stock["SKU"].astype(str)
     df_stock["STOCK"] = pd.to_numeric(df_stock["STOCK"], errors="coerce").fillna(0)
+
 except:
     df_stock = pd.DataFrame(columns=["SKU", "STOCK"])
 
@@ -161,25 +161,17 @@ except:
 # Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
+
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
 # Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
-coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
+
+coding["partner_sku"] = coding["partner_sku"].astype(str)
+
 df = df.merge(coding, on="partner_sku", how="left")
-
-# =========================
-# 🔍 بحث
-# =========================
-search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
-
-if search:
-    df = df[
-        df["partner_sku"].str.contains(search, case=False, na=False) |
-        df["unified_code"].astype(str).str.contains(search)
-    ]
 
 # =========================
 # ترتيب الأكواد
@@ -193,60 +185,53 @@ for code in code_order:
 
     df_code = df[df["unified_code"] == code]
 
-    total_orders = df_code.shape[0]
-
-    color_class = "green" if total_orders >= 50 else "red"
-
-    img = df_code["image_url"].dropna()
-
-    main_img = safe_image(img.iloc[0]) if not img.empty else "https://via.placeholder.com/250"
-
     st.markdown(f"""
-    <div class="big-card {color_class}">
+    <div class="big-card green">
         <div class="title">🆔 {code}</div>
-        <div>📦 إجمالي الطلبات: {total_orders}</div>
+        <div>📦 إجمالي الطلبات: {df_code.shape[0]}</div>
     </div>
-    """ , unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns([1,4])
+    col1, col2 = st.columns([1,3])
 
     with col1:
-        st.image(main_img, width=200)
+        img = df_code["image_url"].dropna()
+        if not img.empty:
+            st.image(safe_image(img.iloc[0]), width=200)
 
-    for store_name in ["Noon","Amazon","Trendyol"]:
+    with col2:
 
-        df_store = df_code[df_code["store"] == store_name]
+        for store_name in ["Noon","Amazon","Trendyol"]:
 
-        if df_store.empty:
-            continue
+            df_store = df_code[df_code["store"] == store_name]
 
-        with col2:
+            if df_store.empty:
+                continue
 
-            st.markdown(
-                f"<div class='divider'></div><b>{store_name} طلبات:</b>",
-                unsafe_allow_html=True
-            )
+            st.markdown(f"<div class='divider'></div><b>{store_name}</b>", unsafe_allow_html=True)
 
             cols = st.columns(4)
 
-            df_grouped = df_store.groupby(
+            # 🔥 هنا التعديل المهم
+            df_store_unique = df_store.groupby(
                 ["partner_sku","order_type","invoice_price"]
             ).agg(
                 total_orders=("partner_sku","count"),
                 image_url=("image_url","first")
             ).reset_index()
 
-            sku_list = df_grouped["partner_sku"].unique()
+            sku_list = df_store_unique["partner_sku"].unique()
 
             for i, sku in enumerate(sku_list):
 
-                df_sku = df_grouped[
-                    df_grouped["partner_sku"] == sku
+                df_sku = df_store_unique[
+                    df_store_unique["partner_sku"] == sku
                 ]
 
                 image = safe_image(df_sku["image_url"].iloc[0])
 
                 stock_row = df_stock[df_stock["SKU"] == sku]
+
                 stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
 
                 with cols[i % 4]:
@@ -267,7 +252,9 @@ for code in code_order:
                     )
 
                     # عادي
-                    df_normal = df_sku[df_sku["order_type"] == "عادي"]
+                    df_normal = df_sku[
+                        df_sku["order_type"] == "عادي"
+                    ]
 
                     if not df_normal.empty:
 
@@ -284,7 +271,9 @@ for code in code_order:
                             )
 
                     # تخزين
-                    df_storage = df_sku[df_sku["order_type"] == "تخزين"]
+                    df_storage = df_sku[
+                        df_sku["order_type"] == "تخزين"
+                    ]
 
                     if not df_storage.empty:
 
@@ -301,3 +290,49 @@ for code in code_order:
                             )
 
                     st.markdown("</div>", unsafe_allow_html=True)
+
+# =========================
+# Sidebar
+# =========================
+st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
+
+slider_items = df.merge(
+    df_stock,
+    left_on="partner_sku",
+    right_on="SKU",
+    how="inner"
+)
+
+slider_items["daily_sales"] = 1
+
+slider_items["days_remaining"] = (
+    slider_items["STOCK"] /
+    slider_items["daily_sales"]
+)
+
+slider_items = slider_items[
+    slider_items["days_remaining"] <= 15
+]
+
+slider_items = slider_items.drop_duplicates("partner_sku")
+
+for _, row in slider_items.iterrows():
+
+    st.sidebar.markdown("---")
+
+    st.sidebar.image(
+        safe_image(row["image_url"]),
+        width=100
+    )
+
+    st.sidebar.markdown(
+        f"**{row['partner_sku']}**"
+    )
+
+    st.sidebar.markdown(
+        f"📦 Stock: {int(row['STOCK'])}"
+    )
+
+    st.sidebar.markdown(
+        f"⏳ أيام متبقية: {row['days_remaining']:.1f}"
+    )
