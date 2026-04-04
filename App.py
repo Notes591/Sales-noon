@@ -294,7 +294,7 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ التعديل هنا: عدم تكرار SKU، عرض كل سعر ونوع أسفل بعض
+            # ✅ التعديل الرئيسي: عدم تكرار الصورة، عرض كل سعر تحت الآخر
             df_store_unique = df_store.groupby(
                 ["partner_sku","order_type","invoice_price","image_url"]
             ).agg(
@@ -304,25 +304,30 @@ for code in code_order:
                 ascending=[True,True,False]
             )
 
+            sku_images = {}
             for i, row in df_store_unique.iterrows():
                 sku = row['partner_sku']
-                image = safe_image(row["image_url"])
                 order_type = row["order_type"]
+                price = row["invoice_price"]
+                total = row["total_orders"]
 
                 stock_row = df_stock[df_stock["SKU"] == sku]
                 stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
 
                 with cols[i % 4]:
-                    st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-                    st.image(image, width=80)
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+
+                    # الصورة مرة واحدة فقط لكل SKU
+                    if sku not in sku_images:
+                        st.image(safe_image(row["image_url"]), width=80)
+                        sku_images[sku] = True
+
                     if stock is not None:
                         st.markdown(f"<div class='stock-badge'>Stock: {stock}</div>", unsafe_allow_html=True)
+
                     st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
-                    st.markdown(
-                        f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['total_orders']} طلب</div>",
-                        unsafe_allow_html=True
-                    )
+                    st.markdown(f"<div class='small'>💰 {price:.2f} | 📦 {total} طلب</div>", unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
