@@ -294,7 +294,7 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ التعديل هنا: ترتيب تنازلي حسب عدد الطلبات مع فصل العادي والتخزين
+            # ✅ التعديل هنا: ترتيب تنازلي حسب عدد الطلبات داخل كل متجر
             df_store_unique = (
                 df_store.groupby(["partner_sku", "order_type", "image_url"])
                 .agg(
@@ -302,7 +302,7 @@ for code in code_order:
                     prices=("invoice_price", lambda x: x.value_counts().to_dict())
                 )
                 .reset_index()
-                .sort_values(by=["order_type", "total_orders"], ascending=[True, False])
+                .sort_values(by="total_orders", ascending=False)  # <- ترتيب تنازلي حسب الطلبات فقط
             )
 
             for i, row in df_store_unique.iterrows():
