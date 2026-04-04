@@ -40,6 +40,17 @@ st.markdown("""
     background:#f5f5f5;
     margin-bottom:20px;
 }
+.stock-badge {
+    position: relative;
+    top: -20px;
+    left: -5px;
+    background-color: #ff5722;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,19 +148,26 @@ except:
     df_trendyol = pd.DataFrame()
 
 # =========================
+# Load Stock
+# =========================
+try:
+    df_stock = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Stock").get_all_records())
+    df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
+    df_stock["STOCK"] = pd.to_numeric(df_stock["STOCK"], errors="coerce").fillna(0)
+except:
+    df_stock = pd.DataFrame(columns=["SKU", "STOCK"])
+
+# =========================
 # Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
-
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
 # Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
-
 coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
-
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
@@ -211,22 +229,25 @@ for code in code_order:
 
             cols = st.columns(4)
 
-            df_store_grouped = df_store.groupby(
+            df_grouped = df_store.groupby(
                 ["partner_sku","order_type","invoice_price"]
             ).agg(
-                orders=("partner_sku","count"),
-                image=("image_url","first")
+                total_orders=("partner_sku","count"),
+                image_url=("image_url","first")
             ).reset_index()
 
-            sku_list = df_store_grouped["partner_sku"].unique()
+            sku_list = df_grouped["partner_sku"].unique()
 
             for i, sku in enumerate(sku_list):
 
-                df_sku = df_store_grouped[
-                    df_store_grouped["partner_sku"] == sku
+                df_sku = df_grouped[
+                    df_grouped["partner_sku"] == sku
                 ]
 
-                image = safe_image(df_sku["image"].iloc[0])
+                image = safe_image(df_sku["image_url"].iloc[0])
+
+                stock_row = df_stock[df_stock["SKU"] == sku]
+                stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
 
                 with cols[i % 4]:
 
@@ -234,15 +255,19 @@ for code in code_order:
 
                     st.image(image, width=80)
 
+                    if stock is not None:
+                        st.markdown(
+                            f"<div class='stock-badge'>Stock: {stock}</div>",
+                            unsafe_allow_html=True
+                        )
+
                     st.markdown(
                         f"<div class='title'>{sku}</div>",
                         unsafe_allow_html=True
                     )
 
                     # عادي
-                    df_normal = df_sku[
-                        df_sku["order_type"] == "عادي"
-                    ]
+                    df_normal = df_sku[df_sku["order_type"] == "عادي"]
 
                     if not df_normal.empty:
 
@@ -254,14 +279,12 @@ for code in code_order:
                         for _, row in df_normal.iterrows():
 
                             st.markdown(
-                                f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} طلب</div>",
+                                f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['total_orders']} طلب</div>",
                                 unsafe_allow_html=True
                             )
 
                     # تخزين
-                    df_storage = df_sku[
-                        df_sku["order_type"] == "تخزين"
-                    ]
+                    df_storage = df_sku[df_sku["order_type"] == "تخزين"]
 
                     if not df_storage.empty:
 
@@ -273,7 +296,7 @@ for code in code_order:
                         for _, row in df_storage.iterrows():
 
                             st.markdown(
-                                f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} طلب</div>",
+                                f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['total_orders']} طلب</div>",
                                 unsafe_allow_html=True
                             )
 
