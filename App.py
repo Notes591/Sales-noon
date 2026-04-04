@@ -7,7 +7,7 @@ import requests
 # =========================
 # إعداد الصفحة
 # =========================
-st.set_page_config(page_title="📊 Advanced Product Dashboard", layout="wide")
+st.set_page_config(page_title="", layout="wide")
 
 # =========================
 # CSS احترافي
