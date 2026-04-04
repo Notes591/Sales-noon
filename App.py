@@ -285,9 +285,6 @@ for code in code_order:
         </div>
         """, unsafe_allow_html=True)
 
-    # =========================
-    # عرض الصور الصغيرة مع المخزون (من غير تكرار SKU)
-    # =========================
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
         if df_store.empty:
@@ -297,18 +294,15 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # دمج المخزون حسب SKU لتجنب التكرار
             df_store_unique = df_store.groupby(["partner_sku","order_type","invoice_price","image_url"]).agg(
                 total_orders=("partner_sku","count")
             ).reset_index().sort_values(by="total_orders", ascending=False)
 
-            # عرض كل SKU مرة واحدة فقط
             for i, row in df_store_unique.iterrows():
                 sku = row['partner_sku']
                 image = safe_image(row["image_url"])
                 order_type = row["order_type"]
 
-                # stock
                 stock_row = df_stock[df_stock["SKU"] == sku]
                 stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
 
@@ -326,27 +320,30 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# Stock Slider على اليمين (بدون تكرار SKU)
+# 🛒 Sidebar (قرب المخزون ينتهي)
 # =========================
-st.markdown("<h3>🛒 السلع قرب المخزون ينفذ (Noon & Amazon)</h3>", unsafe_allow_html=True)
+st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
+
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
-
-# دمج مع المخزون
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
-slider_items["days_remaining"] = slider_items["STOCK"] / slider_items.get("daily_sales", 1)
 
-# فلترة <= 15 يوم
+slider_items["daily_sales"] = slider_items.get("daily_sales", 1)
+slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
+
+slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
+
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 
-# الاحتفاظ بصف واحد لكل SKU
-slider_items_unique = slider_items.groupby(["partner_sku","store","image_url","STOCK"]).first().reset_index()
+slider_items_unique = slider_items.groupby(
+    ["partner_sku","store","image_url","STOCK"]
+).first().reset_index()
 
-# ترتيب: Noon أولاً ثم Amazon
-slider_items_unique = slider_items_unique.sort_values(["store","partner_sku"], ascending=[True, True])
+slider_items_unique = slider_items_unique.sort_values("days_remaining")
 
-cols = st.columns(4)
-for i, row in slider_items_unique.iterrows():
-    with cols[i % 4]:
-        st.image(safe_image(row["image_url"]), width=80)
-        st.markdown(f"<div class='title'>{row['partner_sku']}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='stock-badge'>Stock: {row['STOCK']}</div>", unsafe_allow_html=True)
+with st.sidebar:
+    for _, row in slider_items_unique.iterrows():
+        st.markdown("---")
+        st.image(safe_image(row["image_url"]), width=100)
+        st.markdown(f"**{row['partner_sku']}**")
+        st.markdown(f"📦 Stock: {int(row['STOCK'])}")
+        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
