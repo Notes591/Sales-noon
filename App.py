@@ -294,9 +294,15 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            df_store_unique = df_store.groupby(["partner_sku","order_type","invoice_price","image_url"]).agg(
+            # ✅ التعديل هنا: عدم تكرار SKU، عرض كل سعر ونوع أسفل بعض
+            df_store_unique = df_store.groupby(
+                ["partner_sku","order_type","invoice_price","image_url"]
+            ).agg(
                 total_orders=("partner_sku","count")
-            ).reset_index().sort_values(by="total_orders", ascending=False)
+            ).reset_index().sort_values(
+                by=["partner_sku","order_type","invoice_price"],
+                ascending=[True,True,False]
+            )
 
             for i, row in df_store_unique.iterrows():
                 sku = row['partner_sku']
