@@ -7,7 +7,7 @@ import requests
 # =========================
 # إعداد الصفحة
 # =========================
-st.set_page_config(page_title="", layout="wide")
+st.set_page_config(page_title="📊 Advanced Product Dashboard", layout="wide")
 
 # =========================
 # CSS احترافي
@@ -54,7 +54,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("")
+st.title("🚀 Advanced Product Dashboard")
 
 # =========================
 # Safe Image
@@ -294,7 +294,7 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ التعديل: ترتيب العادي أولًا ثم التخزين حسب عدد الطلبات
+            # ✅ ترتيب العادي أولًا ثم التخزين حسب عدد الطلبات
             df_store_unique = df_store.groupby(["partner_sku","order_type","image_url"]).agg(
                 total_orders=("partner_sku","count"),
                 prices=("invoice_price", lambda x: x.value_counts().to_dict())
@@ -347,7 +347,9 @@ slider_items_unique = slider_items.groupby(
     ["partner_sku","store","image_url","STOCK"]
 ).first().reset_index()
 
-slider_items_unique = slider_items_unique.sort_values("days_remaining")
+# ✅ ترتيب السلايدر: Noon أولًا ثم Amazon
+slider_items_unique['store_rank'] = slider_items_unique['store'].apply(lambda x: 0 if x=='Noon' else 1)
+slider_items_unique = slider_items_unique.sort_values(by=['store_rank','days_remaining']).reset_index(drop=True)
 
 with st.sidebar:
     for _, row in slider_items_unique.iterrows():
