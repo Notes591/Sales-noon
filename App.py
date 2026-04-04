@@ -294,17 +294,13 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ التعديل: ترتيب العادي أولًا ثم التخزين، داخل كل نوع حسب أعلى طلب
+            # ✅ التعديل: ترتيب العادي أولًا ثم التخزين داخل كل نوع حسب total_orders
             df_store_unique = df_store.groupby(["partner_sku","order_type","image_url"]).agg(
                 total_orders=("partner_sku","count"),
                 prices=("invoice_price", lambda x: x.value_counts().to_dict())
             ).reset_index()
-
             df_store_unique['order_rank'] = df_store_unique['order_type'].apply(lambda x: 0 if x=='عادي' else 1)
-            df_store_unique = df_store_unique.sort_values(
-                by=['order_rank', 'total_orders'],
-                ascending=[True, False]
-            )
+            df_store_unique = df_store_unique.sort_values(by=['order_rank','total_orders'], ascending=[True, False])
 
             for i, row in df_store_unique.iterrows():
                 sku = row['partner_sku']
