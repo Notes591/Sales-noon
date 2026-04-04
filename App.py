@@ -294,28 +294,16 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ تعديل الترتيب: حسب النوع ثم تنازلي حسب عدد الطلبات
-            order_priority = {"تخزين": 0, "عادي": 1}
-
+            # ✅ التعديل هنا: ترتيب تنازلي حسب عدد الطلبات مع فصل العادي والتخزين
             df_store_unique = (
-                df_store
-                .groupby(
-                    ["partner_sku", "order_type", "image_url"],
-                    dropna=False
-                )
+                df_store.groupby(["partner_sku", "order_type", "image_url"])
                 .agg(
                     total_orders=("partner_sku", "count"),
                     prices=("invoice_price", lambda x: x.value_counts().to_dict())
                 )
                 .reset_index()
+                .sort_values(by=["order_type", "total_orders"], ascending=[True, False])
             )
-
-            df_store_unique["type_order"] = df_store_unique["order_type"].map(order_priority)
-
-            df_store_unique = df_store_unique.sort_values(
-                by=["type_order", "total_orders"],
-                ascending=[True, False]
-            ).drop(columns="type_order")
 
             for i, row in df_store_unique.iterrows():
                 sku = row['partner_sku']
