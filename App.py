@@ -205,70 +205,150 @@ code_order = df.groupby("unified_code").size().sort_values(ascending=False).inde
 # عرض الأكواد
 # =========================
 for code in code_order:
-
     df_code = df[df["unified_code"] == code]
+    total_orders = df_code.shape[0]
 
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+    df_noon_store = df_code[df_code["store"] == "Noon"]
+    noon_orders = df_noon_store.shape[0]
+    noon_normal = df_noon_store[df_noon_store["order_type"].str.contains("عادي")].shape[0]
+    noon_storage = df_noon_store[df_noon_store["order_type"].str.contains("تخزين")].shape[0]
+
+    df_amazon_store = df_code[df_code["store"] == "Amazon"]
+    amazon_orders = df_amazon_store.shape[0]
+    amazon_normal = df_amazon_store[df_amazon_store["order_type"].str.contains("عادي")].shape[0]
+    amazon_storage = df_amazon_store[df_amazon_store["order_type"].str.contains("تخزين")].shape[0]
+
+    df_trendyol_store = df_code[df_code["store"] == "Trendyol"]
+    trendyol_orders = df_trendyol_store.shape[0]
+    trendyol_normal = df_trendyol_store[df_trendyol_store["order_type"].str.contains("عادي")].shape[0]
+    trendyol_storage = df_trendyol_store[df_trendyol_store["order_type"].str.contains("تخزين")].shape[0]
+
+    color_class = "green" if total_orders >= 50 else "red"
+
+    img = df_code["image_url"].dropna()
+    main_img = safe_image(img.iloc[0]) if not img.empty else "https://via.placeholder.com/250"
+
+    st.markdown(f"""
+    <div class="big-card {color_class}">
+        <div class="title">🆔 {code}</div>
+        <div>📦 إجمالي الطلبات: {total_orders}</div>
+        <div style="display:flex; gap:20px; margin-top:10px;">
+            <div>🟡 Noon: <b>{noon_orders}</b> (عادي: {noon_normal} | تخزين: {noon_storage})</div>
+            <div>🔵 Amazon: <b>{amazon_orders}</b> (عادي: {amazon_normal} | تخزين: {amazon_storage})</div>
+            <div>🟣 Trendyol: <b>{trendyol_orders}</b> (عادي: {trendyol_normal} | تخزين: {trendyol_storage})</div>
+        </div>
+    </div>
+    """ , unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1,3,2])
+
+    with col1:
+        st.image(main_img, width=200)
+
+    with col3:
+        try:
+            top_store = df_code["store"].value_counts().idxmax()
+        except:
+            top_store = "-"
+
+        try:
+            min_row = df_code.loc[df_code["invoice_price"].idxmin()]
+            min_text = f"{min_row['invoice_price']:.2f} ({min_row['store']} - {min_row['partner_sku']})"
+        except:
+            min_text = "-"
+
+        try:
+            max_row = df_code.loc[df_code["invoice_price"].idxmax()]
+            max_text = f"{max_row['invoice_price']:.2f} ({max_row['store']} - {max_row['partner_sku']})"
+        except:
+            max_text = "-"
+
+        try:
+            best_sku = df_code["partner_sku"].value_counts().idxmax()
+        except:
+            best_sku = "-"
+
+        try:
+            avg_price = df_code["invoice_price"].mean()
+            avg_price = f"{avg_price:.2f}"
+        except:
+            avg_price = "-"
+
+        st.markdown(f"""
+        <div class="card">
+            <div class="title">📊 تحليل</div>
+            <div class="small">🏆 أكتر متجر: {top_store}</div>
+            <div class="small">💰 أقل سعر: {min_text}</div>
+            <div class="small">💎 أعلى سعر: {max_text}</div>
+            <div class="small">📦 أقوى SKU: {best_sku}</div>
+            <div class="small">📊 متوسط السعر: {avg_price}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     for store_name in ["Noon","Amazon","Trendyol"]:
-
         df_store = df_code[df_code["store"] == store_name]
-
         if df_store.empty:
             continue
 
-        st.markdown(f"<b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+            cols = st.columns(4)
 
-        cols = st.columns(4)
+            df_store_unique = df_store.groupby(
+                ["partner_sku","order_type","invoice_price"]
+            ).agg(
+                total_orders=("partner_sku","count"),
+                image_url=("image_url","first")
+            ).reset_index().sort_values(
+                by=["partner_sku","order_type","invoice_price"]
+            )
 
-        # 🔥 التعديل هنا فقط
-        df_store_unique = df_store.groupby(["partner_sku"]).agg(
-            image_url=("image_url","first")
-        ).reset_index()
+            for i, row in df_store_unique.iterrows():
+                sku = row['partner_sku']
+                image = safe_image(row["image_url"])
+                order_type = row["order_type"]
 
-        for i, row in df_store_unique.iterrows():
+                stock_row = df_stock[df_stock["SKU"] == sku]
+                stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
 
-            sku = row['partner_sku']
-
-            image = safe_image(row["image_url"])
-
-            stock_row = df_stock[df_stock["SKU"] == sku]
-
-            stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
-
-            df_prices = df_store[df_store["partner_sku"] == sku]
-
-            price_groups = df_prices.groupby(
-                ["order_type","invoice_price"]
-            ).size().reset_index(name="total_orders")
-
-            with cols[i % 4]:
-
-                st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-
-                st.image(image, width=80)
-
-                if stock is not None:
+                with cols[i % 4]:
+                    st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+                    st.image(image, width=80)
+                    if stock is not None:
+                        st.markdown(f"<div class='stock-badge'>Stock: {stock}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
                     st.markdown(
-                        f"<div class='stock-badge'>Stock: {stock}</div>",
+                        f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['total_orders']} طلب</div>",
                         unsafe_allow_html=True
                     )
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-                st.markdown(
-                    f"<div class='title'>{sku}</div>",
-                    unsafe_allow_html=True
-                )
+# =========================
+# 🛒 Sidebar (قرب المخزون ينتهي)
+# =========================
+st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
-                for _, p in price_groups.iterrows():
+slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
+slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
 
-                    st.markdown(
-                        f"<div class='order-type'>{p['order_type']}</div>",
-                        unsafe_allow_html=True
-                    )
+slider_items["daily_sales"] = slider_items.get("daily_sales", 1)
+slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
 
-                    st.markdown(
-                        f"<div class='small'>💰 {p['invoice_price']:.2f} | 📦 {p['total_orders']} طلب</div>",
-                        unsafe_allow_html=True
-                    )
+slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
 
-                st.markdown("</div>", unsafe_allow_html=True)
+slider_items = slider_items[slider_items["days_remaining"] <= 15]
+
+slider_items_unique = slider_items.groupby(
+    ["partner_sku","store","image_url","STOCK"]
+).first().reset_index()
+
+slider_items_unique = slider_items_unique.sort_values("days_remaining")
+
+with st.sidebar:
+    for _, row in slider_items_unique.iterrows():
+        st.markdown("---")
+        st.image(safe_image(row["image_url"]), width=100)
+        st.markdown(f"**{row['partner_sku']}**")
+        st.markdown(f"📦 Stock: {int(row['STOCK'])}")
+        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
