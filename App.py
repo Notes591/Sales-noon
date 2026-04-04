@@ -285,9 +285,6 @@ for code in code_order:
         </div>
         """, unsafe_allow_html=True)
 
-    # =========================
-    # عرض المنتجات حسب الطلب لكل متجر (مرتبة تنازليًا)
-    # =========================
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
         if df_store.empty:
@@ -295,13 +292,15 @@ for code in code_order:
 
         with col2:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
+            cols = st.columns(4)
 
+            # ✅ التعديل هنا فقط
             df_store_unique = df_store.groupby(["partner_sku","order_type","image_url"]).agg(
                 total_orders=("partner_sku","count"),
                 prices=("invoice_price", lambda x: x.value_counts().to_dict())
             ).reset_index().sort_values(by="total_orders", ascending=False)
 
-            for _, row in df_store_unique.iterrows():
+            for i, row in df_store_unique.iterrows():
                 sku = row['partner_sku']
                 image = safe_image(row["image_url"])
                 order_type = row["order_type"]
@@ -314,20 +313,21 @@ for code in code_order:
                     for price, count in row["prices"].items()
                 ])
 
-                st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-                st.image(image, width=80)
-                if stock is not None:
-                    st.markdown(f"<div class='stock-badge'>Stock: {stock}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div class='small'>{prices_html}<br>📦 {row['total_orders']} طلب</div>",
-                    unsafe_allow_html=True
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
+                with cols[i % 4]:
+                    st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+                    st.image(image, width=80)
+                    if stock is not None:
+                        st.markdown(f"<div class='stock-badge'>Stock: {stock}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='small'>{prices_html}<br>📦 {row['total_orders']} طلب</div>",
+                        unsafe_allow_html=True
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# 🛒 Sidebar - قرب نفاد المخزون
+# 🛒 Sidebar
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
