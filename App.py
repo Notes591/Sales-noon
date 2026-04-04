@@ -218,7 +218,7 @@ for code in code_order:
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
     </div>
-    """ , unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
     col1, col2 = st.columns([1,4])
 
@@ -234,14 +234,14 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ الحل هنا
-            df_store_unique = df_store.groupby(["partner_sku","order_type"]).agg(
+            # ✅ الحل النهائي هنا
+            df_store_grouped = df_store.groupby(["partner_sku","order_type"]).agg(
                 total_orders=("partner_sku","count"),
                 prices=("invoice_price", lambda x: list(sorted(set(x)))),
                 image_url=("image_url","first")
             ).reset_index().sort_values(by="total_orders", ascending=False)
 
-            for i, row in df_store_unique.iterrows():
+            for i, row in df_store_grouped.iterrows():
                 sku = row['partner_sku']
                 image = safe_image(row["image_url"])
                 order_type = row["order_type"]
