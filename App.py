@@ -40,12 +40,6 @@ st.markdown("""
     background:#f5f5f5;
     margin-bottom:20px;
 }
-.stock-badge {
-    font-weight:bold; 
-    font-size:14px; 
-    margin-bottom:5px; 
-    color:#d32f2f;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,7 +107,10 @@ df_noon["partner_sku"] = df_noon["sku"]
 # =========================
 try:
     df_amazon = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Amazon").get_all_records())
-    df_amazon = df_amazon.rename(columns={"ASIN":"partner_sku","مبلغ المنتج":"invoice_price"})
+    df_amazon = df_amazon.rename(columns={
+        "ASIN": "partner_sku",
+        "مبلغ المنتج": "invoice_price"
+    })
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
@@ -124,6 +121,7 @@ try:
         else:
             return "تخزين"
     df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+
 except:
     df_amazon = pd.DataFrame()
 
@@ -141,52 +139,40 @@ except:
     df_trendyol = pd.DataFrame()
 
 # =========================
-# Merge All Stores
+# Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
+
+# تنظيف الأسعار
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
 
 # =========================
-# Merge Stock
+# Merge Stock (Only Noon & Amazon)
 # =========================
 df["partner_sku"] = df["partner_sku"].astype(str).str.strip()
 df = df.merge(df_stock, left_on="partner_sku", right_on="SKU", how="left")
-# STOCK: keep 0 but ignore empty
-df["STOCK"] = df["STOCK"].fillna(-1)  # empty treated as -1
-df.loc[df["STOCK"]<0, "STOCK"] = None  # empty SKUs become None
+
+# تجاهل الفارغ فقط، صفر يظل موجود
+df.loc[df["STOCK"].isna(), "STOCK"] = None
+df.loc[~df["store"].isin(["Noon","Amazon"]), "STOCK"] = None
 
 # =========================
-# Sidebar: SKUs with low stock (< 15 days) for Noon & Amazon only
-# =========================
-st.sidebar.title("⚠️ SKUs - Low Stock (<15 days)")
-low_stock_skus = df[df["store"].isin(["Noon","Amazon"]) & (df["STOCK"].notnull()) & (df["STOCK"] < 15)]
-low_stock_skus = low_stock_skus.groupby(["store","partner_sku"]).agg(
-    total_orders=("partner_sku","count"),
-    stock=("STOCK","max"),
-    image=("image_url","first")
-).reset_index()
-
-# ترتيب Sidebar: Noon أولاً ثم Amazon، ومن الأعلى طلبات إلى الأقل
-low_stock_skus = low_stock_skus.sort_values(by=["store","total_orders"], ascending=[True, False])
-
-for i, row in low_stock_skus.iterrows():
-    st.sidebar.image(safe_image(row["image"]), width=50)
-    st.sidebar.markdown(f"**{row['partner_sku']}** ({row['store']}) - {int(row['stock'])} يوم متبقي", unsafe_allow_html=True)
-
-# =========================
-# Summary
+# 🔥 ملخص عام
 # =========================
 summary_data = []
+
 for store in ["Noon","Amazon","Trendyol"]:
     df_store = df[df["store"] == store]
     total = df_store.shape[0]
     normal = df_store[df_store["order_type"].str.contains("عادي")].shape[0]
     storage = df_store[df_store["order_type"].str.contains("تخزين")].shape[0]
-    summary_data.append((store,total,normal,storage))
+
+    summary_data.append((store, total, normal, storage))
 
 st.markdown("<div class='summary'><b>📊 ملخص عام:</b></div>", unsafe_allow_html=True)
+
 cols = st.columns(3)
-for i, (store,total,normal,storage) in enumerate(summary_data):
+for i, (store, total, normal, storage) in enumerate(summary_data):
     with cols[i]:
         st.markdown(f"""
         <div class="card">
@@ -198,14 +184,14 @@ for i, (store,total,normal,storage) in enumerate(summary_data):
         """, unsafe_allow_html=True)
 
 # =========================
-# Coding Merge
+# Coding
 # =========================
 coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
 coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
 df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
-# Search
+# 🔍 بحث
 # =========================
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
 if search:
@@ -213,14 +199,34 @@ if search:
             df["unified_code"].astype(str).str.contains(search)]
 
 # =========================
-# Display by Unified Code
+# ترتيب الأكواد
 # =========================
 code_order = df.groupby("unified_code").size().sort_values(ascending=False).index
+
+# =========================
+# عرض الأكواد
+# =========================
 for code in code_order:
     df_code = df[df["unified_code"] == code]
     total_orders = df_code.shape[0]
 
+    df_noon_store = df_code[df_code["store"] == "Noon"]
+    noon_orders = df_noon_store.shape[0]
+    noon_normal = df_noon_store[df_noon_store["order_type"].str.contains("عادي")].shape[0]
+    noon_storage = df_noon_store[df_noon_store["order_type"].str.contains("تخزين")].shape[0]
+
+    df_amazon_store = df_code[df_code["store"] == "Amazon"]
+    amazon_orders = df_amazon_store.shape[0]
+    amazon_normal = df_amazon_store[df_amazon_store["order_type"].str.contains("عادي")].shape[0]
+    amazon_storage = df_amazon_store[df_amazon_store["order_type"].str.contains("تخزين")].shape[0]
+
+    df_trendyol_store = df_code[df_code["store"] == "Trendyol"]
+    trendyol_orders = df_trendyol_store.shape[0]
+    trendyol_normal = df_trendyol_store[df_trendyol_store["order_type"].str.contains("عادي")].shape[0]
+    trendyol_storage = df_trendyol_store[df_trendyol_store["order_type"].str.contains("تخزين")].shape[0]
+
     color_class = "green" if total_orders >= 50 else "red"
+
     img = df_code["image_url"].dropna()
     main_img = safe_image(img.iloc[0]) if not img.empty else "https://via.placeholder.com/250"
 
@@ -228,26 +234,47 @@ for code in code_order:
     <div class="big-card {color_class}">
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
+        <div style="display:flex; gap:20px; margin-top:10px;">
+            <div>🟡 Noon: <b>{noon_orders}</b> (عادي: {noon_normal} | تخزين: {noon_storage})</div>
+            <div>🔵 Amazon: <b>{amazon_orders}</b> (عادي: {amazon_normal} | تخزين: {amazon_storage})</div>
+            <div>🟣 Trendyol: <b>{trendyol_orders}</b> (عادي: {trendyol_normal} | تخزين: {trendyol_storage})</div>
+        </div>
     </div>
-    """, unsafe_allow_html=True)
+    """ , unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1,3,2])
+
     with col1:
         st.image(main_img, width=200)
 
     with col3:
-        try: top_store = df_code["store"].value_counts().idxmax()
-        except: top_store = "-"
-        try: min_row = df_code.loc[df_code["invoice_price"].idxmin()]
-        except: min_row = None
-        min_text = f"{min_row['invoice_price']:.2f} ({min_row['store']} - {min_row['partner_sku']})" if min_row is not None else "-"
-        try: max_row = df_code.loc[df_code["invoice_price"].idxmax()]
-        except: max_row = None
-        max_text = f"{max_row['invoice_price']:.2f} ({max_row['store']} - {max_row['partner_sku']})" if max_row is not None else "-"
-        try: best_sku = df_code["partner_sku"].value_counts().idxmax()
-        except: best_sku = "-"
-        try: avg_price = f"{df_code['invoice_price'].mean():.2f}"
-        except: avg_price = "-"
+        try:
+            top_store = df_code["store"].value_counts().idxmax()
+        except:
+            top_store = "-"
+
+        try:
+            min_row = df_code.loc[df_code["invoice_price"].idxmin()]
+            min_text = f"{min_row['invoice_price']:.2f} ({min_row['store']} - {min_row['partner_sku']})"
+        except:
+            min_text = "-"
+
+        try:
+            max_row = df_code.loc[df_code["invoice_price"].idxmax()]
+            max_text = f"{max_row['invoice_price']:.2f} ({max_row['store']} - {max_row['partner_sku']})"
+        except:
+            max_text = "-"
+
+        try:
+            best_sku = df_code["partner_sku"].value_counts().idxmax()
+        except:
+            best_sku = "-"
+
+        try:
+            avg_price = df_code["invoice_price"].mean()
+            avg_price = f"{avg_price:.2f}"
+        except:
+            avg_price = "-"
 
         st.markdown(f"""
         <div class="card">
@@ -260,9 +287,6 @@ for code in code_order:
         </div>
         """, unsafe_allow_html=True)
 
-    # =========================
-    # Display SKUs per store
-    # =========================
     for store_name in ["Noon","Amazon","Trendyol"]:
         df_store = df_code[df_code["store"] == store_name]
         if df_store.empty:
@@ -271,29 +295,32 @@ for code in code_order:
         with col2:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
+            displayed_skus = set()
 
             df_store_grouped = df_store.groupby(["partner_sku","order_type","invoice_price","STOCK"]).agg(
                 orders=("partner_sku","count"),
                 image=("image_url","first")
             ).reset_index().sort_values(by="orders", ascending=False)
 
+            # ترتيب "عادي" ثم "تخزين"
             df_store_grouped = pd.concat([
-                df_store_grouped[df_store_grouped["order_type"]=="عادي"],
-                df_store_grouped[df_store_grouped["order_type"]=="تخزين"]
+                df_store_grouped[df_store_grouped["order_type"] == "عادي"],
+                df_store_grouped[df_store_grouped["order_type"] == "تخزين"]
             ], ignore_index=True)
 
             for i, row in df_store_grouped.iterrows():
                 sku = row['partner_sku']
                 image = safe_image(row["image"])
                 order_type = row["order_type"]
+                stock_display = f" | 📦 <b>{int(row['STOCK'])}</b>" if row["STOCK"] is not None else ""
 
                 with cols[i % 4]:
                     st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-                    # Stock badge only if Noon or Amazon and stock not None
-                    if store_name in ["Noon","Amazon"] and row.get("STOCK") is not None:
-                        st.markdown(f"<div class='stock-badge'>Stock: {int(row['STOCK'])}</div>", unsafe_allow_html=True)
                     st.image(image, width=80)
                     st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} طلب</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} طلب{stock_display}</div>",
+                        unsafe_allow_html=True
+                    )
                     st.markdown("</div>", unsafe_allow_html=True)
