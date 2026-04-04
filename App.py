@@ -158,36 +158,9 @@ df = df.merge(stock_df, on="partner_sku", how="left")
 df["stock"] = df["stock"].fillna(0)
 
 # =========================
-# 🔴 قائمة المنتجات الحرجة
+# 🔴 المنتجات الحرجة
 # =========================
 critical_items = []
-
-# =========================
-# 🔥 ملخص عام
-# =========================
-summary_data = []
-
-for store in ["Noon","Amazon","Trendyol"]:
-    df_store = df[df["store"] == store]
-    total = df_store.shape[0]
-    normal = df_store[df_store["order_type"].str.contains("عادي")].shape[0]
-    storage = df_store[df_store["order_type"].str.contains("تخزين")].shape[0]
-
-    summary_data.append((store, total, normal, storage))
-
-st.markdown("<div class='summary'><b>📊 ملخص عام:</b></div>", unsafe_allow_html=True)
-
-cols = st.columns(3)
-for i, (store, total, normal, storage) in enumerate(summary_data):
-    with cols[i]:
-        st.markdown(f"""
-        <div class="card">
-            <div class="title">{store}</div>
-            <div>📦 إجمالي: {total}</div>
-            <div class="small">عادي: {normal}</div>
-            <div class="small">تخزين: {storage}</div>
-        </div>
-        """, unsafe_allow_html=True)
 
 # =========================
 # Coding
@@ -214,9 +187,8 @@ code_order = df.groupby("unified_code").size().sort_values(ascending=False).inde
 # =========================
 for code in code_order:
     df_code = df[df["unified_code"] == code]
-    total_orders = df_code.shape[0]
 
-    # تحليل المخزون لكل SKU
+    # تحليل SKU
     sku_analysis = df_code.groupby("partner_sku").agg(
         stock=("stock", "max"),
         storage_orders=("order_type", lambda x: (x == "تخزين").sum())
@@ -224,56 +196,39 @@ for code in code_order:
 
     sku_analysis["daily_sales"] = sku_analysis["storage_orders"] / 30
 
-    def calc_status(row):
-        if row["storage_orders"] < 5:
-            return ("⚠️ مبيعات ضعيفة", "stock-warning", 999)
-
-        days_left = row["stock"] / row["daily_sales"]
-
-        if days_left < 15:
-            return (f"المخزون يكفي {int(days_left)} يوم", "stock-danger", days_left)
-        elif days_left < 30:
-            return (f"المخزون يكفي {int(days_left)} يوم", "stock-warning", days_left)
-        elif days_left > 120:
-            return (f"المخزون يكفي {int(days_left)} يوم", "stock-warning", days_left)
-        else:
-            return (f"المخزون يكفي {int(days_left)} يوم", "stock-good", days_left)
-
-    sku_analysis[["status", "class", "days_left"]] = sku_analysis.apply(
-        lambda row: pd.Series(calc_status(row)), axis=1
-    )
-
-    # تجميع المنتجات الحرجة
     for _, r in sku_analysis.iterrows():
-        if r["days_left"] < 15:
-            img_series = df_code[df_code["partner_sku"] == r["partner_sku"]]["image_url"].dropna()
-            img = img_series.iloc[0] if not img_series.empty else ""
-            critical_items.append({
-                "sku": r["partner_sku"],
-                "days": int(r["days_left"]),
-                "stock": int(r["stock"]),
-                "image": img
-            })
+        if r["daily_sales"] > 0:
+            days = r["stock"] / r["daily_sales"]
+            if days < 15:
+                img_series = df_code[df_code["partner_sku"] == r["partner_sku"]]["image_url"].dropna()
+                img = img_series.iloc[0] if not img_series.empty else ""
+                critical_items.append({
+                    "sku": r["partner_sku"],
+                    "days": int(days),
+                    "stock": int(r["stock"]),
+                    "image": img
+                })
 
 # =========================
-# 🚨 المنتجات الحرجة
+# 🚨 Slider المنتجات الحرجة
 # =========================
 if critical_items:
     st.markdown("## 🚨 منتجات تحتاج تخزين عاجل")
 
-    cols = st.columns(5)
+    html_slider = """
+    <div style="display:flex; overflow-x:auto; gap:15px; padding:10px;">
+    """
 
-    for i, item in enumerate(critical_items):
-        with cols[i % 5]:
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            st.image(safe_image(item["image"]), width=100)
-            st.markdown(f"<div class='title'>{item['sku']}</div>", unsafe_allow_html=True)
+    for item in critical_items:
+        html_slider += f"""
+        <div style="min-width:180px; background:white; padding:10px; border-radius:10px; text-align:center;">
+            <img src="{safe_image(item['image'])}" width="120"><br>
+            <b>{item['sku']}</b><br>
+            📦 {item['stock']}<br>
+            ⏳ {item['days']} يوم
+        </div>
+        """
 
-            st.markdown(f"""
-            <div class="stock-box stock-danger">
-                📦 {item['stock']} <br>
-                ⏳ {item['days']} يوم
-            </div>
-            """, unsafe_allow_html=True)
+    html_slider += "</div>"
 
-            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(html_slider, unsafe_allow_html=True)
