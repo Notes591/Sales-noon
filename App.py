@@ -158,6 +158,11 @@ df = df.merge(stock_df, on="partner_sku", how="left")
 df["stock"] = df["stock"].fillna(0)
 
 # =========================
+# 🔴 قائمة المنتجات الحرجة
+# =========================
+critical_items = []
+
+# =========================
 # 🔥 ملخص عام
 # =========================
 summary_data = []
@@ -211,7 +216,7 @@ for code in code_order:
     df_code = df[df["unified_code"] == code]
     total_orders = df_code.shape[0]
 
-    # ✅ تحليل المخزون لكل SKU
+    # تحليل المخزون لكل SKU
     sku_analysis = df_code.groupby("partner_sku").agg(
         stock=("stock", "max"),
         storage_orders=("order_type", lambda x: (x == "تخزين").sum())
@@ -220,127 +225,55 @@ for code in code_order:
     sku_analysis["daily_sales"] = sku_analysis["storage_orders"] / 30
 
     def calc_status(row):
-        if row["daily_sales"] == 0:
-            return ("✅ مفيش بيع تخزين", "stock-good", 999)
+        if row["storage_orders"] < 5:
+            return ("⚠️ مبيعات ضعيفة", "stock-warning", 999)
 
         days_left = row["stock"] / row["daily_sales"]
 
         if days_left < 15:
-            return ("❌ لا يكفي 15 يوم", "stock-danger", days_left)
+            return (f"المخزون يكفي {int(days_left)} يوم", "stock-danger", days_left)
         elif days_left < 30:
-            return ("⚠️ أقل من 30 يوم", "stock-warning", days_left)
+            return (f"المخزون يكفي {int(days_left)} يوم", "stock-warning", days_left)
+        elif days_left > 120:
+            return (f"المخزون يكفي {int(days_left)} يوم", "stock-warning", days_left)
         else:
-            return ("✅ ممتاز", "stock-good", days_left)
+            return (f"المخزون يكفي {int(days_left)} يوم", "stock-good", days_left)
 
     sku_analysis[["status", "class", "days_left"]] = sku_analysis.apply(
         lambda row: pd.Series(calc_status(row)), axis=1
     )
 
-    color_class = "green" if total_orders >= 50 else "red"
+    # تجميع المنتجات الحرجة
+    for _, r in sku_analysis.iterrows():
+        if r["days_left"] < 15:
+            img_series = df_code[df_code["partner_sku"] == r["partner_sku"]]["image_url"].dropna()
+            img = img_series.iloc[0] if not img_series.empty else ""
+            critical_items.append({
+                "sku": r["partner_sku"],
+                "days": int(r["days_left"]),
+                "stock": int(r["stock"]),
+                "image": img
+            })
 
-    img = df_code["image_url"].dropna()
-    main_img = safe_image(img.iloc[0]) if not img.empty else "https://via.placeholder.com/250"
+# =========================
+# 🚨 المنتجات الحرجة
+# =========================
+if critical_items:
+    st.markdown("## 🚨 منتجات تحتاج تخزين عاجل")
 
-    st.markdown(f"""
-    <div class="big-card {color_class}">
-        <div class="title">🆔 {code}</div>
-        <div>📦 إجمالي الطلبات: {total_orders}</div>
-    </div>
-    """ , unsafe_allow_html=True)
+    cols = st.columns(5)
 
-    col1, col2, col3 = st.columns([1,3,2])
+    for i, item in enumerate(critical_items):
+        with cols[i % 5]:
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.image(safe_image(item["image"]), width=100)
+            st.markdown(f"<div class='title'>{item['sku']}</div>", unsafe_allow_html=True)
 
-    with col1:
-        st.image(main_img, width=200)
+            st.markdown(f"""
+            <div class="stock-box stock-danger">
+                📦 {item['stock']} <br>
+                ⏳ {item['days']} يوم
+            </div>
+            """, unsafe_allow_html=True)
 
-    with col3:
-        try:
-            top_store = df_code["store"].value_counts().idxmax()
-        except:
-            top_store = "-"
-
-        try:
-            min_row = df_code.loc[df_code["invoice_price"].idxmin()]
-            min_text = f"{min_row['invoice_price']:.2f} ({min_row['store']} - {min_row['partner_sku']})"
-        except:
-            min_text = "-"
-
-        try:
-            max_row = df_code.loc[df_code["invoice_price"].idxmax()]
-            max_text = f"{max_row['invoice_price']:.2f} ({max_row['store']} - {max_row['partner_sku']})"
-        except:
-            max_text = "-"
-
-        try:
-            best_sku = df_code["partner_sku"].value_counts().idxmax()
-        except:
-            best_sku = "-"
-
-        try:
-            avg_price = df_code["invoice_price"].mean()
-            avg_price = f"{avg_price:.2f}"
-        except:
-            avg_price = "-"
-
-        st.markdown(f"""
-        <div class="card">
-            <div class="title">📊 تحليل</div>
-            <div class="small">🏆 أكتر متجر: {top_store}</div>
-            <div class="small">💰 أقل سعر: {min_text}</div>
-            <div class="small">💎 أعلى سعر: {max_text}</div>
-            <div class="small">📦 أقوى SKU: {best_sku}</div>
-            <div class="small">📊 متوسط السعر: {avg_price}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    for store_name in ["Noon","Amazon","Trendyol"]:
-        df_store = df_code[df_code["store"] == store_name]
-        if df_store.empty:
-            continue
-
-        with col2:
-            st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
-            cols = st.columns(4)
-
-            df_store_grouped = df_store.groupby(["partner_sku","order_type","invoice_price"]).agg(
-                orders=("partner_sku","count"),
-                image=("image_url","first")
-            ).reset_index().sort_values(by="orders", ascending=False)
-
-            df_store_grouped = pd.concat([
-                df_store_grouped[df_store_grouped["order_type"] == "عادي"],
-                df_store_grouped[df_store_grouped["order_type"] == "تخزين"]
-            ], ignore_index=True)
-
-            for i, row in df_store_grouped.iterrows():
-                sku = row['partner_sku']
-                image = safe_image(row["image"])
-                order_type = row["order_type"]
-
-                sku_row = sku_analysis[sku_analysis["partner_sku"] == sku]
-
-                with cols[i % 4]:
-                    st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-                    st.image(image, width=80)
-                    st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
-
-                    if not sku_row.empty:
-                        stock_val = int(sku_row.iloc[0]["stock"])
-                        status = sku_row.iloc[0]["status"]
-                        css_class = sku_row.iloc[0]["class"]
-                        days_left = sku_row.iloc[0]["days_left"]
-
-                        st.markdown(f"""
-                        <div class="stock-box {css_class}">
-                            📦 {stock_val} <br>
-                            ⏳ {int(days_left)} يوم <br>
-                            {status}
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                    st.markdown(
-                        f"<div class='small'>💰 {row['invoice_price']:.2f} | 📦 {row['orders']} طلب</div>",
-                        unsafe_allow_html=True
-                    )
-                    st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
