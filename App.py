@@ -84,7 +84,7 @@ client = gspread.authorize(creds)
 try:
     df_stock = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Stock").get_all_records())
     df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
-    df_stock["STOCK"] = pd.to_numeric(df_stock["STOCK"], errors="coerce").fillna(0)
+    df_stock["STOCK"] = pd.to_numeric(df_stock["STOCK"], errors="coerce")
 except:
     df_stock = pd.DataFrame(columns=["SKU","STOCK"])
 
@@ -151,22 +151,27 @@ df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna
 # =========================
 df["partner_sku"] = df["partner_sku"].astype(str).str.strip()
 df = df.merge(df_stock, left_on="partner_sku", right_on="SKU", how="left")
-df["STOCK"] = df["STOCK"].fillna(0)
+# STOCK: keep 0 but ignore empty
+df["STOCK"] = df["STOCK"].fillna(-1)  # empty treated as -1
+df.loc[df["STOCK"]<0, "STOCK"] = None  # empty SKUs become None
 
 # =========================
-# Sidebar: SKUs with low stock (< 15 days)
+# Sidebar: SKUs with low stock (< 15 days) for Noon & Amazon only
 # =========================
 st.sidebar.title("⚠️ SKUs - Low Stock (<15 days)")
-low_stock_skus = df.groupby("partner_sku").agg(
+low_stock_skus = df[df["store"].isin(["Noon","Amazon"]) & (df["STOCK"].notnull()) & (df["STOCK"] < 15)]
+low_stock_skus = low_stock_skus.groupby(["store","partner_sku"]).agg(
     total_orders=("partner_sku","count"),
     stock=("STOCK","max"),
     image=("image_url","first")
 ).reset_index()
 
-low_stock_skus = low_stock_skus[low_stock_skus["stock"] < 15]
+# ترتيب Sidebar: Noon أولاً ثم Amazon، ومن الأعلى طلبات إلى الأقل
+low_stock_skus = low_stock_skus.sort_values(by=["store","total_orders"], ascending=[True, False])
+
 for i, row in low_stock_skus.iterrows():
     st.sidebar.image(safe_image(row["image"]), width=50)
-    st.sidebar.markdown(f"**{row['partner_sku']}** - {int(row['stock'])} يوم متبقي", unsafe_allow_html=True)
+    st.sidebar.markdown(f"**{row['partner_sku']}** ({row['store']}) - {int(row['stock'])} يوم متبقي", unsafe_allow_html=True)
 
 # =========================
 # Summary
@@ -224,11 +229,10 @@ for code in code_order:
         <div class="title">🆔 {code}</div>
         <div>📦 إجمالي الطلبات: {total_orders}</div>
     </div>
-    """ , unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1,3,2])
     with col1:
-        st.markdown(f"<div class='stock-badge'>Stock: {int(df_code['STOCK'].max())}</div>", unsafe_allow_html=True)
         st.image(main_img, width=200)
 
     with col3:
@@ -285,7 +289,9 @@ for code in code_order:
 
                 with cols[i % 4]:
                     st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='stock-badge'>Stock: {int(row.get('STOCK',0))}</div>", unsafe_allow_html=True)
+                    # Stock badge only if Noon or Amazon and stock not None
+                    if store_name in ["Noon","Amazon"] and row.get("STOCK") is not None:
+                        st.markdown(f"<div class='stock-badge'>Stock: {int(row['STOCK'])}</div>", unsafe_allow_html=True)
                     st.image(image, width=80)
                     st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
