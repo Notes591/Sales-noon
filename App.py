@@ -252,10 +252,35 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
-scan_result = html("""
+html("""
+<div id="reader" style="width:320px"></div>
+<div id="result" style="font-size:18px;font-weight:bold;margin-top:10px;"></div>
 
-""", height=350)
+<script src="https://unpkg.com/html5-qrcode"></script>
 
+<script>
+
+function onScanSuccess(decodedText) {
+
+    document.getElementById("result").innerText = "Scanned: " + decodedText;
+
+    const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+
+    if(input){
+        input.value = decodedText;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+let scanner = new Html5QrcodeScanner(
+    "reader",
+    { fps: 10, qrbox: 250 }
+);
+
+scanner.render(onScanSuccess);
+
+</script>
+""", height=400)
 
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=scan_result if scan_result else "")
 if search:
