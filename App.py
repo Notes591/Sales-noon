@@ -328,35 +328,29 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# 🛒 Sidebar (المعادلة الجديدة)
+# 🛒 Sidebar (Daily Sales من عدد الطلبات لكل SKU)
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
-# استخدام daily_sales الموجودة لكل سكيو مباشرة
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
-
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
-
 df_stock = df_stock.drop_duplicates(subset=["SKU"])
 
-# دمج المخزون مع بيانات السكيو
+# دمج مع المخزون
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
 
-# استخدام daily_sales الموجود في البيانات
-if "daily_sales" not in slider_items.columns:
-    slider_items["daily_sales"] = 1
-else:
-    slider_items["daily_sales"] = pd.to_numeric(slider_items["daily_sales"], errors="coerce").fillna(1)
-    slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
+# حساب عدد الطلبات اليومي لكل SKU (عدد مرات ظهور كل SKU لكل متجر)
+daily_sales_df = slider_items.groupby("partner_sku")["partner_sku"].count().reset_index(name="daily_sales")
+slider_items = slider_items.merge(daily_sales_df, on="partner_sku", how="left")
+slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
 
-# حساب الأيام المتبقية لكل سكيو
+# حساب الأيام المتبقية
 slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
 
-# تصفية السكيوهات اللي المخزون لها 15 يوم أو أقل
+# تصفية ≤ 15 يوم
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 
-# إزالة التكرارات وعرضها مرتب
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"])
 slider_items_unique = slider_items_unique.sort_values(by="days_remaining").reset_index(drop=True)
 
