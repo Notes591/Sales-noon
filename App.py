@@ -250,7 +250,7 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # =========================
 # 📷 مسح الباركود بالكاميرا
-# 📷 مسح الباركود بالكاميرا
+
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
 # session_state
@@ -260,6 +260,10 @@ if "scanned_code" not in st.session_state:
 # Text Input مرتبط بالـ session_state
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=st.session_state.scanned_code)
 
+# عرض رسالة مباشرة للكود المقروء
+if st.session_state.scanned_code:
+    st.success(f"✅ تم قراءة الكود: {st.session_state.scanned_code}")
+
 # HTML + JS للكاميرا الخلفية
 html("""
 <div id="reader" style="width:320px"></div>
@@ -267,7 +271,6 @@ html("""
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    // حفظ القيمة في الـ input
     window.parent.postMessage({type:'set-code', value:decodedText}, "*");
 }
 
