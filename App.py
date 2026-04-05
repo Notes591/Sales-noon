@@ -104,10 +104,12 @@ df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
 df_noon["partner_sku"] = df_noon["sku"]
 
 # =========================
-# Add Commission & Shipping columns for Noon
+# Use Commission & Shipping from Sheet for Noon
 # =========================
-df_noon["Commission"] = 0.0
-df_noon["Shipping"] = 0.0
+if "Commission" not in df_noon.columns:
+    df_noon["Commission"] = 0.0
+if "Shipping" not in df_noon.columns:
+    df_noon["Shipping"] = 0.0
 
 # =========================
 # Load Amazon
@@ -129,9 +131,11 @@ try:
             return "تخزين"
     df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
 
-    # Add Commission & Shipping columns for Amazon
-    df_amazon["Commission"] = 0.0
-    df_amazon["Shipping"] = 0.0
+    # Use Commission & Shipping from Sheet for Amazon
+    if "Commission" not in df_amazon.columns:
+        df_amazon["Commission"] = 0.0
+    if "Shipping" not in df_amazon.columns:
+        df_amazon["Shipping"] = 0.0
 
 except:
     df_amazon = pd.DataFrame()
@@ -147,9 +151,11 @@ try:
     df_trendyol["image_url"] = df_trendyol.get("image_url", None)
     df_trendyol["order_type"] = "عادي"
 
-    # Add Commission & Shipping columns for Trendyol
-    df_trendyol["Commission"] = 0.0
-    df_trendyol["Shipping"] = 0.0
+    # Use Commission & Shipping from Sheet for Trendyol
+    if "Commission" not in df_trendyol.columns:
+        df_trendyol["Commission"] = 0.0
+    if "Shipping" not in df_trendyol.columns:
+        df_trendyol["Shipping"] = 0.0
 
 except:
     df_trendyol = pd.DataFrame()
