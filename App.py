@@ -270,11 +270,13 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # 🔍 بحث (معدل وآمن)
 # =========================
-search_text = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+search_text = st.text_input("🔍 ابحث بالـ SKU أو الكود", key="search_box")
 
-search = search_text
+# لو فيه QR → يتحط تلقائي
 if scanner_value and isinstance(scanner_value, str):
-    search = scanner_value
+    st.session_state.search_box = scanner_value
+
+search = st.session_state.get("search_box", "")
 
 if search:
     search = str(search).strip()
