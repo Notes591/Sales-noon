@@ -250,14 +250,14 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # =========================
 # 📷 مسح الباركود بالكاميرا
-# ============# 📷 مسح الباركود بالكاميرا
+# 📷 مسح الباركود بالكاميرا
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
 # session_state
 if "scanned_code" not in st.session_state:
     st.session_state.scanned_code = ""
 
-# Text Input
+# Text Input مرتبط بالـ session_state
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=st.session_state.scanned_code)
 
 # HTML + JS للكاميرا الخلفية
@@ -267,13 +267,14 @@ html("""
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
+    // حفظ القيمة في الـ input
     window.parent.postMessage({type:'set-code', value:decodedText}, "*");
 }
 
 // اختيار الكاميرا الخلفية
 Html5Qrcode.getCameras().then(cameras => {
     if(cameras && cameras.length) {
-        let backCamera = cameras[cameras.length-1].id; // غالبًا الكاميرا الخلفية
+        let backCamera = cameras[cameras.length-1].id; // غالبًا الخلفية
         let scanner = new Html5Qrcode("reader");
         scanner.start(backCamera, { fps: 10, qrbox: 250 }, onScanSuccess);
     }
@@ -283,7 +284,7 @@ Html5Qrcode.getCameras().then(cameras => {
 </script>
 """, height=400)
 
-# event listener لتحديث الـ input
+# event listener لتحديث الـ input + session_state
 st.markdown("""
 <script>
 window.addEventListener('message', event => {
@@ -298,11 +299,10 @@ window.addEventListener('message', event => {
 </script>
 """, unsafe_allow_html=True)
 
-# فلترة الداتا حسب البحث
+# فلترة DataFrame حسب الكود المقروء
 if search:
+    st.session_state.scanned_code = search  # حفظه في session_state
     df = df[df["partner_sku"].str.contains(search, case=False, na=False)]
-
-
 # =========================
 # فلترة الداتا حسب البحث
 # =========================
