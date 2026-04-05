@@ -300,7 +300,7 @@ window.addEventListener('message', event => {
 
 # فلترة الداتا حسب البحث
 if search:
-    df = df[df["partner_sku"].str.contains(search, case=False, na=False)]=============
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False)]
 
 
 # =========================
