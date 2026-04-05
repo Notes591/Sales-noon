@@ -328,20 +328,20 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# 🛒 Sidebar (تم الإصلاح)
+# 🛒 Sidebar (المعادلة الجديدة)
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
 sales_count = df.groupby("partner_sku").size().reset_index(name="total_orders")
-DAYS = 7
-sales_count["daily_sales"] = sales_count["total_orders"] / DAYS
+
+# 🔥 التعديل هنا فقط
+sales_count["daily_sales"] = (sales_count["total_orders"] * 30) / 2
 
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
 
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
 
-# ✅ حل مشكلة الاستوك
 df_stock = df_stock.drop_duplicates(subset=["SKU"])
 
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
@@ -354,9 +354,7 @@ slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sal
 
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 
-# ✅ حل مشكلة التكرار
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"])
-
 slider_items_unique = slider_items_unique.sort_values(by="days_remaining").reset_index(drop=True)
 
 with st.sidebar:
@@ -366,4 +364,4 @@ with st.sidebar:
         st.markdown(f"**{row['partner_sku']}**")
         st.markdown(f"📦 Stock: {int(row['STOCK'])}")
         st.markdown(f"🔥 Daily Sales: {row['daily_sales']:.2f}")
-        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
+        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.2f}")
