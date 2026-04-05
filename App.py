@@ -252,6 +252,9 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # 📷 مسح الباركود بالكاميرا (تحديث كامل)
 # =========================
+# =========================
+# 📷 مسح الباركود بالكاميرا (تحديث كامل)
+# =========================
 import streamlit as st
 from streamlit.components.v1 import html
 
@@ -290,18 +293,20 @@ if st.session_state.scanned_code:
     </script>
     """, unsafe_allow_html=True)
 
-# HTML + JS للكاميرا الخلفية
+# HTML + JS للكاميرا الخلفية مع التعديلات الجديدة
 html("""
 <div id="reader" style="width:320px"></div>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    // أرسل الكود مباشرة للـ input (widget) في Streamlit
     const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
     if(input){
         input.value = decodedText;
         input.dispatchEvent(new Event('input', { bubbles: true }));
+        
+        // إرسال رسالة لإعادة تشغيل Streamlit
+        window.parent.postMessage({type: 'set-code', value: decodedText}, "*");
     }
 }
 
@@ -315,9 +320,21 @@ Html5Qrcode.getCameras().then(cameras => {
 }).catch(err => {
     console.error(err);
 });
+
+// Listener في Streamlit لتحديث input تلقائيًا
+window.addEventListener('message', event => {
+    if(event.data.type === 'set-code') {
+        const input = document.querySelector('input[data-testid="stTextInput"]');
+        if(input){
+            input.value = event.data.value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        // إعادة تشغيل Streamlit تلقائيًا لتفعيل البحث
+        window.parent.location.reload();
+    }
+});
 </script>
 """, height=400)
-
 # =========================
 # فلترة DataFrame حسب الكود المقروء
 if search:
