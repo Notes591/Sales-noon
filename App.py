@@ -294,7 +294,6 @@ for code in code_order:
             st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
             cols = st.columns(4)
 
-            # ✅ ترتيب العادي أولًا ثم التخزين حسب عدد الطلبات
             df_store_unique = df_store.groupby(["partner_sku","order_type","image_url"]).agg(
                 total_orders=("partner_sku","count"),
                 prices=("invoice_price", lambda x: x.value_counts().to_dict())
@@ -329,14 +328,25 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# 🛒 Sidebar
+# 🛒 Sidebar (🔥 تم التعديل هنا فقط)
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
-slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
-slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
+# ✅ نحسب الطلبات (زي الصورة)
+sales_count = df.groupby("partner_sku").size().reset_index(name="total_orders")
 
-slider_items["daily_sales"] = slider_items.get("daily_sales", 1)
+# ✅ نحسب daily_sales
+DAYS = 7
+sales_count["daily_sales"] = sales_count["total_orders"] / DAYS
+
+slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
+slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
+df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
+
+slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
+slider_items = slider_items.merge(sales_count[["partner_sku","daily_sales"]], on="partner_sku", how="left")
+
+slider_items["daily_sales"] = slider_items["daily_sales"].fillna(1)
 slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
 
 slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
@@ -347,7 +357,6 @@ slider_items_unique = slider_items.groupby(
     ["partner_sku","store","image_url","STOCK"]
 ).first().reset_index()
 
-# ✅ ترتيب السلايدر: Noon أولًا ثم Amazon
 slider_items_unique['store_rank'] = slider_items_unique['store'].apply(lambda x: 0 if x=='Noon' else 1)
 slider_items_unique = slider_items_unique.sort_values(by=['store_rank','days_remaining']).reset_index(drop=True)
 
@@ -357,4 +366,5 @@ with st.sidebar:
         st.image(safe_image(row["image_url"]), width=100)
         st.markdown(f"**{row['partner_sku']}**")
         st.markdown(f"📦 Stock: {int(row['STOCK'])}")
+        st.markdown(f"🔥 Daily Sales: {row['daily_sales']:.2f}")
         st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
