@@ -3,7 +3,6 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 import requests
-from streamlit.components.v1 import html
 
 # =========================
 # إعداد الصفحة
@@ -246,72 +245,12 @@ df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
 # 🔍 بحث
-
-# 📷 مسح الباركود بالكاميرا (تحديث كامل)
 # =========================
-# 🔍 مسح الباركود والبحث تلقائي
-# =========================
-
-st.markdown("### 📷 مسح الباركود بالكاميرا")
-
-# session_state لتخزين الكود الممسوح
-if "scanned_code" not in st.session_state:
-    st.session_state.scanned_code = ""
-
-# Text Input مربوط بالـ session_state
-search = st.text_input(
-    "🔍 ابحث بالـ SKU أو الكود",
-    value=st.session_state.scanned_code,
-    key="scanned_code"
-)
-
-# HTML + JS للكاميرا الخلفية بدون reload
-html("""
-<div id="reader" style="width:320px;"></div>
-
-<script src="https://unpkg.com/html5-qrcode"></script>
-<script>
-function onScanSuccess(decodedText) {
-    // إرسال الكود الممسوح إلى Streamlit
-    window.parent.postMessage({type: 'set-code', value: decodedText}, "*");
-}
-
-// اختيار الكاميرا الخلفية بشكل ديناميكي
-Html5Qrcode.getCameras().then(cameras => {
-    if(cameras && cameras.length) {
-        let backCamera = cameras.find(cam => cam.label.toLowerCase().includes("back")) || cameras[0];
-        let scanner = new Html5Qrcode("reader");
-        scanner.start(backCamera.id, { fps: 10, qrbox: 250 }, onScanSuccess);
-    }
-}).catch(err => console.error(err));
-
-// Listener لتحديث Streamlit session_state
-window.addEventListener('message', event => {
-    if(event.data.type === 'set-code'){
-        const input = document.querySelector('input[data-testid="stTextInput"]');
-        if(input){
-            input.value = event.data.value;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-    }
-});
-</script>
-""", height=400)
-
-# إعادة تشغيل تلقائي عند وجود كود لفلترة الـ DataFrame
-if st.session_state.scanned_code:
-    search = st.session_state.scanned_code
-# =========================
-# فلترة DataFrame حسب الكود المقروء
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
 if search:
-    # df هنا جدول المنتجات الخاص بك
-    df_filtered = df[df["partner_sku"].str.contains(search, case=False, na=False)]
-    st.write(f"🔍 تم العثور على {df_filtered.shape[0]} نتيجة للكود: {search}")
-# =========================
-# فلترة الداتا حسب البحث
-# =========================
-if search:
-    df = df[df["partner_sku"].str.contains(search, case=False, na=False)]
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
+            df["unified_code"].astype(str).str.contains(search)]
+
 # =========================
 # ترتيب الأكواد
 # =========================
