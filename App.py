@@ -250,7 +250,6 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # =========================
 # 📷 مسح الباركود بالكاميرا
-
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
 # session_state
@@ -272,10 +271,10 @@ st.markdown("""
 search = st.text_input(
     "🔍 ابحث بالـ SKU أو الكود", 
     value=st.session_state.scanned_code, 
-    key="scanned_code"  # مهم جدًا
+    key="scanned_code"
 )
 
-# إضافة class إذا فيه كود مقروء
+# عرض إطار أخضر عند وجود كود
 if st.session_state.scanned_code:
     st.markdown("""
     <script>
@@ -293,9 +292,12 @@ html("""
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    // أرسل الكود إلى Streamlit session_state
-    const streamlitEvent = new CustomEvent("streamlit:message", {detail: {value: decodedText}});
-    window.dispatchEvent(streamlitEvent);
+    // أرسل الكود مباشرة للـ input (widget) في Streamlit
+    const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+    if(input){
+        input.value = decodedText;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 }
 
 // اختيار الكاميرا الخلفية
@@ -311,11 +313,10 @@ Html5Qrcode.getCameras().then(cameras => {
 </script>
 """, height=400)
 
-# Listener لتحديث session_state مباشرة
-st.session_state.scanned_code = st.session_state.get("scanned_code", "")
-if st.session_state.scanned_code:
-    # فلترة DataFrame حسب الكود المقروء
-    df = df[df["partner_sku"].str.contains(st.session_state.scanned_code, case=False, na=False)]
+# فلترة DataFrame حسب الكود المقروء
+if search:
+    df_filtered = df[df["partner_sku"].str.contains(search, case=False, na=False)]
+    st.write(f"🔍 تم العثور على {df_filtered.shape[0]} نتيجة للكود: {search}")
 
 # =========================
 # فلترة الداتا حسب البحث
