@@ -248,6 +248,9 @@ df = df.merge(coding, on="partner_sku", how="left")
 # 🔍 بحث
 
 # 📷 مسح الباركود بالكاميرا (تحديث كامل)
+# =========================
+# 🔍 مسح الباركود والبحث تلقائي
+# =========================
 
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
@@ -269,14 +272,13 @@ html("""
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    // إرسال الكود الممسوح إلى Streamlit عبر postMessage
+    // إرسال الكود الممسوح إلى Streamlit
     window.parent.postMessage({type: 'set-code', value: decodedText}, "*");
 }
 
 // اختيار الكاميرا الخلفية بشكل ديناميكي
 Html5Qrcode.getCameras().then(cameras => {
     if(cameras && cameras.length) {
-        // غالبًا الخلفية، إذا لم يوجد استخدم أول كاميرا
         let backCamera = cameras.find(cam => cam.label.toLowerCase().includes("back")) || cameras[0];
         let scanner = new Html5Qrcode("reader");
         scanner.start(backCamera.id, { fps: 10, qrbox: 250 }, onScanSuccess);
@@ -296,9 +298,9 @@ window.addEventListener('message', event => {
 </script>
 """, height=400)
 
-# إعادة تشغيل Streamlit تلقائيًا عند وجود كود
+# إعادة تشغيل تلقائي عند وجود كود لفلترة الـ DataFrame
 if st.session_state.scanned_code:
-    st.experimental_rerun()
+    search = st.session_state.scanned_code
 # =========================
 # فلترة DataFrame حسب الكود المقروء
 if search:
