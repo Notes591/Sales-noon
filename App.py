@@ -250,17 +250,17 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # =========================
 # 📷 مسح الباركود بالكاميرا
-# =========================
+# ============# 📷 مسح الباركود بالكاميرا
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
-# تأكد من session_state
+# session_state
 if "scanned_code" not in st.session_state:
     st.session_state.scanned_code = ""
 
-# الـ Text Input
+# Text Input
 search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=st.session_state.scanned_code)
 
-# كود HTML + JS للكاميرا
+# HTML + JS للكاميرا الخلفية
 html("""
 <div id="reader" style="width:320px"></div>
 
@@ -270,12 +270,20 @@ function onScanSuccess(decodedText) {
     window.parent.postMessage({type:'set-code', value:decodedText}, "*");
 }
 
-let scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-scanner.render(onScanSuccess);
+// اختيار الكاميرا الخلفية
+Html5Qrcode.getCameras().then(cameras => {
+    if(cameras && cameras.length) {
+        let backCamera = cameras[cameras.length-1].id; // غالبًا الكاميرا الخلفية
+        let scanner = new Html5Qrcode("reader");
+        scanner.start(backCamera, { fps: 10, qrbox: 250 }, onScanSuccess);
+    }
+}).catch(err => {
+    console.error(err);
+});
 </script>
 """, height=400)
 
-# استماع للـ message من JS لتحديث input
+# event listener لتحديث الـ input
 st.markdown("""
 <script>
 window.addEventListener('message', event => {
@@ -289,6 +297,11 @@ window.addEventListener('message', event => {
 });
 </script>
 """, unsafe_allow_html=True)
+
+# فلترة الداتا حسب البحث
+if search:
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False)]=============
+
 
 # =========================
 # فلترة الداتا حسب البحث
