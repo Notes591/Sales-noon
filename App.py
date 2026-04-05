@@ -101,6 +101,17 @@ def classify_noon_order(row):
     else:
         return "تخزين"
 df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
+df_noon["partner_sku"] = df_noon["sku"]
+
+# =========================
+# Use Commission & Shipping from Sheet for Noon
+# =========================
+if "Commission" not in df_noon.columns:
+    df_noon["Commission"] = 0.0
+if "Shipping" not in df_noon.columns:
+    df_noon["Shipping"] = 0.0
+if "TYPE" not in df_noon.columns:
+    df_noon["TYPE"] = "NORMAL"
 
 # =========================
 # Load Amazon
@@ -122,6 +133,13 @@ try:
             return "تخزين"
     df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
 
+    if "Commission" not in df_amazon.columns:
+        df_amazon["Commission"] = 0.0
+    if "Shipping" not in df_amazon.columns:
+        df_amazon["Shipping"] = 0.0
+    if "TYPE" not in df_amazon.columns:
+        df_amazon["TYPE"] = "NORMAL"
+
 except:
     df_amazon = pd.DataFrame()
 
@@ -135,6 +153,14 @@ try:
     df_trendyol["invoice_price"] = pd.to_numeric(df_trendyol["Unit Price"], errors="coerce")
     df_trendyol["image_url"] = df_trendyol.get("image_url", None)
     df_trendyol["order_type"] = "عادي"
+
+    if "Commission" not in df_trendyol.columns:
+        df_trendyol["Commission"] = 0.0
+    if "Shipping" not in df_trendyol.columns:
+        df_trendyol["Shipping"] = 0.0
+    if "TYPE" not in df_trendyol.columns:
+        df_trendyol["TYPE"] = "NORMAL"
+
 except:
     df_trendyol = pd.DataFrame()
 
@@ -149,27 +175,14 @@ except:
     df_stock = pd.DataFrame(columns=["SKU", "STOCK"])
 
 # =========================
-# Merge All Stores
+# Merge
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
-
-# =========================
-# Load Coding Table
-# =========================
-coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
-coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
-
-# =========================
-# Use TYPE Column to determine Commission & Shipping
-# =========================
-df = df.merge(coding[["partner_sku","TYPE","Commission","Shipping"]], on="partner_sku", how="left")
-df["TYPE"] = df["TYPE"].fillna("NORMAL")
-df["Commission"] = df.apply(lambda x: x["Commission"] if x["TYPE"]=="NORMAL" and x["order_type"]=="عادي" else x["Commission"], axis=1)
-df["Shipping"] = df.apply(lambda x: x["Shipping"] if x["TYPE"]=="OUT" and x["order_type"]=="تخزين" else x["Shipping"], axis=1)
-
 df["Commission"] = pd.to_numeric(df["Commission"], errors="coerce").fillna(0)
 df["Shipping"] = pd.to_numeric(df["Shipping"], errors="coerce").fillna(0)
+if "TYPE" not in df.columns:
+    df["TYPE"] = "NORMAL"
 
 # =========================
 # Compute Final Price
@@ -189,6 +202,7 @@ for store in ["Noon","Amazon","Trendyol"]:
     summary_data.append((store, total, normal, storage))
 
 st.markdown("<div class='summary'><b>📊 ملخص عام:</b></div>", unsafe_allow_html=True)
+
 cols = st.columns(3)
 for i, (store, total, normal, storage) in enumerate(summary_data):
     with cols[i]:
@@ -200,6 +214,17 @@ for i, (store, total, normal, storage) in enumerate(summary_data):
             <div class="small">تخزين: {storage}</div>
         </div>
         """, unsafe_allow_html=True)
+
+# =========================
+# Coding
+# =========================
+coding = pd.DataFrame(client.open_by_key(SHEET_ID).worksheet("Coding").get_all_records())
+coding["partner_sku"] = coding["partner_sku"].astype(str).str.strip()
+for col in ["TYPE","Commission","Shipping"]:
+    if col not in coding.columns:
+        coding[col] = 0.0 if col in ["Commission","Shipping"] else "NORMAL"
+
+df = df.merge(coding[["partner_sku","TYPE","Commission","Shipping"]], on="partner_sku", how="left")
 
 # =========================
 # 🔍 بحث
@@ -253,82 +278,8 @@ for code in code_order:
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1,3,2])
-    with col1:
-        st.image(main_img, width=200)
-    with col3:
-        try:
-            top_store = df_code["store"].value_counts().idxmax()
-        except:
-            top_store = "-"
-        try:
-            min_row = df_code.loc[df_code["invoice_price"].idxmin()]
-            min_text = f"{min_row['invoice_price']:.2f} ({min_row['store']} - {min_row['partner_sku']})"
-        except:
-            min_text = "-"
-        try:
-            max_row = df_code.loc[df_code["invoice_price"].idxmax()]
-            max_text = f"{max_row['invoice_price']:.2f} ({max_row['store']} - {max_row['partner_sku']})"
-        except:
-            max_text = "-"
-        try:
-            best_sku = df_code["partner_sku"].value_counts().idxmax()
-        except:
-            best_sku = "-"
-        try:
-            avg_price = df_code["invoice_price"].mean()
-            avg_price = f"{avg_price:.2f}"
-        except:
-            avg_price = "-"
-        st.markdown(f"""
-        <div class="card">
-            <div class="title">📊 تحليل</div>
-            <div class="small">🏆 أكتر متجر: {top_store}</div>
-            <div class="small">💰 أقل سعر: {min_text}</div>
-            <div class="small">💎 أعلى سعر: {max_text}</div>
-            <div class="small">📦 أقوى SKU: {best_sku}</div>
-            <div class="small">📊 متوسط السعر: {avg_price}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    for store_name in ["Noon","Amazon","Trendyol"]:
-        df_store = df_code[df_code["store"] == store_name]
-        if df_store.empty:
-            continue
-        with col2:
-            st.markdown(f"<div class='divider'></div><b>{store_name} طلبات:</b>", unsafe_allow_html=True)
-            cols = st.columns(4)
-            df_store_unique = df_store.groupby(["partner_sku","order_type","image_url"]).agg(
-                total_orders=("partner_sku","count"),
-                prices=("invoice_price", lambda x: x.value_counts().to_dict()),
-                Commission=("Commission", "first"),
-                Shipping=("Shipping", "first"),
-                final_price=("final_price", "first")
-            ).reset_index()
-            df_store_unique['order_rank'] = df_store_unique['order_type'].apply(lambda x: 0 if x=='عادي' else 1)
-            df_store_unique = df_store_unique.sort_values(by=['order_rank','total_orders'], ascending=[True, False]).reset_index(drop=True)
-            for i, row in df_store_unique.iterrows():
-                sku = row['partner_sku']
-                image = safe_image(row["image_url"])
-                order_type = row["order_type"]
-                stock_row = df_stock[df_stock["SKU"] == sku]
-                stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else None
-                prices_html = "<br>".join([f"💰 {price:.2f} ({count} طلب)" for price, count in row["prices"].items()])
-                with cols[i % 4]:
-                    st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-                    st.image(image, width=80)
-                    if stock is not None:
-                        st.markdown(f"<div class='stock-badge'>Stock: {stock}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
-                    st.markdown(
-                        f"<div class='small'>{prices_html}<br>📦 {row['total_orders']} طلب<br>💵 Commission: {row['Commission']:.2f}<br>🚚 Shipping: {row['Shipping']:.2f}<br>💰 Final Price: {row['final_price']:.2f}</div>",
-                        unsafe_allow_html=True
-                    )
-                    st.markdown("</div>", unsafe_allow_html=True)
-
 # =========================
-# 🛒 Sidebar (المعادلة الجديدة)
+# 🛒 Sidebar (المخزون القريب للنهاية)
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
@@ -339,9 +290,11 @@ df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
 df_stock = df_stock.drop_duplicates(subset=["SKU"])
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
 slider_items = slider_items.merge(sales_count[["partner_sku","total_orders"]], on="partner_sku", how="left")
+
 slider_items["daily_sales"] = slider_items["total_orders"].fillna(1)
 slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
 slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
+
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"])
 slider_items_unique = slider_items_unique.sort_values(by="days_remaining").reset_index(drop=True)
