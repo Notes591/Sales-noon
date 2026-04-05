@@ -250,35 +250,14 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # 📷 مسح الباركود بالكاميرا
 # =========================
-
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
-html("""
-<div id="reader" style="width:300px"></div>
+scan_result = html("""
 
-<script src="https://unpkg.com/html5-qrcode"></script>
-
-<script>
-function onScanSuccess(decodedText, decodedResult) {
-
-    const streamlitDoc = window.parent.document;
-    const input = streamlitDoc.querySelector('input[data-testid="stTextInput"]');
-
-    if(input){
-        input.value = decodedText;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-}
-
-let html5QrcodeScanner = new Html5QrcodeScanner(
-    "reader",
-    { fps: 10, qrbox: 250 }
-);
-
-html5QrcodeScanner.render(onScanSuccess);
-</script>
 """, height=350)
-search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+
+
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=scan_result if scan_result else "")
 if search:
     df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
             df["unified_code"].astype(str).str.contains(search)]
