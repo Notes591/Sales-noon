@@ -246,17 +246,8 @@ df = df.merge(coding, on="partner_sku", how="left")
 
 # =========================
 # 🔍 بحث
-# =========================
-# =========================
-# =========================
-# =========================
+
 # 📷 مسح الباركود بالكاميرا (تحديث كامل)
-# =========================
-# =========================
-# 📷 مسح الباركود بالكاميرا (تحديث كامل)
-# =========================
-import streamlit as st
-from streamlit.components.v1 import html
 
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
@@ -271,70 +262,43 @@ search = st.text_input(
     key="scanned_code"
 )
 
-# CSS لإطار أخضر عند وجود كود
-st.markdown("""
-<style>
-.scanned-input input {
-    border: 2px solid #4CAF50 !important;  /* إطار أخضر */
-    padding: 5px;
-    border-radius: 5px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# إضافة الإطار الأخضر إذا فيه كود
-if st.session_state.scanned_code:
-    st.markdown("""
-    <script>
-    const input = document.querySelector('input[data-testid="stTextInput"]');
-    if(input){
-        input.classList.add('scanned-input');
-    }
-    </script>
-    """, unsafe_allow_html=True)
-
-# HTML + JS للكاميرا الخلفية مع التعديلات الجديدة
+# HTML + JS للكاميرا الخلفية بدون reload
 html("""
-<div id="reader" style="width:320px"></div>
+<div id="reader" style="width:320px;"></div>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
-    if(input){
-        input.value = decodedText;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        
-        // إرسال رسالة لإعادة تشغيل Streamlit
-        window.parent.postMessage({type: 'set-code', value: decodedText}, "*");
-    }
+    // إرسال الكود الممسوح إلى Streamlit عبر postMessage
+    window.parent.postMessage({type: 'set-code', value: decodedText}, "*");
 }
 
-// اختيار الكاميرا الخلفية
+// اختيار الكاميرا الخلفية بشكل ديناميكي
 Html5Qrcode.getCameras().then(cameras => {
     if(cameras && cameras.length) {
-        let backCamera = cameras[cameras.length-1].id; // غالبًا الخلفية
+        // غالبًا الخلفية، إذا لم يوجد استخدم أول كاميرا
+        let backCamera = cameras.find(cam => cam.label.toLowerCase().includes("back")) || cameras[0];
         let scanner = new Html5Qrcode("reader");
-        scanner.start(backCamera, { fps: 10, qrbox: 250 }, onScanSuccess);
+        scanner.start(backCamera.id, { fps: 10, qrbox: 250 }, onScanSuccess);
     }
-}).catch(err => {
-    console.error(err);
-});
+}).catch(err => console.error(err));
 
-// Listener في Streamlit لتحديث input تلقائيًا
+// Listener لتحديث Streamlit session_state
 window.addEventListener('message', event => {
-    if(event.data.type === 'set-code') {
+    if(event.data.type === 'set-code'){
         const input = document.querySelector('input[data-testid="stTextInput"]');
         if(input){
             input.value = event.data.value;
             input.dispatchEvent(new Event('input', { bubbles: true }));
         }
-        // إعادة تشغيل Streamlit تلقائيًا لتفعيل البحث
-        window.parent.location.reload();
     }
 });
 </script>
 """, height=400)
+
+# إعادة تشغيل Streamlit تلقائيًا عند وجود كود
+if st.session_state.scanned_code:
+    st.experimental_rerun()
 # =========================
 # فلترة DataFrame حسب الكود المقروء
 if search:
