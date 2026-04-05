@@ -249,7 +249,9 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # =========================
 # =========================
-# 📷 مسح الباركود بالكاميرا
+# =========================
+# 📷 مسح الباركود بالكاميرا (تحديث كامل)
+# =========================
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
 # session_state
@@ -285,19 +287,15 @@ if st.session_state.scanned_code:
     </script>
     """, unsafe_allow_html=True)
 
-# HTML + JS للكاميرا الخلفية
+# HTML + JS للكاميرا الخلفية مع تحديث session_state
 html("""
 <div id="reader" style="width:320px"></div>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    // أرسل الكود مباشرة للـ input (widget) في Streamlit
-    const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
-    if(input){
-        input.value = decodedText;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    // إرسال الكود إلى Streamlit عبر postMessage
+    window.parent.postMessage({type: 'scanned-code', value: decodedText}, "*");
 }
 
 // اختيار الكاميرا الخلفية
@@ -313,11 +311,22 @@ Html5Qrcode.getCameras().then(cameras => {
 </script>
 """, height=400)
 
-# فلترة DataFrame حسب الكود المقروء
-if search:
-    df_filtered = df[df["partner_sku"].str.contains(search, case=False, na=False)]
-    st.write(f"🔍 تم العثور على {df_filtered.shape[0]} نتيجة للكود: {search}")
-
+# JS Listener لتحديث session_state فورًا
+st.markdown("""
+<script>
+window.addEventListener('message', event => {
+    if(event.data.type === 'scanned-code'){
+        const input = document.querySelector('input[data-testid="stTextInput"]');
+        if(input){
+            input.value = event.data.value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        // Streamlit rerun via setting the hidden key
+        fetch(window.location.href, { method: 'POST', body: JSON.stringify({scanned_code: event.data.value}) });
+    }
+});
+</script>
+""", unsafe_allow_html=True)
 # =========================
 # فلترة الداتا حسب البحث
 # =========================
