@@ -104,7 +104,7 @@ df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
 df_noon["partner_sku"] = df_noon["sku"]
 
 # =========================
-# Default Commission & Shipping for Noon
+# Use Commission & Shipping from Sheet for Noon
 # =========================
 if "Commission" not in df_noon.columns:
     df_noon["Commission"] = 0.0
@@ -131,7 +131,7 @@ try:
             return "تخزين"
     df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
 
-    # Default Commission & Shipping
+    # Use Commission & Shipping from Sheet for Amazon
     if "Commission" not in df_amazon.columns:
         df_amazon["Commission"] = 0.0
     if "Shipping" not in df_amazon.columns:
@@ -151,6 +151,7 @@ try:
     df_trendyol["image_url"] = df_trendyol.get("image_url", None)
     df_trendyol["order_type"] = "عادي"
 
+    # Use Commission & Shipping from Sheet for Trendyol
     if "Commission" not in df_trendyol.columns:
         df_trendyol["Commission"] = 0.0
     if "Shipping" not in df_trendyol.columns:
@@ -178,47 +179,18 @@ df["Commission"] = pd.to_numeric(df["Commission"], errors="coerce").fillna(0)
 df["Shipping"] = pd.to_numeric(df["Shipping"], errors="coerce").fillna(0)
 
 # =========================
+# حساب العمولة والتوصيل حسب TYPE
 # =========================
-# Apply Commission & Shipping based on TYPE column
-# =========================
-def get_commission_shipping(row, df_sheet):
-    sku = row["partner_sku"]
-    order_type = row["order_type"]  # "عادي" أو "تخزين"
-    type_map = {"عادي": "NORMAL", "تخزين": "OUT"}
-    type_value = type_map.get(order_type, "OUT")
+def get_commission_shipping(row):
+    if "TYPE" in row and pd.notna(row["TYPE"]):
+        typ = str(row["TYPE"]).strip().upper()
+        if typ == "NORMAL":
+            return row.get("Commission_NORMAL", row["Commission"]), row.get("Shipping_NORMAL", row["Shipping"])
+        elif typ == "OUT":
+            return row.get("Commission_OUT", row["Commission"]), row.get("Shipping_OUT", row["Shipping"])
+    return row["Commission"], row["Shipping"]
 
-    if row["store"] == "Noon":
-        df_filter = df_sheet[(df_sheet["sku"] == sku) & (df_sheet["TYPE"] == type_value)]
-    elif row["store"] == "Amazon":
-        df_filter = df_sheet[(df_sheet["partner_sku"] == sku) & (df_sheet["TYPE"] == type_value)]
-    elif row["store"] == "Trendyol":
-        df_filter = df_sheet[(df_sheet["partner_sku"] == sku) & (df_sheet["TYPE"] == type_value)]
-    else:
-        return 0.0, 0.0
-
-    if not df_filter.empty:
-        commission = float(df_filter["Commission"].iloc[0])
-        shipping = float(df_filter["Shipping"].iloc[0])
-    else:
-        commission = 0.0
-        shipping = 0.0
-
-    return commission, shipping
-
-def apply_commission_shipping(row):
-    if row["store"] == "Noon":
-        df_sheet = df_noon
-    elif row["store"] == "Amazon":
-        df_sheet = df_amazon
-    elif row["store"] == "Trendyol":
-        df_sheet = df_trendyol
-    else:
-        return pd.Series([0.0, 0.0])
-
-    commission, shipping = get_commission_shipping(row, df_sheet)
-    return pd.Series([commission, shipping])
-
-df[["Commission", "Shipping"]] = df.apply(apply_commission_shipping, axis=1)
+df[["Commission","Shipping"]] = df.apply(lambda r: pd.Series(get_commission_shipping(r)), axis=1)
 
 # =========================
 # Compute Final Price
@@ -407,7 +379,7 @@ st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
 sales_count = df.groupby("partner_sku").size().reset_index(name="total_orders")
 
-slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
+slider_items = df[df["store"].isin(["Noon","Amazon","Trendyol"])].copy()
 
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
@@ -418,9 +390,20 @@ slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU
 slider_items = slider_items.merge(sales_count[["partner_sku","total_orders"]], on="partner_sku", how="left")
 
 slider_items["daily_sales"] = slider_items["total_orders"].fillna(1)
-slider_items["daily_sales"] = slider_items["daily_sales"].replace(0,1)
-slider_items["remaining_days"] = (slider_items["STOCK"] / slider_items["daily_sales"]).fillna(0).astype(int)
-slider_items = slider_items.sort_values("remaining_days")
+slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
 
-for idx, row in slider_items.iterrows():
-    st.sidebar.markdown(f"**{row['partner_sku']}**: {row['STOCK']} قطعة متبقية ~ {row['remaining_days']} أيام")
+slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
+
+slider_items = slider_items[slider_items["days_remaining"] <= 15]
+
+slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"])
+slider_items_unique = slider_items_unique.sort_values(by="days_remaining").reset_index(drop=True)
+
+with st.sidebar:
+    for _, row in slider_items_unique.iterrows():
+        st.markdown("---")
+        st.image(safe_image(row["image_url"]), width=100)
+        st.markdown(f"**{row['partner_sku']}**")
+        st.markdown(f"📦 Stock: {int(row['STOCK'])}")
+        st.markdown(f"🔥 Daily Sales: {row['daily_sales']:.2f}")
+        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.2f}")
