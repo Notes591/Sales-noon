@@ -92,12 +92,6 @@ if "base_price" in df_noon.columns:
 df_noon["store"] = "Noon"
 df_noon["sku"] = df_noon["sku"].astype(str)
 
-# إضافة عمودين العمولة والتوصيل إذا موجودين في الشيت
-df_noon["Commission"] = pd.to_numeric(df_noon.get("Commission", 0), errors="coerce").fillna(0)
-df_noon["Shipping"] = pd.to_numeric(df_noon.get("Shipping", 0), errors="coerce").fillna(0)
-df_noon["final_price"] = df_noon["invoice_price"] + df_noon["Commission"] + df_noon["Shipping"]
-df_noon["final_price"] = df_noon["final_price"] * 1.15  # إضافة ضريبة 15%
-
 def classify_noon_order(row):
     fbn = str(row.get("is_fbn","")).strip().lower()
     if "fulfilled by noon" in fbn:
@@ -108,6 +102,12 @@ def classify_noon_order(row):
         return "تخزين"
 df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
 df_noon["partner_sku"] = df_noon["sku"]
+
+# =========================
+# Add Commission & Shipping columns for Noon
+# =========================
+df_noon["Commission"] = 0.0
+df_noon["Shipping"] = 0.0
 
 # =========================
 # Load Amazon
@@ -121,11 +121,6 @@ try:
     df_amazon["store"] = "Amazon"
     df_amazon["image_url"] = df_amazon.get("image_url", None)
 
-    df_amazon["Commission"] = pd.to_numeric(df_amazon.get("Commission", 0), errors="coerce").fillna(0)
-    df_amazon["Shipping"] = pd.to_numeric(df_amazon.get("Shipping", 0), errors="coerce").fillna(0)
-    df_amazon["final_price"] = df_amazon["invoice_price"] + df_amazon["Commission"] + df_amazon["Shipping"]
-    df_amazon["final_price"] = df_amazon["final_price"] * 1.15
-
     def classify_amazon_order(row):
         container = str(row.get("حاوية كاملة الحمولة", "")).strip().upper()
         if container == "FSAB":
@@ -133,6 +128,10 @@ try:
         else:
             return "تخزين"
     df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+
+    # Add Commission & Shipping columns for Amazon
+    df_amazon["Commission"] = 0.0
+    df_amazon["Shipping"] = 0.0
 
 except:
     df_amazon = pd.DataFrame()
@@ -148,10 +147,9 @@ try:
     df_trendyol["image_url"] = df_trendyol.get("image_url", None)
     df_trendyol["order_type"] = "عادي"
 
-    df_trendyol["Commission"] = pd.to_numeric(df_trendyol.get("Commission", 0), errors="coerce").fillna(0)
-    df_trendyol["Shipping"] = pd.to_numeric(df_trendyol.get("Shipping", 0), errors="coerce").fillna(0)
-    df_trendyol["final_price"] = df_trendyol["invoice_price"] + df_trendyol["Commission"] + df_trendyol["Shipping"]
-    df_trendyol["final_price"] = df_trendyol["final_price"] * 1.15
+    # Add Commission & Shipping columns for Trendyol
+    df_trendyol["Commission"] = 0.0
+    df_trendyol["Shipping"] = 0.0
 
 except:
     df_trendyol = pd.DataFrame()
@@ -171,6 +169,13 @@ except:
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
+df["Commission"] = pd.to_numeric(df["Commission"], errors="coerce").fillna(0)
+df["Shipping"] = pd.to_numeric(df["Shipping"], errors="coerce").fillna(0)
+
+# =========================
+# Compute Final Price
+# =========================
+df["final_price"] = (df["invoice_price"] - df["Commission"] - df["Shipping"]) * 0.85
 
 # =========================
 # 🔥 ملخص عام
@@ -314,8 +319,8 @@ for code in code_order:
             df_store_unique = df_store.groupby(["partner_sku","order_type","image_url"]).agg(
                 total_orders=("partner_sku","count"),
                 prices=("invoice_price", lambda x: x.value_counts().to_dict()),
-                commission=("Commission", "first"),
-                shipping=("Shipping", "first"),
+                Commission=("Commission", "first"),
+                Shipping=("Shipping", "first"),
                 final_price=("final_price", "first")
             ).reset_index()
             df_store_unique['order_rank'] = df_store_unique['order_type'].apply(lambda x: 0 if x=='عادي' else 1)
@@ -342,28 +347,33 @@ for code in code_order:
                     st.markdown(f"<div class='title'>{sku}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div class='order-type'>{order_type}</div>", unsafe_allow_html=True)
                     st.markdown(
-                        f"<div class='small'>{prices_html}<br>📦 {row['total_orders']} طلب<br>💵 Commission: {row['commission']:.2f}<br>🚚 Shipping: {row['shipping']:.2f}<br>💰 Final Price: {row['final_price']:.2f}</div>",
+                        f"<div class='small'>{prices_html}<br>📦 {row['total_orders']} طلب<br>💵 Commission: {row['Commission']:.2f}<br>🚚 Shipping: {row['Shipping']:.2f}<br>💰 Final Price: {row['final_price']:.2f}</div>",
                         unsafe_allow_html=True
                     )
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# 🛒 Sidebar
+# 🛒 Sidebar (المعادلة الجديدة)
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
+sales_count = df.groupby("partner_sku").size().reset_index(name="total_orders")
+
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
+
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
+
 df_stock = df_stock.drop_duplicates(subset=["SKU"])
 
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
+slider_items = slider_items.merge(sales_count[["partner_sku","total_orders"]], on="partner_sku", how="left")
 
-daily_sales_df = slider_items.groupby("partner_sku")["partner_sku"].count().reset_index(name="daily_sales")
-slider_items = slider_items.merge(daily_sales_df, on="partner_sku", how="left")
+slider_items["daily_sales"] = slider_items["total_orders"].fillna(1)
 slider_items["daily_sales"] = slider_items["daily_sales"].replace(0, 1)
 
 slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
+
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"])
@@ -377,6 +387,3 @@ with st.sidebar:
         st.markdown(f"📦 Stock: {int(row['STOCK'])}")
         st.markdown(f"🔥 Daily Sales: {row['daily_sales']:.2f}")
         st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.2f}")
-        st.markdown(f"💵 Commission: {row['Commission']:.2f}")
-        st.markdown(f"🚚 Shipping: {row['Shipping']:.2f}")
-        st.markdown(f"💰 Final Price: {row['final_price']:.2f}")
