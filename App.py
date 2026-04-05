@@ -104,12 +104,24 @@ df_noon["order_type"] = df_noon.apply(classify_noon_order, axis=1)
 df_noon["partner_sku"] = df_noon["sku"]
 
 # =========================
+# Add type column for commission/shipping selection
+# =========================
+df_noon["type"] = df_noon["order_type"].apply(lambda x: "out" if x=="تخزين" else "normal")
+
+# =========================
 # Use Commission & Shipping from Sheet for Noon
 # =========================
-if "Commission" not in df_noon.columns:
-    df_noon["Commission"] = 0.0
-if "Shipping" not in df_noon.columns:
-    df_noon["Shipping"] = 0.0
+if "Commission_out" not in df_noon.columns:
+    df_noon["Commission_out"] = 0.0
+if "Shipping_out" not in df_noon.columns:
+    df_noon["Shipping_out"] = 0.0
+if "Commission_normal" not in df_noon.columns:
+    df_noon["Commission_normal"] = 0.0
+if "Shipping_normal" not in df_noon.columns:
+    df_noon["Shipping_normal"] = 0.0
+
+df_noon["Commission"] = df_noon.apply(lambda row: row["Commission_out"] if row["type"]=="out" else row["Commission_normal"], axis=1)
+df_noon["Shipping"] = df_noon.apply(lambda row: row["Shipping_out"] if row["type"]=="out" else row["Shipping_normal"], axis=1)
 
 # =========================
 # Load Amazon
@@ -130,12 +142,17 @@ try:
         else:
             return "تخزين"
     df_amazon["order_type"] = df_amazon.apply(classify_amazon_order, axis=1)
+    df_amazon["type"] = df_amazon["order_type"].apply(lambda x: "out" if x=="تخزين" else "normal")
 
     # Use Commission & Shipping from Sheet for Amazon
-    if "Commission" not in df_amazon.columns:
-        df_amazon["Commission"] = 0.0
-    if "Shipping" not in df_amazon.columns:
-        df_amazon["Shipping"] = 0.0
+    for t in ["out","normal"]:
+        if f"Commission_{t}" not in df_amazon.columns:
+            df_amazon[f"Commission_{t}"] = 0.0
+        if f"Shipping_{t}" not in df_amazon.columns:
+            df_amazon[f"Shipping_{t}"] = 0.0
+
+    df_amazon["Commission"] = df_amazon.apply(lambda row: row[f"Commission_{row['type']}"], axis=1)
+    df_amazon["Shipping"] = df_amazon.apply(lambda row: row[f"Shipping_{row['type']}"], axis=1)
 
 except:
     df_amazon = pd.DataFrame()
@@ -150,12 +167,17 @@ try:
     df_trendyol["invoice_price"] = pd.to_numeric(df_trendyol["Unit Price"], errors="coerce")
     df_trendyol["image_url"] = df_trendyol.get("image_url", None)
     df_trendyol["order_type"] = "عادي"
+    df_trendyol["type"] = "normal"
 
     # Use Commission & Shipping from Sheet for Trendyol
-    if "Commission" not in df_trendyol.columns:
-        df_trendyol["Commission"] = 0.0
-    if "Shipping" not in df_trendyol.columns:
-        df_trendyol["Shipping"] = 0.0
+    for t in ["out","normal"]:
+        if f"Commission_{t}" not in df_trendyol.columns:
+            df_trendyol[f"Commission_{t}"] = 0.0
+        if f"Shipping_{t}" not in df_trendyol.columns:
+            df_trendyol[f"Shipping_{t}"] = 0.0
+
+    df_trendyol["Commission"] = df_trendyol.apply(lambda row: row[f"Commission_{row['type']}"], axis=1)
+    df_trendyol["Shipping"] = df_trendyol.apply(lambda row: row[f"Shipping_{row['type']}"], axis=1)
 
 except:
     df_trendyol = pd.DataFrame()
