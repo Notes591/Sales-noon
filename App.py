@@ -254,15 +254,12 @@ st.markdown("### 📷 مسح الباركود بالكاميرا")
 
 html("""
 <div id="reader" style="width:320px"></div>
-<div id="result" style="font-size:18px;font-weight:bold;margin-top:10px;"></div>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
 
 <script>
 
 function onScanSuccess(decodedText) {
-
-    document.getElementById("result").innerText = "Scanned: " + decodedText;
 
     const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
 
@@ -282,10 +279,7 @@ scanner.render(onScanSuccess);
 </script>
 """, height=400)
 
-search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=scan_result if scan_result else "")
-if search:
-    df = df[df["partner_sku"].str.contains(search, case=False, na=False) |
-            df["unified_code"].astype(str).str.contains(search)]
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
 
 # =========================
 # ترتيب الأكواد
