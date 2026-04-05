@@ -257,12 +257,34 @@ st.markdown("### 📷 مسح الباركود بالكاميرا")
 if "scanned_code" not in st.session_state:
     st.session_state.scanned_code = ""
 
-# Text Input مرتبط بالـ session_state
-search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=st.session_state.scanned_code)
+# CSS لتغيير إطار الـ input عند وجود كود
+st.markdown("""
+<style>
+.scanned-input input {
+    border: 2px solid #4CAF50 !important;  /* إطار أخضر */
+    padding: 5px;
+    border-radius: 5px;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# عرض رسالة مباشرة للكود المقروء
+# Text Input مرتبط بالـ session_state
+search = st.text_input(
+    "🔍 ابحث بالـ SKU أو الكود", 
+    value=st.session_state.scanned_code, 
+    key="scanned_code"  # مهم جدًا
+)
+
+# إضافة class إذا فيه كود مقروء
 if st.session_state.scanned_code:
-    st.success(f"✅ تم قراءة الكود: {st.session_state.scanned_code}")
+    st.markdown("""
+    <script>
+    const input = document.querySelector('input[data-testid="stTextInput"]');
+    if(input){
+        input.classList.add('scanned-input');
+    }
+    </script>
+    """, unsafe_allow_html=True)
 
 # HTML + JS للكاميرا الخلفية
 html("""
@@ -271,7 +293,9 @@ html("""
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    window.parent.postMessage({type:'set-code', value:decodedText}, "*");
+    // أرسل الكود إلى Streamlit session_state
+    const streamlitEvent = new CustomEvent("streamlit:message", {detail: {value: decodedText}});
+    window.dispatchEvent(streamlitEvent);
 }
 
 // اختيار الكاميرا الخلفية
@@ -287,25 +311,12 @@ Html5Qrcode.getCameras().then(cameras => {
 </script>
 """, height=400)
 
-# event listener لتحديث الـ input + session_state
-st.markdown("""
-<script>
-window.addEventListener('message', event => {
-    if(event.data.type === 'set-code') {
-        const input = document.querySelector('input[data-testid="stTextInput"]');
-        if(input){
-            input.value = event.data.value;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-    }
-});
-</script>
-""", unsafe_allow_html=True)
+# Listener لتحديث session_state مباشرة
+st.session_state.scanned_code = st.session_state.get("scanned_code", "")
+if st.session_state.scanned_code:
+    # فلترة DataFrame حسب الكود المقروء
+    df = df[df["partner_sku"].str.contains(st.session_state.scanned_code, case=False, na=False)]
 
-# فلترة DataFrame حسب الكود المقروء
-if search:
-    st.session_state.scanned_code = search  # حفظه في session_state
-    df = df[df["partner_sku"].str.contains(search, case=False, na=False)]
 # =========================
 # فلترة الداتا حسب البحث
 # =========================
