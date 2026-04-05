@@ -252,13 +252,23 @@ df = df.merge(coding, on="partner_sku", how="left")
 # =========================
 # 📷 مسح الباركود بالكاميرا (تحديث كامل)
 # =========================
+import streamlit as st
+from streamlit.components.v1 import html
+
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
-# session_state
+# session_state لتخزين الكود الممسوح
 if "scanned_code" not in st.session_state:
     st.session_state.scanned_code = ""
 
-# CSS لتغيير إطار الـ input عند وجود كود
+# Text Input مربوط بالـ session_state
+search = st.text_input(
+    "🔍 ابحث بالـ SKU أو الكود",
+    value=st.session_state.scanned_code,
+    key="scanned_code"
+)
+
+# CSS لإطار أخضر عند وجود كود
 st.markdown("""
 <style>
 .scanned-input input {
@@ -269,14 +279,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Text Input مرتبط بالـ session_state
-search = st.text_input(
-    "🔍 ابحث بالـ SKU أو الكود", 
-    value=st.session_state.scanned_code, 
-    key="scanned_code"
-)
-
-# عرض إطار أخضر عند وجود كود
+# إضافة الإطار الأخضر إذا فيه كود
 if st.session_state.scanned_code:
     st.markdown("""
     <script>
@@ -287,15 +290,19 @@ if st.session_state.scanned_code:
     </script>
     """, unsafe_allow_html=True)
 
-# HTML + JS للكاميرا الخلفية مع تحديث session_state
+# HTML + JS للكاميرا الخلفية
 html("""
 <div id="reader" style="width:320px"></div>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
 function onScanSuccess(decodedText) {
-    // إرسال الكود إلى Streamlit عبر postMessage
-    window.parent.postMessage({type: 'scanned-code', value: decodedText}, "*");
+    // أرسل الكود مباشرة للـ input (widget) في Streamlit
+    const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+    if(input){
+        input.value = decodedText;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 }
 
 // اختيار الكاميرا الخلفية
@@ -311,22 +318,12 @@ Html5Qrcode.getCameras().then(cameras => {
 </script>
 """, height=400)
 
-# JS Listener لتحديث session_state فورًا
-st.markdown("""
-<script>
-window.addEventListener('message', event => {
-    if(event.data.type === 'scanned-code'){
-        const input = document.querySelector('input[data-testid="stTextInput"]');
-        if(input){
-            input.value = event.data.value;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-        // Streamlit rerun via setting the hidden key
-        fetch(window.location.href, { method: 'POST', body: JSON.stringify({scanned_code: event.data.value}) });
-    }
-});
-</script>
-""", unsafe_allow_html=True)
+# =========================
+# فلترة DataFrame حسب الكود المقروء
+if search:
+    # df هنا جدول المنتجات الخاص بك
+    df_filtered = df[df["partner_sku"].str.contains(search, case=False, na=False)]
+    st.write(f"🔍 تم العثور على {df_filtered.shape[0]} نتيجة للكود: {search}")
 # =========================
 # فلترة الداتا حسب البحث
 # =========================
