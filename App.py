@@ -248,39 +248,53 @@ df = df.merge(coding, on="partner_sku", how="left")
 # 🔍 بحث
 # =========================
 # =========================
+# =========================
 # 📷 مسح الباركود بالكاميرا
 # =========================
 st.markdown("### 📷 مسح الباركود بالكاميرا")
 
+# تأكد من session_state
+if "scanned_code" not in st.session_state:
+    st.session_state.scanned_code = ""
+
+# الـ Text Input
+search = st.text_input("🔍 ابحث بالـ SKU أو الكود", value=st.session_state.scanned_code)
+
+# كود HTML + JS للكاميرا
 html("""
 <div id="reader" style="width:320px"></div>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
-
 <script>
-
 function onScanSuccess(decodedText) {
-
-    const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
-
-    if(input){
-        input.value = decodedText;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    window.parent.postMessage({type:'set-code', value:decodedText}, "*");
 }
 
-let scanner = new Html5QrcodeScanner(
-    "reader",
-    { fps: 10, qrbox: 250 }
-);
-
+let scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
 scanner.render(onScanSuccess);
-
 </script>
 """, height=400)
 
-search = st.text_input("🔍 ابحث بالـ SKU أو الكود")
+# استماع للـ message من JS لتحديث input
+st.markdown("""
+<script>
+window.addEventListener('message', event => {
+    if(event.data.type === 'set-code') {
+        const input = document.querySelector('input[data-testid="stTextInput"]');
+        if(input){
+            input.value = event.data.value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }
+});
+</script>
+""", unsafe_allow_html=True)
 
+# =========================
+# فلترة الداتا حسب البحث
+# =========================
+if search:
+    df = df[df["partner_sku"].str.contains(search, case=False, na=False)]
 # =========================
 # ترتيب الأكواد
 # =========================
