@@ -383,26 +383,45 @@ with st.sidebar:
         st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
 # =========================
-# 🔥 Right Sidebar (الحقيقية)
+# 🔥 Right Sidebar Toggle (احترافي)
 # =========================
-# =========================
-# 🔥 Right Sidebar FIXED (بدون مشاكل HTML)
-# =========================
+
+# زر التحكم
+if "show_right_sidebar" not in st.session_state:
+    st.session_state.show_right_sidebar = True
+
+toggle = st.button("📊 فروقات المنصات ➡️")
+
+if toggle:
+    st.session_state.show_right_sidebar = not st.session_state.show_right_sidebar
+
+# CSS
 st.markdown("""
 <style>
 .right-sidebar {
     position: fixed;
-    top: 80px;
+    top: 70px;
     right: 0;
     width: 300px;
     height: 90vh;
     overflow-y: auto;
-    background: #ffffff;
+    background: white;
     padding: 15px;
     border-left: 2px solid #eee;
-    box-shadow: -2px 0 8px rgba(0,0,0,0.05);
+    box-shadow: -2px 0 10px rgba(0,0,0,0.08);
     z-index: 999;
 }
+
+.hide-sidebar {
+    right: -320px;
+    transition: 0.3s;
+}
+
+.show-sidebar {
+    right: 0;
+    transition: 0.3s;
+}
+
 .right-card {
     background: #fafafa;
     padding: 8px;
@@ -413,7 +432,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# تحديد الحالة
+sidebar_class = "show-sidebar" if st.session_state.show_right_sidebar else "hide-sidebar"
+
+# تجهيز البيانات
 df_compare = df.copy()
+
 pivot = df_compare.pivot_table(
     index="partner_sku",
     columns="store",
@@ -430,19 +454,17 @@ noon_only = pivot[(pivot["Noon"]>0)&(pivot["Amazon"]==0)]
 amazon_only = pivot[(pivot["Amazon"]>0)&(pivot["Noon"]==0)]
 trendyol_only = pivot[(pivot["Trendyol"]>0)&(pivot["Noon"]==0)&(pivot["Amazon"]==0)]
 
-# =========================
-# بناء HTML بشكل نظيف
-# =========================
-html_parts = []
-html_parts.append("<div class='right-sidebar'>")
-html_parts.append("<h3>🔁 فروقات المنصات</h3>")
+# HTML
+html = f"<div class='right-sidebar {sidebar_class}'>"
+html += "<h3>🔁 فروقات المنصات</h3>"
 
-def build_section(title, df_section):
-    section = [f"<h4>{title}</h4>"]
-    
+def add_section(title, df_section):
+    global html
+    html += f"<h4>{title}</h4>"
+
     if df_section.empty:
-        section.append("<div>لا يوجد</div>")
-        return section
+        html += "<div>لا يوجد</div>"
+        return
 
     for _, r in df_section.head(15).iterrows():
         sku = r["partner_sku"]
@@ -452,23 +474,12 @@ def build_section(title, df_section):
         stock_row = df_stock[df_stock["SKU"] == sku]
         stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else "-"
 
-        section.append(f"""
-        <div class='right-card'>
-            <img src="{img}" width="70"/>
-            <div><b>{sku}</b></div>
-            <div style="font-size:12px">📦 {stock}</div>
-        </div>
-        """)
+        html += f"<div class='right-card'><img src='{img}' width='70'/><div><b>{sku}</b></div><div style='font-size:12px'>📦 {stock}</div></div>"
 
-    return section
+add_section("🟡 Noon فقط", noon_only)
+add_section("🔵 Amazon فقط", amazon_only)
+add_section("🟣 Trendyol فقط", trendyol_only)
 
-# إضافة الأقسام
-html_parts += build_section("🟡 Noon فقط", noon_only)
-html_parts += build_section("🔵 Amazon فقط", amazon_only)
-html_parts += build_section("🟣 Trendyol فقط", trendyol_only)
+html += "</div>"
 
-html_parts.append("</div>")
-
-# دمج وطباعة مرة واحدة فقط
-final_html = "".join(html_parts)
-st.markdown(final_html, unsafe_allow_html=True)
+st.markdown(html, unsafe_allow_html=True)
