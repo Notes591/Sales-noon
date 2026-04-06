@@ -363,8 +363,10 @@ for code in code_order:
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
-# حساب المبيعات اليومية و الأيام المتبقية
+# حساب عدد الطلبات لكل SKU
 sales_count = df.groupby("partner_sku").size().reset_index(name="total_orders")
+
+# تجهيز المنتجات للسلايدر (Noon و Amazon)
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
@@ -376,41 +378,39 @@ slider_items["days_remaining"] = slider_items["STOCK"]/slider_items["daily_sales
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"]).sort_values("days_remaining").reset_index(drop=True)
 
-# عرض المنتجات مع المخزون
-with st.sidebar:
-    for _, row in slider_items_unique.iterrows():
-        st.markdown("---")
-        st.image(safe_image(row["image_url"]), width=100)
-        st.markdown(f"**{row['partner_sku']}**")
-        st.markdown(f"📦 Stock: {int(row['STOCK'])}")
-        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
+# عرض الأيام المتبقية أولًا
+for _, row in slider_items_unique.iterrows():
+    st.sidebar.markdown("---")
+    st.sidebar.image(safe_image(row["image_url"]), width=100)
+    st.sidebar.markdown(f"**{row['partner_sku']}**")
+    st.sidebar.markdown(f"📦 Stock: {int(row['STOCK'])}")
+    st.sidebar.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
 # =========================
-# فروق المنصات حسب الكود العام
+# 🔁 فروقات المنصات حسب الكود العام (مع المنصات غير الموجودة + SKU لكل منصة)
 # =========================
-st.markdown("## 🔁 فروق المنصات حسب الكود العام")
+st.sidebar.markdown("---")
+st.sidebar.markdown("## 🔁 فروقات المنصات حسب الكود العام")
 
-all_stores = ["Noon","Amazon","Trendyol"]
+all_stores = ["Noon", "Amazon", "Trendyol"]
+
+# تجهيز البيانات حسب الكود العام
 codes = df["unified_code"].dropna().unique()
 
 for code in codes:
-    st.markdown(f"### {code}")
-
-    # المنصات اللي موجودة
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"**{code}**")
+    
     present_stores = []
+    
     for store in all_stores:
         df_store = df[(df["unified_code"] == code) & (df["store"] == store)]
         if not df_store.empty:
-            sku_set = sorted(set(df_store["partner_sku"].astype(str)))
-            present_stores.append((store, sku_set))
-
-    # المنصات الغير موجودة
-    missing_stores = [s for s in all_stores if s not in [ps[0] for ps in present_stores]]
-
-    # عرض المنصات الموجودة مع العدد
-    for store, sku_set in present_stores:
-        st.markdown(f"🟢 {store}: {', '.join(sku_set)} ({len(sku_set)})")
-
-    # عرض المنصات الغير موجودة
+            # إزالة التكرار
+            sku_list = sorted(set(df_store["partner_sku"].astype(str)))
+            present_stores.append(store)
+            st.sidebar.markdown(f"🟢 {store}: {', '.join(sku_list)} ({len(sku_list)})")
+    
+    missing_stores = [s for s in all_stores if s not in present_stores]
     if missing_stores:
-        st.markdown(f"❌ غير موجود في: {', '.join(missing_stores)}")
+        st.sidebar.markdown(f"❌ غير موجود في: {', '.join(missing_stores)}")
