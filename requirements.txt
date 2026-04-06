@@ -8,3 +8,7 @@ matplotlib
 beautifulsoup4
 requests
 validators
+Pillow
+sentence-transformers
+torch
+torchvision
