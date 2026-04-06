@@ -385,6 +385,9 @@ with st.sidebar:
 # =========================
 # 🔥 Right Sidebar (الحقيقية)
 # =========================
+# =========================
+# 🔥 Right Sidebar FIXED (بدون مشاكل HTML)
+# =========================
 st.markdown("""
 <style>
 .right-sidebar {
@@ -411,7 +414,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 df_compare = df.copy()
-pivot = df_compare.pivot_table(index="partner_sku", columns="store", values="invoice_price", aggfunc="count", fill_value=0).reset_index()
+pivot = df_compare.pivot_table(
+    index="partner_sku",
+    columns="store",
+    values="invoice_price",
+    aggfunc="count",
+    fill_value=0
+).reset_index()
 
 for col in ["Noon","Amazon","Trendyol"]:
     if col not in pivot.columns:
@@ -421,28 +430,45 @@ noon_only = pivot[(pivot["Noon"]>0)&(pivot["Amazon"]==0)]
 amazon_only = pivot[(pivot["Amazon"]>0)&(pivot["Noon"]==0)]
 trendyol_only = pivot[(pivot["Trendyol"]>0)&(pivot["Noon"]==0)&(pivot["Amazon"]==0)]
 
-html = "<div class='right-sidebar'><h3>🔁 فروقات المنصات</h3>"
+# =========================
+# بناء HTML بشكل نظيف
+# =========================
+html_parts = []
+html_parts.append("<div class='right-sidebar'>")
+html_parts.append("<h3>🔁 فروقات المنصات</h3>")
 
-def draw(df_section,title):
-    global html
-    html += f"<h4>{title}</h4>"
-    for _,r in df_section.head(15).iterrows():
-        sku=r["partner_sku"]
-        item=df[df["partner_sku"]==sku].iloc[0]
-        img=safe_image(item.get("image_url"))
-        stock_row=df_stock[df_stock["SKU"]==sku]
-        stock=int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else "-"
-        html+=f"""
+def build_section(title, df_section):
+    section = [f"<h4>{title}</h4>"]
+    
+    if df_section.empty:
+        section.append("<div>لا يوجد</div>")
+        return section
+
+    for _, r in df_section.head(15).iterrows():
+        sku = r["partner_sku"]
+        item = df[df["partner_sku"] == sku].iloc[0]
+
+        img = safe_image(item.get("image_url"))
+        stock_row = df_stock[df_stock["SKU"] == sku]
+        stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else "-"
+
+        section.append(f"""
         <div class='right-card'>
-            <img src='{img}' width='70'/>
+            <img src="{img}" width="70"/>
             <div><b>{sku}</b></div>
-            <div style='font-size:12px'>📦 {stock}</div>
+            <div style="font-size:12px">📦 {stock}</div>
         </div>
-        """
+        """)
 
-draw(noon_only,"🟡 Noon فقط")
-draw(amazon_only,"🔵 Amazon فقط")
-draw(trendyol_only,"🟣 Trendyol فقط")
+    return section
 
-html+="</div>"
-st.markdown(html,unsafe_allow_html=True)
+# إضافة الأقسام
+html_parts += build_section("🟡 Noon فقط", noon_only)
+html_parts += build_section("🔵 Amazon فقط", amazon_only)
+html_parts += build_section("🟣 Trendyol فقط", trendyol_only)
+
+html_parts.append("</div>")
+
+# دمج وطباعة مرة واحدة فقط
+final_html = "".join(html_parts)
+st.markdown(final_html, unsafe_allow_html=True)
