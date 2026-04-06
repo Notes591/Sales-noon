@@ -359,7 +359,7 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
- 🛒 Sidebar + Platform Differences مع روابط مباشرة
+ 🛒 Sidebar + Platform Differences
 # =========================
 import streamlit as st
 
