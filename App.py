@@ -383,82 +383,104 @@ with st.sidebar:
         st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
 # =========================
-# 🔥 Right Sidebar Toggle (احترافي)
+# =========================
+# 🔥 Right Sidebar PRO (حسب الكود العام + زر واضح)
 # =========================
 
-# زر التحكم
-if "show_right_sidebar" not in st.session_state:
-    st.session_state.show_right_sidebar = True
+# حالة الفتح والقفل
+if "right_open" not in st.session_state:
+    st.session_state.right_open = True
 
-toggle = st.button("📊 فروقات المنصات ➡️")
-
-if toggle:
-    st.session_state.show_right_sidebar = not st.session_state.show_right_sidebar
+# زر واضح جدا
+col_btn1, col_btn2 = st.columns([8,1])
+with col_btn2:
+    if st.button("➡️" if not st.session_state.right_open else "⬅️"):
+        st.session_state.right_open = not st.session_state.right_open
 
 # CSS
 st.markdown("""
 <style>
 .right-sidebar {
     position: fixed;
-    top: 70px;
+    top: 60px;
     right: 0;
-    width: 300px;
+    width: 320px;
     height: 90vh;
     overflow-y: auto;
-    background: white;
+    background: #ffffff;
     padding: 15px;
     border-left: 2px solid #eee;
     box-shadow: -2px 0 10px rgba(0,0,0,0.08);
     z-index: 999;
 }
 
-.hide-sidebar {
-    right: -320px;
+.hidden {
+    right: -340px;
     transition: 0.3s;
 }
 
-.show-sidebar {
+.visible {
     right: 0;
     transition: 0.3s;
 }
 
 .right-card {
     background: #fafafa;
-    padding: 8px;
-    border-radius: 10px;
-    margin-bottom: 10px;
+    padding: 10px;
+    border-radius: 12px;
+    margin-bottom: 12px;
     text-align: center;
 }
+.small {font-size:12px; color:#555;}
 </style>
 """, unsafe_allow_html=True)
 
-# تحديد الحالة
-sidebar_class = "show-sidebar" if st.session_state.show_right_sidebar else "hide-sidebar"
+sidebar_class = "visible" if st.session_state.right_open else "hidden"
 
-# تجهيز البيانات
-df_compare = df.copy()
+# =========================
+# تجهيز البيانات حسب الكود العام
+# =========================
 
-pivot = df_compare.pivot_table(
-    index="partner_sku",
-    columns="store",
-    values="invoice_price",
-    aggfunc="count",
-    fill_value=0
-).reset_index()
+df2 = df.copy()
+
+# عدد الطلبات لكل كود عام
+code_orders = df2.groupby(["unified_code","store"]).size().unstack(fill_value=0).reset_index()
+
+# دمج صورة + SKU
+first_items = df2.sort_values("invoice_price").drop_duplicates("unified_code")
+
+code_orders = code_orders.merge(first_items[["unified_code","partner_sku","image_url"]], on="unified_code", how="left")
+
+# استوك
+df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
+
+def get_stock(code):
+    skus = df2[df2["unified_code"]==code]["partner_sku"].unique()
+    stock = df_stock[df_stock["SKU"].isin(skus)]["STOCK"].sum()
+    return int(stock) if not pd.isna(stock) else 0
+
+code_orders["stock"] = code_orders["unified_code"].apply(get_stock)
+
+# =========================
+# الفلاتر
+# =========================
 
 for col in ["Noon","Amazon","Trendyol"]:
-    if col not in pivot.columns:
-        pivot[col] = 0
+    if col not in code_orders.columns:
+        code_orders[col] = 0
 
-noon_only = pivot[(pivot["Noon"]>0)&(pivot["Amazon"]==0)]
-amazon_only = pivot[(pivot["Amazon"]>0)&(pivot["Noon"]==0)]
-trendyol_only = pivot[(pivot["Trendyol"]>0)&(pivot["Noon"]==0)&(pivot["Amazon"]==0)]
+noon_only = code_orders[(code_orders["Noon"]>0)&(code_orders["Amazon"]==0)&(code_orders["Trendyol"]==0)]
+amazon_only = code_orders[(code_orders["Amazon"]>0)&(code_orders["Noon"]==0)&(code_orders["Trendyol"]==0)]
+trendyol_only = code_orders[(code_orders["Trendyol"]>0)&(code_orders["Noon"]==0)&(code_orders["Amazon"]==0)]
 
-# HTML
+# =========================
+# بناء HTML
+# =========================
+
 html = f"<div class='right-sidebar {sidebar_class}'>"
 html += "<h3>🔁 فروقات المنصات</h3>"
 
-def add_section(title, df_section):
+def draw(df_section, title):
     global html
     html += f"<h4>{title}</h4>"
 
@@ -467,18 +489,26 @@ def add_section(title, df_section):
         return
 
     for _, r in df_section.head(15).iterrows():
+        code = r["unified_code"]
         sku = r["partner_sku"]
-        item = df[df["partner_sku"] == sku].iloc[0]
+        img = safe_image(r["image_url"])
 
-        img = safe_image(item.get("image_url"))
-        stock_row = df_stock[df_stock["SKU"] == sku]
-        stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else "-"
+        total_orders = int(r.get("Noon",0) + r.get("Amazon",0) + r.get("Trendyol",0))
+        stock = r["stock"]
 
-        html += f"<div class='right-card'><img src='{img}' width='70'/><div><b>{sku}</b></div><div style='font-size:12px'>📦 {stock}</div></div>"
+        html += f"""
+        <div class='right-card'>
+            <img src='{img}' width='80'/>
+            <div><b>🆔 {code}</b></div>
+            <div class='small'>SKU: {sku}</div>
+            <div class='small'>📦 Orders: {total_orders}</div>
+            <div class='small'>📦 Stock: {stock}</div>
+        </div>
+        """
 
-add_section("🟡 Noon فقط", noon_only)
-add_section("🔵 Amazon فقط", amazon_only)
-add_section("🟣 Trendyol فقط", trendyol_only)
+draw(noon_only,"🟡 Noon فقط")
+draw(amazon_only,"🔵 Amazon فقط")
+draw(trendyol_only,"🟣 Trendyol فقط")
 
 html += "</div>"
 
