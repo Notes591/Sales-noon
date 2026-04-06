@@ -359,7 +359,6 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# =========================
 # 🛒 Sidebar (المعادلة الجديدة + فروق المنصات حسب الكود العام)
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
@@ -372,59 +371,61 @@ slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
 df_stock = df_stock.drop_duplicates(subset=["SKU"])
-
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
 slider_items = slider_items.merge(sales_count[["partner_sku","total_orders"]], on="partner_sku", how="left")
 slider_items["daily_sales"] = slider_items["total_orders"].fillna(1).replace(0,1)
 slider_items["days_remaining"] = slider_items["STOCK"]/slider_items["daily_sales"]
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
-
-# إزالة التكرارات وترتيب حسب الأيام المتبقية
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"]).sort_values("days_remaining").reset_index(drop=True)
 
-# عرض الأيام المتبقية
-with st.sidebar:
-    for _, row in slider_items_unique.iterrows():
-        st.markdown("---")
-        st.image(safe_image(row["image_url"]), width=100)
-        st.markdown(f"**{row['partner_sku']}**")
-        st.markdown(f"📦 Stock: {int(row['STOCK'])}")
-        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
+# عرض الأيام المتبقية أولًا
+for _, row in slider_items_unique.iterrows():
+    st.sidebar.markdown("---")
+    st.sidebar.image(safe_image(row["image_url"]), width=100)
+    st.sidebar.markdown(f"**{row['partner_sku']}**")
+    st.sidebar.markdown(f"📦 Stock: {int(row['STOCK'])}")
+    st.sidebar.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
-    # =========================
-    # 🔁 فروقات المنصات حسب الكود العام
-    # =========================
-    st.markdown("---")
-    st.markdown("## 🔁 فروقات المنصات حسب الكود العام")
+# =========================
+# 🔁 فروقات المنصات حسب الكود العام (كل الحالات)
+# =========================
+st.sidebar.markdown("---")
+st.sidebar.markdown("## 🔁 فروقات المنصات حسب الكود العام")
 
-    # تجهيز البيانات حسب الكود العام
-    df_compare = df.groupby("unified_code").agg({
-        "store": lambda x: list(x.unique()),
-        "partner_sku": "count",
-        "image_url": lambda x: x.dropna().iloc[0] if not x.dropna().empty else None
-    }).reset_index()
+# تجهيز البيانات حسب الكود العام
+df_compare = df.groupby("unified_code").agg({
+    "store": lambda x: list(sorted(x.unique())),
+    "partner_sku": "count",
+    "image_url": lambda x: x.dropna().iloc[0] if not x.dropna().empty else None
+}).reset_index()
 
-    # أقسام المنصات
-    noon_only = df_compare[df_compare['store'].apply(lambda x: 'Noon' in x and len(x)==1)]
-    amazon_only = df_compare[df_compare['store'].apply(lambda x: 'Amazon' in x and len(x)==1)]
-    trendyol_only = df_compare[df_compare['store'].apply(lambda x: 'Trendyol' in x and len(x)==1)]
+# دالة لبناء كل قسم حسب قائمة المنصات
+def build_platform_section(title, df_section):
+    st.sidebar.markdown(f"### {title}")
+    if df_section.empty:
+        st.sidebar.markdown("لا يوجد")
+        return
+    for _, row in df_section.iterrows():
+        code = row["unified_code"]
+        img = safe_image(row["image_url"])
+        stores = ", ".join(row["store"])
+        st.sidebar.image(img, width=80)
+        st.sidebar.markdown(f"**{code}**")
+        st.sidebar.markdown(f"🛒 موجود في: {stores}")
+        st.sidebar.markdown("---")
 
-    # دالة لبناء كل قسم
-    def build_platform_section(title, df_section):
-        st.markdown(f"### {title}")
-        if df_section.empty:
-            st.markdown("لا يوجد")
-            return
-        for _, row in df_section.iterrows():
-            code = row["unified_code"]
-            img = safe_image(row["image_url"])
-            stores = ", ".join(row["store"])
-            st.image(img, width=80)
-            st.markdown(f"**{code}**")
-            st.markdown(f"🛒 موجود في: {stores}")
-            st.markdown("---")
+# تصنيف الأكواد حسب المنصات
+cases = {
+    "🟡 Noon فقط": lambda x: x == ['Noon'],
+    "🔵 Amazon فقط": lambda x: x == ['Amazon'],
+    "🟣 Trendyol فقط": lambda x: x == ['Trendyol'],
+    "🟡🔵 Noon + Amazon": lambda x: x == ['Amazon','Noon'],
+    "🟡🟣 Noon + Trendyol": lambda x: x == ['Noon','Trendyol'],
+    "🔵🟣 Amazon + Trendyol": lambda x: x == ['Amazon','Trendyol'],
+    "🟡🔵🟣 Noon + Amazon + Trendyol": lambda x: x == ['Amazon','Noon','Trendyol']
+}
 
-    # إضافة الأقسام
-    build_platform_section("🟡 Noon فقط", noon_only)
-    build_platform_section("🔵 Amazon فقط", amazon_only)
-    build_platform_section("🟣 Trendyol فقط", trendyol_only)
+# إضافة كل الأقسام في Sidebar
+for title, condition in cases.items():
+    df_case = df_compare[df_compare['store'].apply(condition)]
+    build_platform_section(title, df_case)
