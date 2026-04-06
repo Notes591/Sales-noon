@@ -387,36 +387,45 @@ for _, row in slider_items_unique.iterrows():
     st.sidebar.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
 # =========================
-# 🔁 فروقات المنصات حسب الكود العام (مش موجود في)
+# 🔁 فروقات المنصات حسب الكود العام (مع المنصات غير الموجودة + SKU لكل منصة)
 # =========================
 st.sidebar.markdown("---")
 st.sidebar.markdown("## 🔁 فروقات المنصات حسب الكود العام")
 
-# تجهيز البيانات حسب الكود العام
 all_stores = ["Noon", "Amazon", "Trendyol"]
+
+# تجهيز البيانات حسب الكود العام
 df_compare = df.groupby("unified_code").agg({
-    "store": lambda x: list(sorted(x.unique())),
-    "partner_sku": "count",
+    "partner_sku": lambda x: list(x),
+    "store": lambda x: list(x),
     "image_url": lambda x: x.dropna().iloc[0] if not x.dropna().empty else None
 }).reset_index()
 
-# دالة لبناء كل قسم حسب المنصات الغير موجودة
-def build_platform_section(title, df_section):
-    st.sidebar.markdown(f"### {title}")
-    if df_section.empty:
-        st.sidebar.markdown("لا يوجد")
-        return
-    for _, row in df_section.iterrows():
-        code = row["unified_code"]
-        img = safe_image(row["image_url"])
-        missing_stores = [s for s in all_stores if s not in row["store"]]
-        missing_text = ", ".join(missing_stores) if missing_stores else "لا يوجد"
-        st.sidebar.image(img, width=80)
-        st.sidebar.markdown(f"**{code}**")
-        st.sidebar.markdown(f"❌ غير موجود في: {missing_text}")
-        st.sidebar.markdown("---")
+# دالة لبناء كل قسم لكل كود
+def build_platform_sidebar(row):
+    code = row["unified_code"]
+    img = safe_image(row["image_url"])
+    
+    # المنصات الموجودة مع SKU
+    platform_details = []
+    for store in all_stores:
+        df_store = df[(df["unified_code"] == code) & (df["store"] == store)]
+        if not df_store.empty:
+            sku_list = df_store["partner_sku"].astype(str).tolist()
+            platform_details.append(f"{store}: {', '.join(sku_list)}")
+    
+    # المنصات الغير موجودة
+    missing_stores = [s for s in all_stores if s not in row["store"]]
+    missing_text = ", ".join(missing_stores) if missing_stores else "لا يوجد"
+    
+    # عرض في Sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.image(img, width=80)
+    st.sidebar.markdown(f"**{code}**")
+    for detail in platform_details:
+        st.sidebar.markdown(f"🟢 {detail}")
+    st.sidebar.markdown(f"❌ غير موجود في: {missing_text}")
 
-# إضافة كل الأقسام في Sidebar
-for title in ["أكواد موجودة جزئياً أو في منصات محددة"]:
-    df_section = df_compare.copy()
-    build_platform_section(title, df_section)
+# عرض جميع الأكواد
+for _, row in df_compare.iterrows():
+    build_platform_sidebar(row)
