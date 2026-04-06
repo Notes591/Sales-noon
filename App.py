@@ -3,6 +3,9 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 import requests
+from io import BytesIO
+from PIL import Image
+from sentence_transformers import SentenceTransformer, util
 
 # =========================
 # إعداد الصفحة
@@ -359,14 +362,33 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# 🛒 Sidebar (المعادلة الجديدة + فروق المنصات حسب الكود العام)
+# 🛒 Sidebar (المعادلة الجديدة + فروق المنصات حسب الكود العام + اقتراحات الصور)
 # =========================
-st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
+import pandas as pd
+import numpy as np
+from sentence_transformers import SentenceTransformer, util
+import requests
+from io import BytesIO
+from PIL import Image
+import streamlit as st
 
+# -------------------------
+# دالة لجلب الصورة بشكل آمن
+# -------------------------
+def safe_image(url):
+    try:
+        return url if url else ""
+    except:
+        return ""
+
+# -------------------------
 # حساب عدد الطلبات لكل SKU
+# -------------------------
 sales_count = df.groupby("partner_sku").size().reset_index(name="total_orders")
 
-# تجهيز المنتجات للسلايدر (Noon و Amazon)
+# -------------------------
+# إعداد سلايدر الأيام المتبقية (Noon & Amazon)
+# -------------------------
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
@@ -378,17 +400,18 @@ slider_items["days_remaining"] = slider_items["STOCK"]/slider_items["daily_sales
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"]).sort_values("days_remaining").reset_index(drop=True)
 
-# عرض الأيام المتبقية أولًا
-for _, row in slider_items_unique.iterrows():
-    st.sidebar.markdown("---")
-    st.sidebar.image(safe_image(row["image_url"]), width=100)
-    st.sidebar.markdown(f"**{row['partner_sku']}**")
-    st.sidebar.markdown(f"📦 Stock: {int(row['STOCK'])}")
-    st.sidebar.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
+with st.sidebar:
+    st.markdown("## 🛒 قرب المخزون ينتهي")
+    for _, row in slider_items_unique.iterrows():
+        st.markdown("---")
+        st.image(safe_image(row["image_url"]), width=100)
+        st.markdown(f"**{row['partner_sku']}**")
+        st.markdown(f"📦 Stock: {int(row['STOCK'])}")
+        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
-# =========================
-# 🔁 فروقات المنصات حسب الكود العام (مع المنصات غير الموجودة + SKU لكل منصة)
-# =========================
+# -------------------------
+# 🔁 فروقات المنصات حسب الكود العام
+# -------------------------
 st.sidebar.markdown("---")
 st.sidebar.markdown("## 🔁 فروقات المنصات حسب الكود العام")
 
@@ -401,38 +424,67 @@ df_compare = df.groupby("unified_code").agg({
     "image_url": lambda x: x.dropna().iloc[0] if not x.dropna().empty else None
 }).reset_index()
 
-# دالة لبناء كل قسم لكل كود
+# -------------------------
+# نموذج CLIP لتحويل الصور إلى embeddings
+# -------------------------
+model = SentenceTransformer('clip-ViT-B-32')
+
+def image_to_embedding(url):
+    try:
+        response = requests.get(url)
+        img = Image.open(BytesIO(response.content)).convert("RGB")
+        emb = model.encode(img, convert_to_tensor=True)
+        return emb
+    except:
+        return None
+
+# -------------------------
+# دالة لبناء قسم الكود في Sidebar
+# -------------------------
 def build_platform_sidebar(row):
     code = row["unified_code"]
     img = safe_image(row["image_url"])
     
-    present_stores = []
+    # المنصات الموجودة مع SKU
+    platform_details = []
     for store in all_stores:
         df_store = df[(df["unified_code"] == code) & (df["store"] == store)]
         if not df_store.empty:
-            sku_list = sorted(set(df_store["partner_sku"].astype(str)))
-            present_stores.append(store)
-
-    # لو موجود في كل المنصات الثلاثة، لا يظهر شيء
-    if set(present_stores) == set(all_stores):
-        return
-
-    # صورة الكود فوق كل شيء
+            sku_list = df_store["partner_sku"].astype(str).tolist()
+            platform_details.append(f"{store}: {', '.join(sku_list)} ({len(sku_list)})")
+    
+    # المنصات الغير موجودة
+    missing_stores = [s for s in all_stores if s not in row["store"]]
+    missing_text = ", ".join(missing_stores) if missing_stores else "لا يوجد"
+    
     st.sidebar.markdown("---")
     st.sidebar.image(img, width=80)
     st.sidebar.markdown(f"**{code}**")
+    for detail in platform_details:
+        st.sidebar.markdown(f"🟢 {detail}")
+    st.sidebar.markdown(f"❌ غير موجود في: {missing_text}")
+    
+    # -------------------------
+    # اقتراح أكواد مشابهة بالصور
+    # -------------------------
+    emb_current = image_to_embedding(img)
+    if emb_current is not None:
+        similar_codes = []
+        for _, r in df_compare.iterrows():
+            if r["unified_code"] == code:
+                continue
+            emb_other = image_to_embedding(r["image_url"])
+            if emb_other is not None:
+                similarity = util.cos_sim(emb_current, emb_other).item()
+                if similarity >= 0.85:
+                    similar_codes.append((r["unified_code"], round(similarity*100,1)))
+        if similar_codes:
+            st.sidebar.markdown("⚠️ اقتراح أكواد مشابهة بالصور:")
+            for scode, sim in similar_codes:
+                st.sidebar.markdown(f"- {scode} (تشابه: {sim}%)")
 
-    # المنصات الموجودة مع قائمة الـ SKU وعددهم
-    for store in present_stores:
-        df_store = df[(df["unified_code"] == code) & (df["store"] == store)]
-        sku_list = sorted(set(df_store["partner_sku"].astype(str)))
-        st.sidebar.markdown(f"🟢 {store}: {', '.join(sku_list)} ({len(sku_list)})")
-
-    # المنصات الغير موجودة
-    missing_stores = [s for s in all_stores if s not in present_stores]
-    if missing_stores:
-        st.sidebar.markdown(f"❌ غير موجود في: {', '.join(missing_stores)}")
-
-# عرض جميع الأكواد
+# -------------------------
+# عرض كل الأكواد
+# -------------------------
 for _, row in df_compare.iterrows():
     build_platform_sidebar(row)
