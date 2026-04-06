@@ -387,19 +387,20 @@ for _, row in slider_items_unique.iterrows():
     st.sidebar.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
 # =========================
-# 🔁 فروقات المنصات حسب الكود العام (كل الحالات)
+# 🔁 فروقات المنصات حسب الكود العام (مش موجود في)
 # =========================
 st.sidebar.markdown("---")
 st.sidebar.markdown("## 🔁 فروقات المنصات حسب الكود العام")
 
 # تجهيز البيانات حسب الكود العام
+all_stores = ["Noon", "Amazon", "Trendyol"]
 df_compare = df.groupby("unified_code").agg({
     "store": lambda x: list(sorted(x.unique())),
     "partner_sku": "count",
     "image_url": lambda x: x.dropna().iloc[0] if not x.dropna().empty else None
 }).reset_index()
 
-# دالة لبناء كل قسم حسب قائمة المنصات
+# دالة لبناء كل قسم حسب المنصات الغير موجودة
 def build_platform_section(title, df_section):
     st.sidebar.markdown(f"### {title}")
     if df_section.empty:
@@ -408,24 +409,14 @@ def build_platform_section(title, df_section):
     for _, row in df_section.iterrows():
         code = row["unified_code"]
         img = safe_image(row["image_url"])
-        stores = ", ".join(row["store"])
+        missing_stores = [s for s in all_stores if s not in row["store"]]
+        missing_text = ", ".join(missing_stores) if missing_stores else "لا يوجد"
         st.sidebar.image(img, width=80)
         st.sidebar.markdown(f"**{code}**")
-        st.sidebar.markdown(f"🛒 موجود في: {stores}")
+        st.sidebar.markdown(f"❌ غير موجود في: {missing_text}")
         st.sidebar.markdown("---")
 
-# تصنيف الأكواد حسب المنصات
-cases = {
-    "🟡 Noon فقط": lambda x: x == ['Noon'],
-    "🔵 Amazon فقط": lambda x: x == ['Amazon'],
-    "🟣 Trendyol فقط": lambda x: x == ['Trendyol'],
-    "🟡🔵 Noon + Amazon": lambda x: x == ['Amazon','Noon'],
-    "🟡🟣 Noon + Trendyol": lambda x: x == ['Noon','Trendyol'],
-    "🔵🟣 Amazon + Trendyol": lambda x: x == ['Amazon','Trendyol'],
-    "🟡🔵🟣 Noon + Amazon + Trendyol": lambda x: x == ['Amazon','Noon','Trendyol']
-}
-
 # إضافة كل الأقسام في Sidebar
-for title, condition in cases.items():
-    df_case = df_compare[df_compare['store'].apply(condition)]
-    build_platform_section(title, df_case)
+for title in ["أكواد موجودة جزئياً أو في منصات محددة"]:
+    df_section = df_compare.copy()
+    build_platform_section(title, df_section)
