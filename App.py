@@ -359,34 +359,21 @@ for code in code_order:
                     st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# 🛒 Sidebar (المعادلة الجديدة + فروقات المنصات)
+# 🛒 Sidebar (المعادلة الجديدة)
 # =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
-
-# حساب عدد الطلبات لكل SKU
 sales_count = df.groupby("partner_sku").size().reset_index(name="total_orders")
-
-# تجهيز المنتجات للسلايدر (Noon و Amazon)
 slider_items = df[df["store"].isin(["Noon","Amazon"])].copy()
 slider_items["partner_sku"] = slider_items["partner_sku"].astype(str).str.strip()
 df_stock["SKU"] = df_stock["SKU"].astype(str).str.strip()
 df_stock = df_stock.drop_duplicates(subset=["SKU"])
-
-# دمج الاستوك وعدد الطلبات
 slider_items = slider_items.merge(df_stock, left_on="partner_sku", right_on="SKU", how="inner")
 slider_items = slider_items.merge(sales_count[["partner_sku","total_orders"]], on="partner_sku", how="left")
-
-# حساب الأيام المتبقية على الاستوك
 slider_items["daily_sales"] = slider_items["total_orders"].fillna(1).replace(0,1)
-slider_items["days_remaining"] = slider_items["STOCK"] / slider_items["daily_sales"]
-
-# فلترة المنتجات اللي باقي لها 15 يوم أو أقل
+slider_items["days_remaining"] = slider_items["STOCK"]/slider_items["daily_sales"]
 slider_items = slider_items[slider_items["days_remaining"] <= 15]
+slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"]).sort_values("days_remaining").reset_index(drop=True)
 
-# ترتيب وإزالة التكرار
-slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"]).reset_index(drop=True)
-
-# عرض المنتجات في السايدبار
 with st.sidebar:
     for _, row in slider_items_unique.iterrows():
         st.markdown("---")
@@ -396,37 +383,92 @@ with st.sidebar:
         st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
 # =========================
-# 🔁 فروقات المنصات
+# 🔥 Right Sidebar (الحقيقية)
 # =========================
-st.sidebar.markdown("## 🔁 فروقات المنصات")
+# =========================
+# 🔥 Right Sidebar FIXED (بدون مشاكل HTML)
+# =========================
+st.markdown("""
+<style>
+.right-sidebar {
+    position: fixed;
+    top: 80px;
+    right: 0;
+    width: 300px;
+    height: 90vh;
+    overflow-y: auto;
+    background: #ffffff;
+    padding: 15px;
+    border-left: 2px solid #eee;
+    box-shadow: -2px 0 8px rgba(0,0,0,0.05);
+    z-index: 999;
+}
+.right-card {
+    background: #fafafa;
+    padding: 8px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    text-align: center;
+}
+</style>
+""", unsafe_allow_html=True)
 
-df2 = df.copy()
+df_compare = df.copy()
+pivot = df_compare.pivot_table(
+    index="partner_sku",
+    columns="store",
+    values="invoice_price",
+    aggfunc="count",
+    fill_value=0
+).reset_index()
 
-# عدد الطلبات لكل كود عام
-code_orders = df2.groupby(["unified_code","store"]).size().unstack(fill_value=0).reset_index()
+for col in ["Noon","Amazon","Trendyol"]:
+    if col not in pivot.columns:
+        pivot[col] = 0
 
-# إضافة بيانات المنتج (أول عنصر لكل كود)
-first_items = df2.sort_values("invoice_price").drop_duplicates("unified_code")
-code_orders = code_orders.merge(
-    first_items[["unified_code","partner_sku","image_url"]],
-    on="unified_code",
-    how="left"
-)
+noon_only = pivot[(pivot["Noon"]>0)&(pivot["Amazon"]==0)]
+amazon_only = pivot[(pivot["Amazon"]>0)&(pivot["Noon"]==0)]
+trendyol_only = pivot[(pivot["Trendyol"]>0)&(pivot["Noon"]==0)&(pivot["Amazon"]==0)]
 
-# تجهيز الاستوك لكل كود
-def get_stock(code):
-    skus = df2[df2["unified_code"] == code]["partner_sku"].unique()
-    stock = df_stock[df_stock["SKU"].isin(skus)]["STOCK"].sum()
-    return int(stock) if not pd.isna(stock) else 0
+# =========================
+# بناء HTML بشكل نظيف
+# =========================
+html_parts = []
+html_parts.append("<div class='right-sidebar'>")
+html_parts.append("<h3>🔁 فروقات المنصات</h3>")
 
-code_orders["stock"] = code_orders["unified_code"].apply(get_stock)
+def build_section(title, df_section):
+    section = [f"<h4>{title}</h4>"]
+    
+    if df_section.empty:
+        section.append("<div>لا يوجد</div>")
+        return section
 
-# التأكد من وجود أعمدة جميع المنصات
-for col in ["Noon", "Amazon", "Trendyol"]:
-    if col not in code_orders.columns:
-        code_orders[col] = 0
+    for _, r in df_section.head(15).iterrows():
+        sku = r["partner_sku"]
+        item = df[df["partner_sku"] == sku].iloc[0]
 
-# فلترة حسب المنصة فقط
-noon_only = code_orders[(code_orders["Noon"] > 0) & (code_orders["Amazon"] == 0) & (code_orders["Trendyol"] == 0)]
-amazon_only = code_orders[(code_orders["Amazon"] > 0) & (code_orders["Noon"] == 0) & (code_orders["Trendyol"] == 0)]
-trendyol_only = code_orders[(code_orders["Trendyol"] > 0) & (code_orders["Noon"] == 0) & (code_orders["Amazon"] == 0)]
+        img = safe_image(item.get("image_url"))
+        stock_row = df_stock[df_stock["SKU"] == sku]
+        stock = int(stock_row["STOCK"].iloc[0]) if not stock_row.empty else "-"
+
+        section.append(f"""
+        <div class='right-card'>
+            <img src="{img}" width="70"/>
+            <div><b>{sku}</b></div>
+            <div style="font-size:12px">📦 {stock}</div>
+        </div>
+        """)
+
+    return section
+
+# إضافة الأقسام
+html_parts += build_section("🟡 Noon فقط", noon_only)
+html_parts += build_section("🔵 Amazon فقط", amazon_only)
+html_parts += build_section("🟣 Trendyol فقط", trendyol_only)
+
+html_parts.append("</div>")
+
+# دمج وطباعة مرة واحدة فقط
+final_html = "".join(html_parts)
+st.markdown(final_html, unsafe_allow_html=True)
