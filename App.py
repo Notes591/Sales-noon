@@ -381,3 +381,47 @@ with st.sidebar:
         st.markdown(f"**{row['partner_sku']}**")
         st.markdown(f"📦 Stock: {int(row['STOCK'])}")
         st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
+
+# =========================
+# 🛒 Sidebar 2 (فروقات المنصات)
+# =========================
+st.sidebar.markdown("## 🔁 فروقات المنصات")
+
+df_compare = df.copy()
+df_compare["partner_sku"] = df_compare["partner_sku"].astype(str).str.strip()
+
+pivot = df_compare.pivot_table(
+    index="partner_sku",
+    columns="store",
+    values="invoice_price",
+    aggfunc="count",
+    fill_value=0
+).reset_index()
+
+for col in ["Noon", "Amazon", "Trendyol"]:
+    if col not in pivot.columns:
+        pivot[col] = 0
+
+noon_only = pivot[(pivot["Noon"] > 0) & (pivot["Amazon"] == 0)]
+amazon_only = pivot[(pivot["Amazon"] > 0) & (pivot["Noon"] == 0)]
+trendyol_only = pivot[(pivot["Trendyol"] > 0) & (pivot["Noon"] == 0) & (pivot["Amazon"] == 0)]
+noon_trendyol = pivot[(pivot["Noon"] > 0) & (pivot["Trendyol"] > 0) & (pivot["Amazon"] == 0)]
+amazon_trendyol = pivot[(pivot["Amazon"] > 0) & (pivot["Trendyol"] > 0) & (pivot["Noon"] == 0)]
+
+def show_section(title, df_section):
+    st.sidebar.markdown(f"### {title}")
+    if df_section.empty:
+        st.sidebar.markdown("لا يوجد")
+        return
+    for _, row in df_section.head(20).iterrows():
+        sku = row["partner_sku"]
+        item = df[df["partner_sku"] == sku].iloc[0]
+        st.sidebar.markdown("---")
+        st.image(safe_image(item.get("image_url")), width=80)
+        st.sidebar.markdown(f"**{sku}**")
+
+show_section("🟡 Noon فقط", noon_only)
+show_section("🔵 Amazon فقط", amazon_only)
+show_section("🟣 Trendyol فقط", trendyol_only)
+show_section("🟡🟣 Noon + Trendyol بدون Amazon", noon_trendyol)
+show_section("🔵🟣 Amazon + Trendyol بدون Noon", amazon_trendyol)
