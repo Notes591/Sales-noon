@@ -358,7 +358,6 @@ for code in code_order:
                     st.markdown(f"<div class='small'>{prices_html}<br>📦 {row['total_orders']} طلب<br>💵 Commission: {row['Commission']:.2f}<br>🚚 Shipping: {row['Shipping']:.2f}<br>💰 Final Price: {row['final_price']:.2f}</div>", unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
 
-
 # =========================
 # 🛒 Sidebar (المعادلة الجديدة + فروقات المنصات)
 # =========================
