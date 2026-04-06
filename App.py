@@ -358,12 +358,10 @@ for code in code_order:
                     st.markdown(f"<div class='small'>{prices_html}<br>📦 {row['total_orders']} طلب<br>💵 Commission: {row['Commission']:.2f}<br>🚚 Shipping: {row['Shipping']:.2f}<br>💰 Final Price: {row['final_price']:.2f}</div>", unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================
- 🛒 Sidebar + Platform Differences
-# =========================
-import streamlit as st
 
-# --- قرب نفاد المخزون ---
+# =========================
+# 🛒 Sidebar (المعادلة الجديدة + فروقات المنصات)
+# =========================
 st.sidebar.markdown("## 🛒 قرب المخزون ينتهي")
 
 # حساب عدد الطلبات لكل SKU
@@ -389,18 +387,18 @@ slider_items = slider_items[slider_items["days_remaining"] <= 15]
 # ترتيب وإزالة التكرار
 slider_items_unique = slider_items.sort_values("days_remaining").drop_duplicates(subset=["partner_sku"]).reset_index(drop=True)
 
-# عرض المنتجات في السايدبار مع روابط مباشرة
-for _, row in slider_items_unique.iterrows():
-    st.sidebar.markdown("---")
-    st.sidebar.image(safe_image(row["image_url"]), width=80)
-    # عند الضغط على SKU، يتم تغيير Query Parameter
-    if st.sidebar.button(f"{row['partner_sku']}"):
-        st.experimental_set_query_params(code=row['unified_code'])
-    st.sidebar.markdown(f"📦 Stock: {int(row['STOCK'])}")
-    st.sidebar.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
+# عرض المنتجات في السايدبار
+with st.sidebar:
+    for _, row in slider_items_unique.iterrows():
+        st.markdown("---")
+        st.image(safe_image(row["image_url"]), width=100)
+        st.markdown(f"**{row['partner_sku']}**")
+        st.markdown(f"📦 Stock: {int(row['STOCK'])}")
+        st.markdown(f"⏳ أيام متبقية: {row['days_remaining']:.1f}")
 
-
-# --- فروقات المنصات ---
+# =========================
+# 🔁 فروقات المنصات
+# =========================
 st.sidebar.markdown("## 🔁 فروقات المنصات")
 
 df2 = df.copy()
@@ -433,33 +431,3 @@ for col in ["Noon", "Amazon", "Trendyol"]:
 noon_only = code_orders[(code_orders["Noon"] > 0) & (code_orders["Amazon"] == 0) & (code_orders["Trendyol"] == 0)]
 amazon_only = code_orders[(code_orders["Amazon"] > 0) & (code_orders["Noon"] == 0) & (code_orders["Trendyol"] == 0)]
 trendyol_only = code_orders[(code_orders["Trendyol"] > 0) & (code_orders["Noon"] == 0) & (code_orders["Amazon"] == 0)]
-
-platforms = {
-    "Noon": noon_only,
-    "Amazon": amazon_only,
-    "Trendyol": trendyol_only
-}
-
-# عرض المنتجات المصغرة لكل منصة مع روابط مباشرة
-for platform_name, df_platform in platforms.items():
-    if not df_platform.empty:
-        st.sidebar.markdown(f"## {platform_name} فقط")
-        for _, row in df_platform.iterrows():
-            st.sidebar.markdown("---")
-            st.sidebar.image(safe_image(row["image_url"]), width=80)
-            if st.sidebar.button(f"{row['partner_sku']} ({platform_name})"):
-                st.experimental_set_query_params(code=row['unified_code'])
-            st.sidebar.markdown(f"📦 Stock: {row['stock']}")
-            orders = row[platform_name] if platform_name in row else 0
-            st.sidebar.markdown(f"🛒 Orders: {orders}")
-
-
-# --- عرض المنتج الرئيسي بناءً على Query Parameter ---
-query_code = st.experimental_get_query_params().get("code", [""])[0]
-
-if query_code:
-    product = df[df["unified_code"] == query_code].iloc[0]
-    st.markdown(f"### منتج: {product['partner_sku']} (ID: {product['unified_code']})")
-    st.image(product["image_url"])
-    st.markdown(f"📦 Stock: {product['STOCK']}")
-    st.markdown(f"🛒 Orders: {product['total_orders']}")
