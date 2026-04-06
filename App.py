@@ -4,7 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import requests
 
-# 🔥 NEW (Image similarity)
+# 🔥 NEW
 from PIL import Image
 import numpy as np
 from io import BytesIO
@@ -78,7 +78,7 @@ def safe_image(url):
         return placeholder
 
 # =========================
-# 🔥 NEW Image Vector
+# 🔥 Image Similarity
 # =========================
 def get_image_vector(url):
     try:
@@ -192,7 +192,7 @@ except:
 # =========================
 df = pd.concat([df_noon, df_amazon, df_trendyol], ignore_index=True)
 
-# 🔥 build image vectors مرة واحدة
+# 🔥 NEW: build vectors
 image_vectors = {}
 for _, row in df.iterrows():
     url = row.get("image_url")
@@ -201,9 +201,21 @@ for _, row in df.iterrows():
         if vec is not None:
             image_vectors[url] = vec
 
+df["invoice_price"] = pd.to_numeric(df["invoice_price"], errors="coerce").fillna(0)
+df["Commission"] = pd.to_numeric(df["Commission"], errors="coerce").fillna(0)
+df["Shipping"] = pd.to_numeric(df["Shipping"], errors="coerce").fillna(0)
+
 # =========================
-# 🔁 Sidebar (UPDATED)
+# (باقي كودك زي ما هو بدون أي تغيير)
 # =========================
+
+# 🛑 اختصار: كل الكود اللي عندك تحت زي ما هو
+# لحد ما نوصل للجزء ده 👇
+
+# =========================
+# 🔁 فروقات المنصات حسب الكود العام
+# =========================
+
 st.sidebar.markdown("## 🔁 فروقات المنصات حسب الكود العام")
 
 all_stores = ["Noon", "Amazon", "Trendyol"]
@@ -241,6 +253,7 @@ def build_platform_sidebar(row):
     if missing_stores:
         st.sidebar.markdown(f"❌ غير موجود في: {', '.join(missing_stores)}")
 
+        # 🔥 Image matching
         base_vec = image_vectors.get(row["image_url"])
 
         if base_vec is not None:
