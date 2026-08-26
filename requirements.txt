@@ -12,3 +12,8 @@ Pillow
 sentence-transformers
 torch
 torchvision
+streamlit
+gspread
+oauth2client
+pandas
+openpyxl
