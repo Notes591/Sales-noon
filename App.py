@@ -70,6 +70,14 @@ TABS_CONFIG = {
     "Check":             ["ASN","SKU","Quantity","Schedule Date","Image URL","Date Added","Notes","Flag"],
     "CancelNotifications": ["ASN","SKUs","Schedule Date","Reason","Timestamp"],
     "Tacweed":           ["SKU","Code01","Cost","Date Uploaded"],
+    # تاب تكويد أمازون — نفس فكرة Tacweed بالظبط لكن المفتاح ASIN (هوية منتج
+    # أمازون الحقيقية) بدل SKU، عشان منتجات أمازون (FBA أو العادية) اللي
+    # مالهاش نفس الـ SKU المستخدم في نون تقدر برضه تتربط بكود01 وتكلفة، وتشارك
+    # نفس كمية WarehouseStock | Amazon mapping tab — same idea as Tacweed but
+    # keyed by ASIN (Amazon's real product identity) instead of SKU, so Amazon
+    # products (FBA or normal) that don't share Noon's SKU can still be linked
+    # to a Code01 + cost and share the same WarehouseStock quantity.
+    "TacweedAmazon":     ["ASIN","Code01","Cost","Date Uploaded"],
     "WarehouseStock":    ["Code","Quantity","Item Name","Date Uploaded"],
     # تاب "قيد الموافقة" بيتكتب فيه من برنامج الجدولة المكتبي (schedule_entry_app) لما تتحدد
     # علامة Approval — نفس أعمدة تاب Scheduled الجديدة. هنا بنقراه بس (حسب اسم العمود مش
@@ -269,6 +277,7 @@ stock_amazon_sheet   = sheets["StockAmazon"]
 settings_sheet       = sheets["Settings"]
 cancel_notif_sheet   = sheets["CancelNotifications"]
 tacweed_sheet        = sheets["Tacweed"]
+tacweed_amazon_sheet = sheets["TacweedAmazon"]
 warehouse_stock_sheet = sheets["WarehouseStock"]
 ads_sheet             = sheets["Advertisements"]
 com_sheet             = sheets["COM"]
@@ -535,6 +544,79 @@ def get_sku_cost(sku_up):
     code = info.get("code")
     if code:
         return bundle["code_cost_map"].get(code)
+    return None
+
+# ══ نفس منطق تكويد نون بالظبط (_build_tacweed_bundle وما بعدها) لكن بالمفتاح
+#    ASIN بدل SKU، مبني على تاب TacweedAmazon | Same logic as the Noon Tacweed
+#    bundle above, but keyed by ASIN instead of SKU, built from TacweedAmazon ══
+def _build_tacweed_amazon_bundle(raw):
+    data_map, code_map, cost_map, code_cost_map = {}, {}, {}, {}
+    if raw and len(raw) >= 2:
+        header = [h.strip() for h in raw[0]]
+        idx = {h: i for i, h in enumerate(header)}
+        def col(row, *names):
+            for name in names:
+                i = idx.get(name)
+                if i is not None and i < len(row):
+                    return row[i]
+            return ""
+        for row in raw[1:]:
+            asin_raw = col(row, "ASIN", "Asin", "asin")
+            if not str(asin_raw).strip():
+                continue
+            asin_up = str(asin_raw).strip().upper()
+            code = str(col(row, "Code01", "code01", "Code 01")).strip()
+            cost = _f2_or_none(col(row, "Cost", "cost", "التكلفة", "تكلفة"))
+            data_map[asin_up] = {"code": code, "cost": cost}
+            if code:
+                code_map[asin_up] = code
+            if cost is not None:
+                cost_map[asin_up] = cost
+            if code and cost is not None and code not in code_cost_map:
+                code_cost_map[code] = cost
+    return {"data": data_map, "code_map": code_map, "cost_map": cost_map, "code_cost_map": code_cost_map}
+
+def _get_tacweed_amazon_bundle():
+    return _memo_from_sheet(tacweed_amazon_sheet, "tacweed_amazon_bundle", _build_tacweed_amazon_bundle)
+
+def get_tacweed_amazon_data():
+    return _get_tacweed_amazon_bundle()["data"]
+
+def get_tacweed_amazon_map():
+    """ASIN (upper) -> الكود 01 | ASIN -> Code01."""
+    return _get_tacweed_amazon_bundle()["code_map"]
+
+def get_tacweed_amazon_reverse_map():
+    """كود -> قائمة ASINs المرتبطة بيه (عكس get_tacweed_amazon_map) — نفس فكرة
+    get_tacweed_reverse_map بالظبط بس لأمازون، عشان كود واحد ممكن يشترك بين
+    ASIN أمازون وSKU نون في نفس كمية المستودع."""
+    rev = {}
+    for asin_up, code in get_tacweed_amazon_map().items():
+        rev.setdefault(code, []).append(asin_up)
+    return rev
+
+def get_tacweed_amazon_cost_map():
+    return _get_tacweed_amazon_bundle()["cost_map"]
+
+def get_tacweed_amazon_code_cost_map():
+    return _get_tacweed_amazon_bundle()["code_cost_map"]
+
+def get_asin_cost(asin_up):
+    """يرجع تكلفة الوحدة لهذا الـ ASIN — نفس منطق get_sku_cost بالظبط بس من
+    تاب TacweedAmazon: تكلفة مسجلة على نفس الـ ASIN أولاً، وإلا تكلفة الكود01
+    المشترك (سواء مسجلة على ASIN تاني أو حتى SKU نون بنفس الكود)."""
+    bundle = _get_tacweed_amazon_bundle()
+    info = bundle["data"].get(asin_up)
+    code = info.get("code") if info else None
+    cost = info.get("cost") if info else None
+    if cost is not None:
+        return cost
+    if code:
+        c = bundle["code_cost_map"].get(code)
+        if c is not None:
+            return c
+        # fallback: لو نفس الكود مسجل بتكلفة في تاب نون التقليدي (Tacweed)
+        return get_tacweed_code_cost_map().get(code)
     return None
 
 def big_note_html(text):
@@ -888,6 +970,7 @@ def render_tacweed_upload(key_prefix):
                     clear_cache(tacweed_sheet)
                     st.session_state.pop("warehouse_stockout_rows", None)
                     st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
                     return len(to_add)
 
                 ca_tc, cb_tc = st.columns(2)
@@ -969,6 +1052,145 @@ def warehouse_available_badge(sku_up):
         f'{stockout_html}'
     )
 
+def tacweed_cost_badge_html_amazon(asin_up):
+    """نفس tacweed_cost_badge_html بالظبط بس لتكلفة أمازون (get_asin_cost)."""
+    cost = get_asin_cost(asin_up)
+    if cost is None:
+        return ""
+    return f'<span class="tacweed-badge" style="background:#0c4a6e;color:#7dd3fc;">💰 التكلفة: {cost:,.2f} ريال</span>'
+
+def warehouse_available_badge_amazon(asin_up):
+    """نفس warehouse_available_badge بالظبط لكن لمنتج أمازون بالـ ASIN — بتقرا
+    الكود01 والتكلفة من تاب TacweedAmazon، وبتاخد نفس كمية WarehouseStock
+    المشتركة مع نون (نفس الكود = نفس المستودع الفعلي)، وشارة توقع النفاد بتتقرا
+    من warehouse_stockout_asin_lookup اللي بيحسب السحب مجمّع من نون + أمازون
+    مع بعض | Same as warehouse_available_badge but for an Amazon ASIN — reads
+    Code01/cost from TacweedAmazon, shares the same WarehouseStock quantity as
+    Noon (same code = same physical stock), and its stockout badge comes from
+    warehouse_stockout_asin_lookup, which already combines Noon + Amazon draw."""
+    code = get_tacweed_amazon_map().get(asin_up, "")
+    if not code:
+        return ""
+    qty = get_warehouse_stock_map().get(code, "")
+    cost_badge_html = tacweed_cost_badge_html_amazon(asin_up)
+    cost_part = f" {cost_badge_html}" if cost_badge_html else ""
+
+    stockout_html = ""
+    wh_row = st.session_state.get("warehouse_stockout_asin_lookup", {}).get(asin_up)
+    if wh_row:
+        dts = wh_row["days_to_stockout"]
+        dts_txt = f"نفاد خلال {dts} يوم" if dts is not None else "لا يوجد سحب مسجل"
+        status_short = wh_row["status"].split(" | ")[0]
+        stockout_html = (
+            f' <span class="tacweed-badge" style="background:{wh_row["color"]}22;'
+            f'color:{wh_row["color"]};border:1px solid {wh_row["color"]}55;">'
+            f'{status_short} — {dts_txt}</span>'
+        )
+
+    if qty == "":
+        return f'<span class="tacweed-badge" style="background:#3b0764;color:#e9d5ff;">🏷️ تكويد: {code}</span>{cost_part}{stockout_html}'
+    return (
+        f'<span class="tacweed-badge" style="background:#3b0764;color:#e9d5ff;">🏷️ تكويد: {code}</span>{cost_part} '
+        f'<span class="tacweed-badge" style="background:#78350f;color:#fde68a;">📦 المتوفر بالمستودع: {qty}</span>'
+        f'{stockout_html}'
+    )
+
+def render_tacweed_amazon_upload(key_prefix):
+    """واجهة رفع ملف تكويد أمازون (ASIN + Code01 + التكلفة) — نفس شكل
+    render_tacweed_upload بالظبط بس بتدور على عمود ASIN بدل SKU، ومفيهاش
+    اكتشاف تلقائي لشيت \"noon\" لأن الملف أصلاً بتاع أمازون."""
+    with st.expander("📤 رفع ملف تكويد أمازون | Upload Amazon Tacweed (ASIN Mapping) File", expanded=False):
+        upl_tca = st.file_uploader(
+            "ارفع ملف تكويد أمازون (xlsx/xlsm/csv) | Upload Amazon Tacweed File",
+            type=["xlsx", "xls", "xlsm", "csv"], key=f"{key_prefix}_tacweed_amz_upload")
+        if upl_tca:
+            try:
+                if upl_tca.name.lower().endswith(".csv"):
+                    df_tca = pd.read_csv(upl_tca, dtype=str).fillna("")
+                else:
+                    xls_a = pd.ExcelFile(upl_tca)
+                    sheet_names_a = xls_a.sheet_names
+                    chosen_sheet_a = None
+                    for sn in sheet_names_a:
+                        if "amazon" in sn.strip().lower() or "امازون" in sn.strip():
+                            chosen_sheet_a = sn
+                            break
+                    if not chosen_sheet_a:
+                        if len(sheet_names_a) > 1:
+                            chosen_sheet_a = st.selectbox(
+                                "اختار الشيت اللي فيه التكويد | Choose the sheet with the mapping",
+                                sheet_names_a, key=f"{key_prefix}_tacweed_amz_sheet_pick")
+                        else:
+                            chosen_sheet_a = sheet_names_a[0]
+                    df_tca = pd.read_excel(upl_tca, sheet_name=chosen_sheet_a, dtype=str).fillna("")
+
+                asin_col_tca = code_col_tca = cost_col_tca = None
+                for c in df_tca.columns:
+                    cl = str(c).strip().lower()
+                    if asin_col_tca is None and "asin" in cl:
+                        asin_col_tca = c
+                    if code_col_tca is None and (("كود" in str(c) and "01" in str(c)) or cl in ("code01", "code 01")):
+                        code_col_tca = c
+                    if cost_col_tca is None and ("cost" in cl or "تكلفة" in str(c)):
+                        cost_col_tca = c
+                if not asin_col_tca:
+                    asin_col_tca = df_tca.columns[0]
+                if not code_col_tca:
+                    for c in df_tca.columns:
+                        if "كود" in str(c):
+                            code_col_tca = c
+                            break
+
+                st.info(f"📊 {len(df_tca)} صف | ASIN: `{asin_col_tca}` | الكود 01: `{code_col_tca}` | التكلفة: `{cost_col_tca or '—'}`")
+                _preview_cols_tca = [asin_col_tca] + ([code_col_tca] if code_col_tca else []) + ([cost_col_tca] if cost_col_tca else [])
+                st.dataframe(df_tca[_preview_cols_tca].head(10),
+                             use_container_width=True, height=180)
+
+                def do_upload_tca(replace=True):
+                    dn = now_str()
+                    to_add = []
+                    for _, row in df_tca.iterrows():
+                        asin = str(row[asin_col_tca]).strip()
+                        code = str(row[code_col_tca]).strip() if code_col_tca else ""
+                        cost = str(row[cost_col_tca]).strip() if cost_col_tca else ""
+                        if cost.lower() == "nan":
+                            cost = ""
+                        if asin and asin.lower() != "nan":
+                            to_add.append([asin, code, cost, dn])
+                    if replace:
+                        safe_delete_all(tacweed_amazon_sheet)
+                    safe_batch_append(tacweed_amazon_sheet, to_add)
+                    clear_cache(tacweed_amazon_sheet)
+                    st.session_state.pop("warehouse_stockout_rows", None)
+                    st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
+                    return len(to_add)
+
+                ca_tca, cb_tca = st.columns(2)
+                with ca_tca:
+                    if st.button("📤 إضافة للموجود | Append", type="primary",
+                                 use_container_width=True, key=f"{key_prefix}_tca_append"):
+                        n = do_upload_tca(replace=False)
+                        st.success(f"✅ أُضيف {n} صف | rows added")
+                        st.rerun()
+                with cb_tca:
+                    if st.button("🔄 استبدال الكل | Replace All", type="secondary",
+                                 use_container_width=True, key=f"{key_prefix}_tca_replace"):
+                        st.session_state[f"{key_prefix}_confirm_replace_tca"] = True
+                if st.session_state.get(f"{key_prefix}_confirm_replace_tca"):
+                    st.warning("⚠️ هيمسح كل تكويد أمازون القديم ويرفع الجديد؟ | Replace all existing Amazon mapping?")
+                    cy_tca, cn_tca = st.columns(2)
+                    if cy_tca.button("✅ نعم | Yes", key=f"{key_prefix}_yes_rep_tca"):
+                        n = do_upload_tca(replace=True)
+                        st.session_state[f"{key_prefix}_confirm_replace_tca"] = False
+                        st.success(f"✅ تم الاستبدال — {n} صف")
+                        st.rerun()
+                    if cn_tca.button("❌ لا | No", key=f"{key_prefix}_no_rep_tca"):
+                        st.session_state[f"{key_prefix}_confirm_replace_tca"] = False
+                        st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
 def render_warehouse_stock_upload(key_prefix):
     """واجهة رفع ملف جرد المستودع (بيتكشف شيت فيه عمود باركود وعمود كمية إجمالية تلقائيًا)."""
     with st.expander("📤 رفع ملف جرد المستودع | Upload Warehouse Stock File", expanded=False):
@@ -1036,6 +1258,7 @@ def render_warehouse_stock_upload(key_prefix):
                     clear_cache(warehouse_stock_sheet)
                     st.session_state.pop("warehouse_stockout_rows", None)
                     st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
                     return len(to_add)
 
                 ca_ws, cb_ws = st.columns(2)
@@ -2872,6 +3095,14 @@ def compute_warehouse_stockout_rows():
     stock_map_wh    = get_warehouse_stock_map()
     links_map_wh    = get_links_map()
 
+    # ── سحب أمازون اللي فعلاً بيتسحب من نفس مستودعنا (WarehouseStock) — طلبات
+    #    "حاوية كاملة الحمولة" = FSAB بس (تخزين عادي/شحن مباشر من عندنا)، مش
+    #    طلبات FBA (دي بتتسحب من مخزون أمازون هو نفسه، مش من مستودعنا) | Only
+    #    Amazon orders actually drawn from OUR warehouse (normal/FSAB storage)
+    #    count here — FBA orders draw from Amazon's own stock, not ours ──
+    multi_counts_amz_wh = build_daily_orders_counts_amazon(dates, mode="normal", group_by="asin")
+    reverse_map_amz_wh  = get_tacweed_amazon_reverse_map()
+
     rows = []
     for code, qty_str in stock_map_wh.items():
         try:
@@ -2880,7 +3111,10 @@ def compute_warehouse_stockout_rows():
             continue
 
         skus = reverse_map_wh.get(code, [])
-        total_sold = sum(sum(multi_counts_wh.get(sku_up, {}).values()) for sku_up in skus)
+        asins = reverse_map_amz_wh.get(code, [])
+        total_sold_noon = sum(sum(multi_counts_wh.get(sku_up, {}).values()) for sku_up in skus)
+        total_sold_amz  = sum(sum(multi_counts_amz_wh.get(asin_up, {}).values()) for asin_up in asins)
+        total_sold = total_sold_noon + total_sold_amz
         daily_draw = (total_sold / window_days) if window_days > 0 else 0
 
         if daily_draw <= 0:
@@ -2900,7 +3134,7 @@ def compute_warehouse_stockout_rows():
         img = next((links_map_wh.get(s) for s in skus if links_map_wh.get(s)), "")
 
         rows.append({
-            "code": code, "skus": skus, "qty": qty,
+            "code": code, "skus": skus, "asins": asins, "qty": qty,
             "daily_draw": round(daily_draw, 2),
             "days_to_stockout": round(days_to_stockout) if days_to_stockout is not None else None,
             "reorder_in": round(reorder_in) if reorder_in is not None else None,
@@ -2917,6 +3151,18 @@ def build_warehouse_stockout_sku_lookup(rows):
     for r in rows:
         for sku_up in r["skus"]:
             lookup[sku_up] = r
+    return lookup
+
+def build_warehouse_stockout_asin_lookup(rows):
+    """نفس build_warehouse_stockout_sku_lookup بالظبط بس بمفتاح ASIN — لبادچة
+    warehouse_available_badge_amazon، والسحب المحسوب في كل صف أصلاً مجمّع من
+    نون + أمازون مع بعض (شوف compute_warehouse_stockout_rows) | Same idea as
+    build_warehouse_stockout_sku_lookup but keyed by ASIN — the draw in each
+    row already combines Noon + Amazon (see compute_warehouse_stockout_rows)."""
+    lookup = {}
+    for r in rows:
+        for asin_up in r["asins"]:
+            lookup[asin_up] = r
     return lookup
 
 def compute_no_sale_rows(days=7):
@@ -3000,6 +3246,8 @@ if "transferred_skus_tamz_fba" not in st.session_state:
 if "warehouse_stockout_rows" not in st.session_state:
     st.session_state["warehouse_stockout_rows"] = compute_warehouse_stockout_rows()
     st.session_state["warehouse_stockout_sku_lookup"] = build_warehouse_stockout_sku_lookup(
+        st.session_state["warehouse_stockout_rows"])
+    st.session_state["warehouse_stockout_asin_lookup"] = build_warehouse_stockout_asin_lookup(
         st.session_state["warehouse_stockout_rows"])
 
 NAV_ITEMS = [
@@ -3182,6 +3430,7 @@ if st.session_state["nav_page"] == "tab9":
             st.subheader("📊 المخزون والمبيع الشهري | Inventory & Monthly Sales")
             links_map = get_links_map()
             render_tacweed_upload("inv")
+            render_tacweed_amazon_upload("inv")
             render_warehouse_stock_upload("inv")
             col_t,_ = st.columns([1,3])
             with col_t:
@@ -3308,6 +3557,7 @@ if st.session_state["nav_page"] == "tab_wh":
                 if st.button("🔄 إعادة الحساب | Recalculate", use_container_width=True, key="wh_recalc_btn"):
                     st.session_state.pop("warehouse_stockout_rows", None)
                     st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
                     st.rerun()
 
             wh_rows = st.session_state.get("warehouse_stockout_rows", [])
@@ -3365,8 +3615,9 @@ if st.session_state["nav_page"] == "tab_wh":
                             st.markdown(f"🗓️ **الأيام المتبقية لموعد الطلب:** {rin_txt}")
                         if r["suggested_qty"] > 0:
                             st.markdown(f"💡 **الكمية المقترحة للطلب:** {r['suggested_qty']:,}")
-                        with st.expander(f"📋 الـ SKUs التابعة لهذا الكود ({len(r['skus'])})"):
-                            st.write(", ".join(r["skus"]) if r["skus"] else "—")
+                        with st.expander(f"📋 الـ SKUs/ASINs التابعة لهذا الكود ({len(r['skus']) + len(r.get('asins', []))})"):
+                            st.write("SKU (نون): " + (", ".join(r["skus"]) if r["skus"] else "—"))
+                            st.write("ASIN (أمازون): " + (", ".join(r.get("asins", [])) if r.get("asins") else "—"))
                     st.divider()
 
         # ══ TAB 14 — المبيعات ══
@@ -3809,7 +4060,12 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 st.markdown(f"🗓️ **الأيام المتبقية لموعد الطلب:** {rin_txt_wh}")
             if r["suggested_qty"] > 0:
                 st.markdown(f"💡 **الكمية المقترحة للطلب:** {r['suggested_qty']:,}")
-            st.caption(", ".join(r["skus"]) if r["skus"] else "—")
+            skus_asins_txt = []
+            if r["skus"]:
+                skus_asins_txt.append("SKU (نون): " + ", ".join(r["skus"]))
+            if r.get("asins"):
+                skus_asins_txt.append("ASIN (أمازون): " + ", ".join(r["asins"]))
+            st.caption(" | ".join(skus_asins_txt) if skus_asins_txt else "—")
         st.divider()
 
     wh_order_now_rows = sorted(
@@ -5289,6 +5545,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                 st.subheader("🛒 مبيعات امازون — عادي (FSAB) | Amazon Sales — Normal (FSAB)")
                 st.caption("نفس تاب مبيعات نون بالظبط، لكن من شيت DailyOrdersAmazon ومقتصر على الطلبات اللي عمود 'حاوية كاملة الحمولة' بتاعها = FSAB (تخزين عادي) | Same as the Noon sales tab exactly, but reads DailyOrdersAmazon and is restricted to orders whose 'حاوية كاملة الحمولة' column = FSAB (normal storage)")
                 render_tacweed_upload("sales_amz_normal")
+                render_tacweed_amazon_upload("sales_amz_normal")
                 render_warehouse_stock_upload("sales_amz_normal")
 
                 sales_display_days = int(load_settings().get("sales_display_days","7") or 7)
@@ -5396,7 +5653,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                         with c_info:
                             st.markdown(f"**ASIN:** {asin_link_html(r.get('asin',''))}", unsafe_allow_html=True)
                             st.caption(f"MSKU: {r['sku']}")
-                            tc_badge_tamz = warehouse_available_badge(r["sku_up"])
+                            tc_badge_tamz = warehouse_available_badge_amazon(r.get("asin", "").upper())
                             if tc_badge_tamz:
                                 st.markdown(tc_badge_tamz, unsafe_allow_html=True)
 
@@ -5654,6 +5911,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                 st.subheader("📦 مبيعات امازون — تخزين FBA | Amazon Sales — FBA Storage")
                 st.caption("نفس تاب مبيعات أمازون بالظبط، لكن مقتصر على الطلبات اللي عمود 'حاوية كاملة الحمولة' بتاعها أي قيمة غير FSAB (يعني تخزين عند أمازون FBA) | Same as the Amazon sales tab exactly, restricted to orders whose 'حاوية كاملة الحمولة' column is anything other than FSAB (i.e. stored with Amazon / FBA)")
                 render_tacweed_upload("sales_amz_fba")
+                render_tacweed_amazon_upload("sales_amz_fba")
                 render_warehouse_stock_upload("sales_amz_fba")
 
                 sales_display_days = int(load_settings().get("sales_display_days","7") or 7)
@@ -5764,7 +6022,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                                     '<span style="background:#78350f;color:#fde68a;padding:2px 8px;'
                                     'border-radius:6px;font-size:12px;">⚠️ مش موجود في ملف المخزون المرفوع | Not in uploaded inventory</span>',
                                     unsafe_allow_html=True)
-                            tc_badge_tamz = warehouse_available_badge(r["sku_up"])
+                            tc_badge_tamz = warehouse_available_badge_amazon(r.get("asin", "").upper())
                             if tc_badge_tamz:
                                 st.markdown(tc_badge_tamz, unsafe_allow_html=True)
 
