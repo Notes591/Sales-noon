@@ -6476,7 +6476,10 @@ if st.session_state["nav_page"] == "tab_stock_review_amz":
                     st.success("✅ لا توجد ASINs محتاجة مراجعة مخزون | No ASINs need stock review")
                 else:
                     df_sr_amz = pd.DataFrame([{
-                        "ASIN": r["asin"], "SKU": r["sku"], "أمس": r["day_counts"].get(sales_dates_amz_sr[0],0),
+                        "ASIN": r["asin"], "SKU": r["sku"],
+                        "Yesterday": r["day_counts"].get(sales_dates_amz_sr[0],0),
+                        "Day Before": r["day_counts"].get(sales_dates_amz_sr[1],0) if len(sales_dates_amz_sr) > 1 else 0,
+                        "3 Days Ago": r["day_counts"].get(sales_dates_amz_sr[2],0) if len(sales_dates_amz_sr) > 2 else 0,
                         "Stock": r["stock"], "Monthly Sales": r["sales_month"],
                         "Suggested Qty": r["suggested_qty"], "Days to Stockout": r["days_to_stockout"]
                     } for r in stock_review_rows_amz])
@@ -6491,8 +6494,23 @@ if st.session_state["nav_page"] == "tab_stock_review_amz":
                             st.markdown(f"**ASIN:** `{r['asin']}` &nbsp;|&nbsp; **SKU:** `{r['sku']}`")
                             if r.get("_transferred_from_sales"):
                                 st.markdown('<span style="background:#7c3aed;color:white;border-radius:6px;padding:2px 10px;font-size:11px;">📌 مرحّل من تاب مبيعات أمازون FBA — محتاج جدولة | Transferred from Amazon FBA Sales tab — needs scheduling</span>', unsafe_allow_html=True)
-                            st.markdown(f"📦 **المخزون | Stock:** {r['stock']} &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly:** {r['sales_month']} &nbsp;|&nbsp; 📊 **يومي أخير | Recent daily:** {r['effective_avg']:.1f}")
+                            st.markdown(f"📦 **المخزون | Stock:** {r['stock']} &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly:** {r['sales_month']}")
+                            # ══ عرض آخر 3 أيام صف بصف — بالظبط زي تاب مراجعة مخزون نون ══
+                            day_labels_amz_sr = []
+                            for _i, _d in enumerate(sales_dates_amz_sr[:3]):
+                                if _i == 0: day_labels_amz_sr.append(f"أمس | Yesterday ({_d.strftime('%m-%d')})")
+                                elif _i == 1: day_labels_amz_sr.append(f"أول أمس | Day before ({_d.strftime('%m-%d')})")
+                                else: day_labels_amz_sr.append(f"أول أول أمس | 3 days ago ({_d.strftime('%m-%d')})")
+                            st.markdown("🛒 " + render_day_counts_md(r["day_counts"], sales_dates_amz_sr[:3], day_labels_amz_sr))
                             st.markdown(f"💡 **اقتراح الكمية | Suggested Qty:** **{r['suggested_qty']}** &nbsp;|&nbsp; ⏳ **نفاد خلال | Days to stockout:** {r['days_to_stockout']} يوم")
+                            # ══ مبيعات أعلى من المعتاد كمان — بالظبط زي نون ══
+                            _recent_vals_sr = [r["day_counts"].get(dd, 0) for dd in sales_dates_amz_sr[:3]]
+                            _recent_avg_sr  = (sum(_recent_vals_sr) / len(_recent_vals_sr)) if _recent_vals_sr else 0
+                            _daily_avg_normal_sr = (r["sales_month"] / 30) if r["sales_month"] > 0 else 0
+                            _elevated_days_sr = sum(1 for v in _recent_vals_sr if _daily_avg_normal_sr > 0 and v > _daily_avg_normal_sr)
+                            _sales_alert_sr = (r["sales_month"] > 0 and _recent_avg_sr * 30 > r["sales_month"] and _elevated_days_sr >= 2)
+                            if _sales_alert_sr:
+                                st.warning("📈 مبيعات أعلى من المعتاد كمان | Also selling faster than usual")
                             st.markdown(f'<span class="status-badge-lg" style="background:{r["_cov_badge_color"]};">{r["_cov_badge_text"]}</span>', unsafe_allow_html=True)
                             if r["sku_up"] in pending_approval_skus_amz_sr:
                                 st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
@@ -6572,7 +6590,10 @@ if st.session_state["nav_page"] == "tab_sales_review_amz":
                     st.success("✅ لا توجد ASINs محتاجة مراجعة مبيعات | No ASINs need sales review")
                 else:
                     df_slr_amz = pd.DataFrame([{
-                        "ASIN": r["asin"], "SKU": r["sku"], "أمس": r["day_counts"].get(sales_dates_amz_slr[0],0),
+                        "ASIN": r["asin"], "SKU": r["sku"],
+                        "Yesterday": r["day_counts"].get(sales_dates_amz_slr[0],0),
+                        "Day Before": r["day_counts"].get(sales_dates_amz_slr[1],0) if len(sales_dates_amz_slr) > 1 else 0,
+                        "3 Days Ago": r["day_counts"].get(sales_dates_amz_slr[2],0) if len(sales_dates_amz_slr) > 2 else 0,
                         "Stock": r["stock"], "Monthly Sales": r["sales_month"], "Days to Stockout": r["days_to_stockout"]
                     } for r in sales_review_rows_amz])
                     c1,c2 = st.columns(2)
@@ -6585,6 +6606,13 @@ if st.session_state["nav_page"] == "tab_sales_review_amz":
                         with c_info:
                             st.markdown(f"**ASIN:** `{r['asin']}` &nbsp;|&nbsp; **SKU:** `{r['sku']}`")
                             st.markdown(f"📦 **المخزون | Stock:** {r['stock']} &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly:** {r['sales_month']}")
+                            # ══ عرض آخر 3 أيام صف بصف — بالظبط زي تاب مراجعة مبيعات نون ══
+                            day_labels_amz_slr = []
+                            for _i, _d in enumerate(sales_dates_amz_slr[:3]):
+                                if _i == 0: day_labels_amz_slr.append(f"أمس | Yesterday ({_d.strftime('%m-%d')})")
+                                elif _i == 1: day_labels_amz_slr.append(f"أول أمس | Day before ({_d.strftime('%m-%d')})")
+                                else: day_labels_amz_slr.append(f"أول أول أمس | 3 days ago ({_d.strftime('%m-%d')})")
+                            st.markdown("🛒 " + render_day_counts_md(r["day_counts"], sales_dates_amz_slr[:3], day_labels_amz_slr))
                             st.markdown(f"⏳ **نفاد خلال | Days to stockout:** {r['days_to_stockout']} يوم")
                             st.markdown(f'<span class="status-badge-lg" style="background:{r["_cov_badge_color"]};">{r["_cov_badge_text"]}</span>', unsafe_allow_html=True)
                             if r["sku_up"] in pending_approval_skus_amz_slr:
