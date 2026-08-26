@@ -2959,8 +2959,6 @@ NAV_ITEMS = [
     ("tab_dash", "📊", "داشبورد المبيعات | Dashboard"),
     ("tab9",     "📦", "المخزون | Inventory"),
     ("tab_wh",   "🏭", "مخزون المستودع | Warehouse Stockout"),
-    ("tab_stock_review_amz", "🔴", "مراجعة مخزون امازون | Amazon Stock Review"),
-    ("tab_sales_review_amz", "📈", "مراجعة مبيعات امازون | Amazon Sales Review"),
     ("tab16",    "🗂️", "مخزون بدون بيع | No Sales"),
     ("tab_ads",  "📢", "الإعلانات | Ads"),
 ]
