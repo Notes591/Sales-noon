@@ -87,6 +87,13 @@ TABS_CONFIG = {
     # تاب الإعلانات — بيتحدّث يدوي من جوجل شيت، وبنعرض أداء كل SKU منه في تاب المبيعات
     "Advertisements":    ["Campaign Name","Sku","Views","Clicks","Orders","ATC","Spends","Revenue",
                            "CTR","ROAS","CPC","CPS","CVR"],
+    # تاب إعلانات أمازون — نفس تاب الإعلانات بالظبط بس بمفتاح ASIN (معرّف منتج أمازون
+    # الحقيقي) بدل SKU، وبنعرض أداء كل ASIN منه في تاب مبيعات أمازون بنفس طريقة نون
+    # تماماً | Amazon ads sheet — identical to Advertisements, but keyed by ASIN
+    # (Amazon's real product identity) instead of SKU; shown in the Amazon Sales tab
+    # exactly the same way Noon's ads are shown.
+    "AdvertisementsAmz": ["Campaign Name","ASIN","Views","Clicks","Orders","ATC","Spends","Revenue",
+                           "CTR","ROAS","CPC","CPS","CVR"],
     # تاب العمولة ومصاريف التوصيل — بيتحدّث يدوي، وبنستخدمه لحساب صافي سعر البيع لكل SKU
     "COM":               ["SKU","مصاريف توصيل","العمولة"],
     # تاب LIVE — نسخة من ملف Noon catalog export، بيتحدّث يدوي بره البرنامج (مش من هنا).
@@ -280,6 +287,7 @@ tacweed_sheet        = sheets["Tacweed"]
 tacweed_amazon_sheet = sheets["TacweedAmazon"]
 warehouse_stock_sheet = sheets["WarehouseStock"]
 ads_sheet             = sheets["Advertisements"]
+ads_amz_sheet         = sheets["AdvertisementsAmz"]
 com_sheet             = sheets["COM"]
 live_sheet            = sheets["LIVE"]
 
@@ -683,6 +691,46 @@ def get_ads_map():
             "cvr":    _f2(col(row, "CVR")),
         }
         m.setdefault(sku_up, []).append(entry)
+    return m
+
+# ══ خريطة إعلانات أمازون (ASIN -> قائمة كامبينات) | Amazon ads map (ASIN -> list of campaigns) ══
+def get_ads_map_amazon():
+    """نفس get_ads_map() بالظبط، بس بيقرأ من شيت AdvertisementsAmz ومفتاحها ASIN
+    (معرّف منتج أمازون الحقيقي) بدل SKU | Same as get_ads_map(), but reads from
+    the AdvertisementsAmz sheet and is keyed by ASIN (Amazon's real product
+    identity) instead of SKU."""
+    data = get_cached(ads_amz_sheet)
+    if not data or len(data) < 2:
+        return {}
+    header = [h.strip() for h in data[0]]
+    idx = {h: i for i, h in enumerate(header)}
+    def col(row, *names):
+        for name in names:
+            i = idx.get(name)
+            if i is not None and i < len(row):
+                return row[i]
+        return ""
+    m = {}
+    for row in data[1:]:
+        asin_raw = col(row, "ASIN", "Asin", "asin")
+        if not str(asin_raw).strip():
+            continue
+        asin_up = str(asin_raw).strip().upper()
+        entry = {
+            "campaign": col(row, "Campaign Name") or "—",
+            "views":  _f2(col(row, "Views")),
+            "clicks": _f2(col(row, "Clicks")),
+            "orders": _f2(col(row, "Orders")),
+            "atc":    _f2(col(row, "ATC")),
+            "spends": _f2(col(row, "Spends")),
+            "revenue":_f2(col(row, "Revenue")),
+            "ctr":    _f2(col(row, "CTR")),
+            "roas":   _f2(col(row, "ROAS")),
+            "cpc":    _f2(col(row, "CPC")),
+            "cps":    _f2(col(row, "CPS")),
+            "cvr":    _f2(col(row, "CVR")),
+        }
+        m.setdefault(asin_up, []).append(entry)
     return m
 
 # ══ خريطة العمولة/التوصيل (SKU -> {delivery, commission_pct}) | Commission & delivery map ══
@@ -4886,6 +4934,459 @@ def _render_ads_performance_tab():
             "history to compare against. Enabling it would require snapshotting the ads sheet with dates.")
 
 
+def _render_ads_performance_tab_amazon():
+    """نسخة أمازون من تاب "الإعلانات" المستقل — نفس بالظبط منطق وتصميم
+    _render_ads_performance_tab (تنبيهات ربح/خسارة + تحليل أداء الحملات)، بس
+    بيانات الإعلانات هنا جايه من شيت AdvertisementsAmz ومفتاحها ASIN (معرّف
+    منتج أمازون الحقيقي) بدل SKU، زي بالظبط ما بيانات نون بتُعرض في تابها |
+    Amazon version of the standalone "Ads" tab — identical logic and layout to
+    _render_ads_performance_tab (profit/loss alerts + campaign performance
+    analysis), but ad data here comes from the AdvertisementsAmz sheet and is
+    keyed by ASIN (Amazon's real product identity) instead of SKU, shown next
+    to Noon's tab exactly the same way."""
+    live_map_dash = get_live_map()
+
+    # ── كروت رئيسية (نظرة عامة) | Main overview cards ──
+    def _kpi_card_html(icon, icon_bg, label, value, delta_text=None, delta_positive=True):
+        delta_html = ""
+        if delta_text is not None:
+            arrow = "↑" if delta_positive else "↓"
+            color = "#16a34a" if delta_positive else "#dc2626"
+            delta_html = f'<div style="font-size:12px;color:{color};margin-top:6px;font-weight:600;">{arrow} {delta_text}</div>'
+        return (
+            f'<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;'
+            f'padding:14px 16px;direction:rtl;min-height:118px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">'
+            f'<div style="width:34px;height:34px;border-radius:9px;background:{icon_bg}1f;'
+            f'display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:10px;">{icon}</div>'
+            f'<div style="font-size:12px;color:#6b7280;margin-bottom:4px;">{label}</div>'
+            f'<div style="font-size:21px;font-weight:800;color:#111827;">{value}</div>'
+            f'{delta_html}</div>'
+        )
+
+    # ── ربحية الإعلانات لكل SKU (نفس منطق تاب المبيعات: صافي الربح الفعلي بعد خصم
+    #    تكلفة المنتج من طلبات الإعلان، مقابل إجمالي المصروف عليه) — عشان تظهر في
+    #    التنبيهات السريعة تحت | Same logic as the Sales tab: actual net profit
+    #    after subtracting product cost from ad orders, vs total ad spend ──
+    ads_map_dash = get_ads_map_amazon()
+    com_map_dash = get_com_map()
+
+    _ads_fallback_dates = [datetime.now().date() - timedelta(days=i) for i in range(1, 91)]
+    _ads_fallback_prices = build_daily_orders_prices_amazon_all_asin(_ads_fallback_dates)
+
+    def _ads_latest_price_for_asin(asin_up, primary_sku_up):
+        """السعر الأساسي لهذا الـ ASIN: عمود sale_price من تاب LIVE أولاً (لو المنتج
+        موجود فيه تحت الـ MSKU الأساسي بتاعه)، ولو مش موجود بيدوّر في أسعار آخر 90
+        يوم من طلبات أمازون (مجمّعة على ASIN، كل الطلبات، غير مقسومة Normal/FBA
+        لأن الإعلانات نفسها مش مقسومة كده) كبديل | Base price for this ASIN: the
+        LIVE sheet's sale_price column first (if the product exists there under
+        its primary MSKU), falling back to the last 90 days of Amazon order
+        prices (grouped by ASIN, all orders, unsplit — ads data itself isn't
+        split by fulfillment type)."""
+        live_info = live_map_dash.get(primary_sku_up)
+        if live_info and live_info.get("price") is not None:
+            return live_info["price"]
+        vals = []
+        for d in _ads_fallback_dates:
+            for p, qty in _ads_fallback_prices.get(asin_up, {}).get(d, []):
+                if p and str(p).strip().lower() not in ("", "nan", "none"):
+                    try:
+                        vals.append((float(str(p).replace(",", "")), qty))
+                    except Exception:
+                        pass
+        if vals:
+            vals.sort(key=lambda x: -x[1])
+            return vals[0][0]
+        return None
+
+    ads_profit_rows_ap, ads_loss_rows_ap = [], []
+    _links_map_ads_orphan = get_links_map_asin()
+    for asin_up_ad, ads_entries_ad in ads_map_dash.items():
+        asin_info_ad = amz_inv_map_asin.get(asin_up_ad, {})
+        mskus_ad = list(asin_info_ad.get("skus", []))
+        primary_sku_ad = mskus_ad[0].upper() if mskus_ad else asin_up_ad
+        com_info_ad = com_map_dash.get(primary_sku_ad)
+        if not ads_entries_ad or not com_info_ad:
+            continue
+        latest_price_ad = _ads_latest_price_for_asin(asin_up_ad, primary_sku_ad)
+        if latest_price_ad is None:
+            continue
+        _, net_tax_ad = compute_net_price_after_fees(latest_price_ad, com_info_ad)
+        # ── تكلفة الوحدة من تاب التكويد الخاص بأمازون (TacweedAmazon) عن طريق
+        #    الـ ASIN، وصافي الربح الفعلي بعدها، زي بالظبط منطق تاب المبيعات —
+        #    لو التكلفة مش مسجلة بتتحط صفر مع تنبيه، بدل ما تختفي بصمت من
+        #    الحساب | Unit cost from the Amazon Tacweed sheet (TacweedAmazon)
+        #    via the ASIN, and the actual net profit after subtracting it —
+        #    same logic as the Sales tab. Missing cost defaults to zero with a
+        #    flag, instead of silently dropping out of the calculation ──
+        cost_ad = resolve_unit_cost(primary_sku_ad, asin_up_ad)
+        cost_missing_ad = cost_ad is None
+        if cost_missing_ad:
+            cost_ad = 0.0
+        net_profit_ad = net_tax_ad - cost_ad
+        total_spends_ad = sum(a["spends"] for a in ads_entries_ad)
+        total_orders_ad = sum(a["orders"] for a in ads_entries_ad)
+        total_net_ad = total_orders_ad * net_profit_ad
+        result_ad = total_net_ad - total_spends_ad
+        # الصورة من خريطة ASIN مباشرة (شيت links a) | Image straight from the
+        # ASIN links map ("links a" sheet)
+        img_ad = _links_map_ads_orphan.get(asin_up_ad, "")
+        sku_disp_ad = ", ".join(mskus_ad) if mskus_ad else asin_up_ad
+        entry_ad = {"sku_up": asin_up_ad, "sku": sku_disp_ad, "asin": asin_up_ad,
+                    "img": img_ad,
+                    "spends": total_spends_ad, "orders": total_orders_ad,
+                    "net_total": total_net_ad, "result": result_ad,
+                    "cost": cost_ad, "cost_missing": cost_missing_ad}
+        if total_orders_ad <= 0 or result_ad < 0:
+            ads_loss_rows_ap.append(entry_ad)
+        else:
+            ads_profit_rows_ap.append(entry_ad)
+    ads_profit_rows_ap.sort(key=lambda r: -r["result"])
+    ads_loss_rows_ap.sort(key=lambda r: r["result"])  # الأكثر خسارة أولاً
+
+    st.markdown("##### 🔔 تنبيهات الإعلانات | Ads Alerts")
+    acp1, acp2 = st.columns(2)
+    with acp1:
+        st.markdown(
+            f'<div style="background:#f0fdf4;border:1px solid #22c55e;border-right:4px solid #22c55e;'
+            f'border-radius:12px;padding:12px 14px;direction:rtl;min-height:92px;">'
+            f'<div style="font-size:12px;color:#374151;margin-bottom:6px;">🎯 منتجات ربحانة من الإعلانات</div>'
+            f'<div style="font-size:22px;font-weight:800;color:#111827;">{len(ads_profit_rows_ap):,}</div>'
+            f'<div style="font-size:11px;color:#6b7280;">صافي ربح الطلبات &gt; المصروف على الإعلان</div></div>',
+            unsafe_allow_html=True)
+    with acp2:
+        st.markdown(
+            f'<div style="background:#fef2f2;border:1px solid #ef4444;border-right:4px solid #ef4444;'
+            f'border-radius:12px;padding:12px 14px;direction:rtl;min-height:92px;">'
+            f'<div style="font-size:12px;color:#374151;margin-bottom:6px;">🚨 منتجات خسرانة من الإعلانات</div>'
+            f'<div style="font-size:22px;font-weight:800;color:#111827;">{len(ads_loss_rows_ap):,}</div>'
+            f'<div style="font-size:11px;color:#6b7280;">المصروف على الإعلان أكبر من صافي الربح (أو من غير طلبات)</div></div>',
+            unsafe_allow_html=True)
+
+    def _render_ads_alert_sku_row(r, badges_html=""):
+        ci_al, cinfo_al = st.columns([1, 6])
+        with ci_al:
+            show_img(r["img"], 55)
+        with cinfo_al:
+            st.markdown(f"{asin_link_html(r.get('asin', r['sku']))}", unsafe_allow_html=True)
+            st.caption(f"MSKU: {r['sku']}")
+            if badges_html:
+                st.markdown(badges_html, unsafe_allow_html=True)
+
+    def _ads_insight_html(r):
+        # ── سطر التكلفة + تنبيه لو غير مسجلة | Cost line + warning if unrecorded ──
+        cost_note_ad = f' &nbsp;|&nbsp; 📦 التكلفة | Cost: <b>{r["cost"]:,.2f}</b> ريال'
+        missing_note_ad = ""
+        if r.get("cost_missing"):
+            missing_note_ad = (' <span style="color:#fbbf24;">⚠️ تكلفة المنتج غير مسجلة '
+                                '(تاب التكويد) — اعتُبرت صفر</span>')
+        if r["orders"] <= 0:
+            return (f'<span style="color:#f87171;font-size:12px;font-weight:700;">🚨 مفدتش لحد دلوقتي: '
+                    f'اتصرف {r["spends"]:,.2f} ريال ولسه ما جابش أي طلبات فعلية</span>'
+                    f'{cost_note_ad}{missing_note_ad}')
+        if r["result"] >= 0:
+            return (f'<span style="color:#4ade80;font-size:12px;font-weight:700;">🎯 الاعلان مربح: '
+                    f'عدد طلبات الاعلان {r["orders"]:,.0f} طلب بصافي ربح فعلي بعد التكلفة إجمالي {r["net_total"]:,.2f} ريال مقابل '
+                    f'{r["spends"]:,.2f} ريال مدفوع — حقق {r["result"]:,.2f} ريال 👌</span>'
+                    f'{cost_note_ad}{missing_note_ad}')
+        return (f'<span style="color:#f87171;font-size:12px;font-weight:700;">🚨 الاعلان غير مربح: '
+                f'مدفوع {r["spends"]:,.2f} ريال، لكن صافي الربح الفعلي بعد التكلفة من {r["orders"]:,.0f} طلب بس {r["net_total"]:,.2f} ريال — '
+                f'خسران {abs(r["result"]):,.2f} ريال إجمالي</span>'
+                f'{cost_note_ad}{missing_note_ad}')
+
+    with st.expander(f"🎯 عرض منتجات ربحانة من الإعلانات ({len(ads_profit_rows_ap):,}) | Show profitable-ads SKUs"):
+        if ads_profit_rows_ap:
+            df_al5 = pd.DataFrame([{
+                "ASIN": r.get("asin", ""), "MSKU": r["sku"], "طلبات الإعلان | Ad Orders": r["orders"],
+                "المصروف | Spends": round(r["spends"], 2),
+                "التكلفة | Cost": round(r["cost"], 2),
+                "صافي الربح بعد التكلفة | Net Total After Cost": round(r["net_total"], 2),
+                "النتيجة | Result": round(r["result"], 2),
+            } for r in ads_profit_rows_ap])
+            dl_btn(df_al5, "alert_ads_profit", key="dl_alert_ads_profit_ap")
+            for r in ads_profit_rows_ap:
+                _render_ads_alert_sku_row(r, badges_html=_ads_insight_html(r))
+        else:
+            st.caption("لا توجد أصناف ربحانة من الإعلانات حالياً")
+
+    with st.expander(f"🚨 عرض منتجات خسرانة من الإعلانات ({len(ads_loss_rows_ap):,}) | Show losing-ads SKUs"):
+        if ads_loss_rows_ap:
+            df_al6 = pd.DataFrame([{
+                "ASIN": r.get("asin", ""), "MSKU": r["sku"], "طلبات الإعلان | Ad Orders": r["orders"],
+                "المصروف | Spends": round(r["spends"], 2),
+                "التكلفة | Cost": round(r["cost"], 2),
+                "صافي الربح بعد التكلفة | Net Total After Cost": round(r["net_total"], 2),
+                "النتيجة | Result": round(r["result"], 2),
+            } for r in ads_loss_rows_ap])
+            dl_btn(df_al6, "alert_ads_loss", key="dl_alert_ads_loss_ap")
+            for r in ads_loss_rows_ap:
+                _render_ads_alert_sku_row(r, badges_html=_ads_insight_html(r))
+        else:
+            st.caption("لا توجد أصناف خسرانة من الإعلانات حالياً 🎉")
+
+    st.divider()
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 📢 تحليل أداء الإعلانات (على مستوى الحملة) | Ads Performance Analysis
+    # (Campaign level) — ده معتمد بس على بيانات الإعلانات الموجودة فعليًا
+    # (Views/Clicks/Orders/ATC/Spends/Revenue) من غير أي افتراض لتكلفة المنتج أو
+    # هامش ربح حقيقي. كل حساب هنا بيتجمّع من *كل* الحملات/الصفوف الخاصة بالـ SKU
+    # أو الحملة قبل ما يتحسب — مش بياخد رقم من صف واحد بس لو فيه أكتر من حملة |
+    # Based only on ad data that actually exists, no product-cost or profit-margin
+    # assumptions. Every number here is summed across *all* matching campaign rows
+    # before any ratio is computed — never taken from a single row when more than
+    # one campaign exists.
+    st.markdown("---")
+    st.markdown("## 📢 تحليل أداء الإعلانات | Ads Performance Analysis")
+    st.caption("مبني فقط على بيانات الإعلانات الموجودة في النظام حاليًا — بدون أي افتراض لتكلفة المنتج أو هامش الربح | Based only on ad data currently in the system — no product cost or profit margin assumptions")
+
+    def _apa_ratios(views, clicks, atc, orders, spends, revenue):
+        """يعيد حساب كل النسب من الأرقام الخام المجمّعة (مش من عمود جاهز في صف واحد)
+        عشان أي SKU/حملة ليها أكتر من صف تتحسب صح | Recomputes every ratio from the
+        summed raw totals (never from a single pre-computed column), so multi-row
+        SKUs/campaigns are calculated correctly."""
+        ctr = (clicks / views * 100) if views > 0 else 0.0
+        cpc = (spends / clicks) if clicks > 0 else 0.0
+        cpa = (spends / orders) if orders > 0 else 0.0
+        cvr = (orders / clicks * 100) if clicks > 0 else 0.0
+        roas = (revenue / spends) if spends > 0 else 0.0
+        click_to_atc = (atc / clicks * 100) if clicks > 0 else 0.0
+        atc_to_order = (orders / atc * 100) if atc > 0 else 0.0
+        return {"ctr": ctr, "cpc": cpc, "cpa": cpa, "cvr": cvr, "roas": roas,
+                "click_to_atc": click_to_atc, "atc_to_order": atc_to_order}
+
+    # ── تجميع كل صفوف الإعلانات (Sku × Campaign) على مستوى الحملة نفسها —
+    #    عشان أي حملة بتستهدف أكتر من SKU تتحسب مجمّعة صح ومتاخدش من صف واحد ──
+    campaigns_apa = {}
+    for sku_up_c, entries_c in ads_map_dash.items():
+        for e in entries_c:
+            cname_c = e["campaign"] or "—"
+            agg_c = campaigns_apa.setdefault(cname_c, {
+                "campaign": cname_c, "views": 0.0, "clicks": 0.0, "orders": 0.0,
+                "atc": 0.0, "spends": 0.0, "revenue": 0.0, "skus": set(),
+            })
+            agg_c["views"]   += e["views"]
+            agg_c["clicks"]  += e["clicks"]
+            agg_c["orders"]  += e["orders"]
+            agg_c["atc"]     += e["atc"]
+            agg_c["spends"]  += e["spends"]
+            agg_c["revenue"] += e["revenue"]
+            agg_c["skus"].add(sku_up_c)
+
+    for _cname, _agg in campaigns_apa.items():
+        _agg.update(_apa_ratios(_agg["views"], _agg["clicks"], _agg["atc"], _agg["orders"], _agg["spends"], _agg["revenue"]))
+        _agg["sku_count"] = len(_agg["skus"])
+        # نتيجة الإعلان بعد الإنفاق الإعلاني فقط — مش ربح حقيقي (مفيش تكلفة منتج) |
+        # Ad result after ad spend only — not real profit (no product cost known)
+        _agg["ad_result"] = _agg["revenue"] - _agg["spends"]
+
+    campaigns_list_apa = list(campaigns_apa.values())
+
+    def _apa_render_related_skus(asin_up_set, max_show=6):
+        """يعرض المنتجات (ASIN) المرتبطة بالحملة مع صورها | Renders the ASINs linked
+        to this campaign, each with its product image."""
+        asin_list_r = sorted(asin_up_set)
+        shown_r = asin_list_r[:max_show]
+        _links_map_apa_orphan = get_links_map_asin()
+        for asin_up_r in shown_r:
+            asin_info_r = amz_inv_map_asin.get(asin_up_r, {})
+            # الصورة من خريطة ASIN مباشرة (شيت links a) | Image straight from
+            # the ASIN links map ("links a" sheet)
+            img_r = _links_map_apa_orphan.get(asin_up_r, "")
+            ci_r, cinfo_r = st.columns([1, 6])
+            with ci_r:
+                show_img(img_r, 45)
+            with cinfo_r:
+                st.markdown(asin_link_html(asin_up_r), unsafe_allow_html=True)
+                mskus_r = asin_info_r.get("skus", [])
+                if mskus_r:
+                    st.caption(f"MSKU: {', '.join(mskus_r)}")
+        if len(asin_list_r) > max_show:
+            st.caption(f"+ {len(asin_list_r) - max_show} ASIN إضافي | more ASINs")
+
+    if not campaigns_list_apa:
+        st.info("لا توجد بيانات إعلانات مرفوعة حالياً | No ad data uploaded yet")
+    else:
+        # ── 1) مؤشرات أداء الإعلانات | Ad Performance Metrics (إجمالي كل الحملات) ──
+        tot_views_apa   = sum(c["views"] for c in campaigns_list_apa)
+        tot_clicks_apa  = sum(c["clicks"] for c in campaigns_list_apa)
+        tot_atc_apa     = sum(c["atc"] for c in campaigns_list_apa)
+        tot_orders_apa  = sum(c["orders"] for c in campaigns_list_apa)
+        tot_spends_apa  = sum(c["spends"] for c in campaigns_list_apa)
+        tot_revenue_apa = sum(c["revenue"] for c in campaigns_list_apa)
+        tot_ratios_apa  = _apa_ratios(tot_views_apa, tot_clicks_apa, tot_atc_apa, tot_orders_apa, tot_spends_apa, tot_revenue_apa)
+
+        st.markdown("#### 📊 مؤشرات أداء الإعلانات | Ad Performance Metrics")
+        st.caption("ℹ️ كل النسب (CTR/CPC/CPS/CVR/ROAS) بتتحسب من إجمالي الأرقام الخام لكل الحملات مجمّعة — مش من عمود جاهز في صف واحد | All ratios are computed from the raw totals across every campaign combined — never from a single pre-computed column")
+        mrow1 = st.columns(4)
+        with mrow1[0]:
+            st.markdown(_kpi_card_html("🛒", "#2563eb", "الطلبات | Orders", f"{tot_orders_apa:,.0f}"), unsafe_allow_html=True)
+        with mrow1[1]:
+            st.markdown(_kpi_card_html("👁️", "#0891b2", "مرات الظهور | Impressions", f"{tot_views_apa:,.0f}"), unsafe_allow_html=True)
+        with mrow1[2]:
+            st.markdown(_kpi_card_html("🖱️", "#7c3aed", "النقرات | Clicks", f"{tot_clicks_apa:,.0f}"), unsafe_allow_html=True)
+        with mrow1[3]:
+            st.markdown(_kpi_card_html("➕", "#059669", "الإضافة إلى السلة | Add to Cart", f"{tot_atc_apa:,.0f}"), unsafe_allow_html=True)
+        mrow2 = st.columns(4)
+        with mrow2[0]:
+            st.markdown(_kpi_card_html("📈", "#0891b2", "معدل النقر | CTR", f"{tot_ratios_apa['ctr']:.2f}%"), unsafe_allow_html=True)
+        with mrow2[1]:
+            st.markdown(_kpi_card_html("💵", "#f59e0b", "تكلفة النقرة | CPC", f"{tot_ratios_apa['cpc']:.2f} ريال"), unsafe_allow_html=True)
+        with mrow2[2]:
+            st.markdown(_kpi_card_html("🎯", "#dc2626", "تكلفة الطلب | CPS / CPA", f"{tot_ratios_apa['cpa']:.2f} ريال"), unsafe_allow_html=True)
+        with mrow2[3]:
+            st.markdown(_kpi_card_html("📊", "#9333ea", "معدل التحويل | CVR", f"{tot_ratios_apa['cvr']:.2f}%"), unsafe_allow_html=True)
+        mrow3 = st.columns(3)
+        with mrow3[0]:
+            st.markdown(_kpi_card_html("🎯", "#16a34a", "العائد على الإنفاق الإعلاني | ROAS", f"{tot_ratios_apa['roas']:.2f}"), unsafe_allow_html=True)
+        with mrow3[1]:
+            st.markdown(_kpi_card_html("💰", "#16a34a", "الإيراد | Revenue", f"{tot_revenue_apa:,.2f} ريال"), unsafe_allow_html=True)
+        with mrow3[2]:
+            st.markdown(_kpi_card_html("💸", "#dc2626", "الإنفاق الإعلاني | Ad Spend", f"{tot_spends_apa:,.2f} ريال"), unsafe_allow_html=True)
+
+        st.write("")
+
+        # ── 2) تحليل مسار الإعلان | Advertising Funnel ──
+        st.markdown("#### 🔻 تحليل مسار الإعلان | Advertising Funnel")
+        st.caption("عشان تعرف أين يحدث انخفاض الأداء في مسار الإعلان | See exactly where performance drops along the funnel")
+        fcols_apa = st.columns(4)
+        funnel_stages_apa = [
+            ("👁️ مرات الظهور | Impressions", tot_views_apa, None),
+            ("🖱️ النقرات | Clicks", tot_clicks_apa, tot_ratios_apa["ctr"]),
+            ("➕ الإضافة إلى السلة | Add to Cart", tot_atc_apa, tot_ratios_apa["click_to_atc"]),
+            ("🛒 الطلبات | Orders", tot_orders_apa, tot_ratios_apa["atc_to_order"]),
+        ]
+        for fc_apa, (label_f, val_f, rate_f) in zip(fcols_apa, funnel_stages_apa):
+            with fc_apa:
+                rate_html_f = (f'<div style="font-size:11px;color:#f59e0b;margin-top:4px;">↓ {rate_f:.1f}%</div>'
+                               if rate_f is not None else "")
+                st.markdown(
+                    f'<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    f'padding:12px 10px;text-align:center;">'
+                    f'<div style="font-size:11px;color:#94a3b8;">{label_f}</div>'
+                    f'<div style="font-size:20px;font-weight:800;color:#e2e8f0;">{val_f:,.0f}</div>'
+                    f'{rate_html_f}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="margin-top:8px;font-size:12px;color:#94a3b8;">'
+            f'📈 معدل النقر | CTR: <b style="color:#e2e8f0;">{tot_ratios_apa["ctr"]:.2f}%</b> &nbsp;|&nbsp; '
+            f'النقر → السلة | Click → Cart: <b style="color:#e2e8f0;">{tot_ratios_apa["click_to_atc"]:.1f}%</b> &nbsp;|&nbsp; '
+            f'السلة → الطلب | Cart → Order: <b style="color:#e2e8f0;">{tot_ratios_apa["atc_to_order"]:.1f}%</b> &nbsp;|&nbsp; '
+            f'معدل التحويل الكلي | CVR: <b style="color:#e2e8f0;">{tot_ratios_apa["cvr"]:.2f}%</b>'
+            f'</div>', unsafe_allow_html=True)
+
+        st.write("")
+
+        # ── دوال التحليل التلقائي / التصنيف / التوصية — مبنية على أكتر من مؤشر مع
+        #    بعض (ROAS+CPA+CVR+CTR+CPC+Orders+Spend+Revenue) مش مؤشر واحد بس ──
+        def _apa_insight(c):
+            if c["orders"] <= 0:
+                return ("🔴", "أداء ضعيف | Poor Performance",
+                        f"اتصرف {c['spends']:,.2f} ريال على الحملة ولسه ما جابتش أي طلبات فعلية.")
+            score_c = 0
+            if c["roas"] >= 3: score_c += 2
+            elif c["roas"] >= 1.5: score_c += 1
+            elif c["roas"] < 1: score_c -= 2
+            if c["cvr"] >= 3: score_c += 1
+            elif c["cvr"] < 1: score_c -= 1
+            if c["ctr"] >= 1: score_c += 1
+            elif c["ctr"] < 0.3: score_c -= 1
+            if c["spends"] > 0 and c["revenue"] < c["spends"]:
+                score_c -= 2
+            if score_c >= 3:
+                return ("🟢", "أداء جيد | Good Performance",
+                        f"الحملة تحقق ROAS {c['roas']:.2f} مع معدل تحويل {c['cvr']:.2f}% جيد.")
+            elif score_c >= 0:
+                return ("🟡", "يحتاج إلى تحسين | Needs Improvement",
+                        f"الحملة بتاخد نقرات معقولة (CTR {c['ctr']:.2f}%)، لكن التحويل للطلبات ({c['cvr']:.2f}%) أو الـ ROAS ({c['roas']:.2f}) لسه محتاج تحسين.")
+            else:
+                return ("🔴", "أداء ضعيف | Poor Performance",
+                        f"تكلفة الطلب {c['cpa']:,.2f} ريال مرتفعة مقارنة بعدد الطلبات ({c['orders']:,.0f}) والـ ROAS {c['roas']:.2f}.")
+
+        def _apa_classification(c):
+            icon_i, _t, _d = _apa_insight(c)
+            if c["orders"] <= 0:
+                return "🔴", "أداء ضعيف | Poor Performance"
+            if icon_i == "🟢":
+                return "🟢", "أداء قوي | Strong Performance"
+            if icon_i == "🟡":
+                if c["roas"] < 1.5 and c["cvr"] < 2:
+                    return "🟠", "يحتاج إلى تحسين | Needs Improvement"
+                return "🟡", "يحتاج إلى مراقبة | Needs Monitoring"
+            return "🔴", "أداء ضعيف | Poor Performance"
+
+        def _apa_recommendation(c):
+            cls_icon_c, _l = _apa_classification(c)
+            if c["orders"] <= 0 and c["spends"] > 0:
+                return "قلل الإنفاق | Reduce Spend"
+            if cls_icon_c == "🟢":
+                return "استمر | Continue"
+            if cls_icon_c == "🟡":
+                return "راقب | Monitor"
+            if cls_icon_c == "🟠":
+                return "حسّن الحملة | Optimize"
+            return "راجع الحملة | Review"
+
+        # ── 5) مقارنة الحملات | Campaign Comparison (قبل التفاصيل عشان تبان الأهم فوق) ──
+        st.markdown("#### 🏆 مقارنة الحملات | Campaign Comparison")
+        camps_with_orders_apa = [c for c in campaigns_list_apa if c["orders"] > 0]
+        camps_with_clicks_apa = [c for c in campaigns_list_apa if c["clicks"] > 0]
+        comp_specs_apa = [
+            ("🏆", "أفضل حملة حسب ROAS | Best by ROAS", camps_with_orders_apa, lambda c: c["roas"], lambda c: f"ROAS {c['roas']:.2f}"),
+            ("💰", "أعلى إيراد | Highest Revenue", campaigns_list_apa, lambda c: c["revenue"], lambda c: f"{c['revenue']:,.2f} ريال"),
+            ("🛒", "أكثر طلبات | Most Orders", campaigns_list_apa, lambda c: c["orders"], lambda c: f"{c['orders']:,.0f} طلب"),
+            ("💸", "أعلى إنفاق إعلاني | Highest Ad Spend", campaigns_list_apa, lambda c: c["spends"], lambda c: f"{c['spends']:,.2f} ريال"),
+            ("🎯", "أفضل تكلفة طلب | Best CPA", camps_with_orders_apa, lambda c: -c["cpa"], lambda c: f"{c['cpa']:.2f} ريال"),
+            ("📈", "أفضل معدل تحويل | Best CVR", camps_with_clicks_apa, lambda c: c["cvr"], lambda c: f"{c['cvr']:.2f}%"),
+            ("👁️", "أفضل معدل نقر | Best CTR", campaigns_list_apa, lambda c: c["ctr"], lambda c: f"{c['ctr']:.2f}%"),
+        ]
+        comp_cols_apa = st.columns(2)
+        for i_apa, (icon_s, label_s, pool_s, key_s, fmt_s) in enumerate(comp_specs_apa):
+            best_c_apa = max(pool_s, key=key_s, default=None)
+            with comp_cols_apa[i_apa % 2]:
+                if best_c_apa:
+                    st.markdown(_kpi_card_html(icon_s, "#2563eb", label_s, best_c_apa["campaign"]), unsafe_allow_html=True)
+                    st.caption(fmt_s(best_c_apa))
+                    with st.expander(f"🏷️ الأصناف (ASIN) | ASINs ({best_c_apa['sku_count']})"):
+                        _apa_render_related_skus(best_c_apa["skus"])
+                else:
+                    st.markdown(_kpi_card_html(icon_s, "#6b7280", label_s, "—"), unsafe_allow_html=True)
+
+        st.write("")
+
+        # ── 3+6+7) التحليل التلقائي + التصنيف + التوصية لكل حملة | Automatic
+        #    insight + classification + recommendation per campaign ──
+        st.markdown("#### 🔎 تحليل كل حملة | Per-Campaign Analysis")
+        for c_apa in sorted(campaigns_list_apa, key=lambda x: -x["spends"]):
+            icon_i, title_i, desc_i = _apa_insight(c_apa)
+            icon_c, label_c = _apa_classification(c_apa)
+            rec_c = _apa_recommendation(c_apa)
+            bg_i = {"🟢": "#052e1655", "🟡": "#78350f33", "🔴": "#4c051655"}[icon_i]
+            border_i = {"🟢": "#16a34a", "🟡": "#f59e0b", "🔴": "#dc2626"}[icon_i]
+            with st.expander(f"{icon_i} {c_apa['campaign']} — {c_apa['sku_count']} ASIN | {c_apa['orders']:,.0f} طلب"):
+                st.markdown(
+                    f'<div dir="rtl" style="background:{bg_i};border:1px solid {border_i};border-radius:8px;padding:8px 12px;margin-bottom:8px;">'
+                    f'<b>{icon_i} {title_i}</b><br><span style="font-size:13px;">{desc_i}</span>'
+                    f'</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f"👁️ ظهور: {c_apa['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {c_apa['clicks']:,.0f} &nbsp;|&nbsp; "
+                    f"➕ سلة: {c_apa['atc']:,.0f} &nbsp;|&nbsp; 🛒 طلبات: {c_apa['orders']:,.0f}<br>"
+                    f"📊 CTR: {c_apa['ctr']:.2f}% &nbsp;|&nbsp; 💵 CPC: {c_apa['cpc']:.2f} &nbsp;|&nbsp; "
+                    f"🎯 CPS/CPA: {c_apa['cpa']:.2f} &nbsp;|&nbsp; 📈 CVR: {c_apa['cvr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {c_apa['roas']:.2f}<br>"
+                    f"💸 إنفاق: {c_apa['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {c_apa['revenue']:,.2f} ريال &nbsp;|&nbsp; "
+                    f"📉 نتيجة الإعلان بعد الإنفاق الإعلاني | Ad Result After Ad Spend: <b>{c_apa['ad_result']:,.2f} ريال</b>")
+                st.markdown(f"🏷️ التصنيف | Classification: **{icon_c} {label_c}**")
+                st.markdown(f"✅ التوصية | Recommendation: **{rec_c}**")
+                st.markdown("🏷️ **الأصناف المرتبطة | Related ASINs**")
+                _apa_render_related_skus(c_apa["skus"])
+
+        st.caption(
+            "ℹ️ مقارنة الفترة الحالية بالفترة السابقة (📈/📉 Revenue, Orders, Ad Spend, ROAS, CPA, CTR, CVR, "
+            "Clicks, Add to Cart) مش متاحة هنا لسه — لأن تاب الإعلانات بيحفظ إجمالي كل حملة لحظيًا من غير "
+            "تاريخ يومي، فمفيش فترة سابقة نقارن بيها. لو حبينا نفعّلها، محتاجين نبدأ نسجّل نسخة/تاريخ لكل "
+            "تحديث في شيت الإعلانات | Current-vs-previous-period comparison isn't available yet because the "
+            "Advertisements sheet only stores each campaign's live cumulative totals, with no daily date "
+            "history to compare against. Enabling it would require snapshotting the ads sheet with dates.")
+
+
 if st.session_state["nav_page"] == "tab14":
     with tab14:
         if _tab_gate("tab14", "🛒 مبيعات نون | Noon Sales"):
@@ -5761,7 +6262,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                     # ══ خريطة SKUs المجدولة خلال آخر 4 أيام (لعرض ASN + الكمية لو فعلاً ليها جدولة) ══
                     recent_sched_map_tamz = get_recent_schedule_rows(days_back=4)
                     pending_approval_skus_tamz = get_pending_approval_skus()
-                    ads_map_tamz = get_ads_map()
+                    ads_map_tamz = get_ads_map_amazon()
                     com_map_tamz = get_com_map()
                     live_map_tamz = get_live_map()
                     xdock_threshold_tamz = int(load_settings().get("xdock_low_stock_threshold","10") or 10)
@@ -5779,7 +6280,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                                 st.markdown(tc_badge_tamz, unsafe_allow_html=True)
 
                             # ══ أداء الإعلانات (لو الـ SKU ده معلن عليه) | Ads performance (if advertised) ══
-                            ads_entries_tamz = ads_map_tamz.get(r["sku_up"])
+                            ads_entries_tamz = ads_map_tamz.get(r.get("asin", "").upper())
                             # ── الإجماليات دي بتتحسب دايمًا (صفر لو مفيش إعلانات) عشان متفضلش
                             #    قيم قديمة من الـ SKU اللي قبله في اللستة | Always computed
                             #    (zero when no ads) so stale values from the previous SKU in
@@ -6125,7 +6626,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                     # ══ خريطة SKUs المجدولة خلال آخر 4 أيام (لعرض ASN + الكمية لو فعلاً ليها جدولة) ══
                     recent_sched_map_tamz = get_recent_schedule_rows(days_back=4)
                     pending_approval_skus_tamz = get_pending_approval_skus()
-                    ads_map_tamz = get_ads_map()
+                    ads_map_tamz = get_ads_map_amazon()
                     com_map_tamz = get_com_map()
                     live_map_tamz = get_live_map()
                     xdock_threshold_tamz = int(load_settings().get("xdock_low_stock_threshold","10") or 10)
@@ -6148,7 +6649,7 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                                 st.markdown(tc_badge_tamz, unsafe_allow_html=True)
 
                             # ══ أداء الإعلانات (لو الـ SKU ده معلن عليه) | Ads performance (if advertised) ══
-                            ads_entries_tamz = ads_map_tamz.get(r["sku_up"])
+                            ads_entries_tamz = ads_map_tamz.get(r.get("asin", "").upper())
                             # ── الإجماليات دي بتتحسب دايمًا (صفر لو مفيش إعلانات) عشان متفضلش
                             #    قيم قديمة من الـ SKU اللي قبله في اللستة | Always computed
                             #    (zero when no ads) so stale values from the previous SKU in
@@ -7183,7 +7684,12 @@ if st.session_state["nav_page"] == "tab_ads":
         if _tab_gate("tab_ads", "📢 الإعلانات | Ads"):
             st.header("📢 الإعلانات | Ads")
             st.caption("منقولة برة داشبورد المبيعات وبتتعرض مرة واحدة بس — بيانات الإعلانات (Views/Clicks/Orders/Spends/Revenue) جايه من شيت الإعلانات نفسه، واللي مفيهوش تصنيف FBN/FBB أصلاً | Moved out of the sales dashboard and shown once — ad data (Views/Clicks/Orders/Spends/Revenue) comes from the Advertisements sheet, which has no FBN/FBB split to begin with")
-            if not inv_map:
-                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
-            else:
-                _render_ads_performance_tab()
+            _noon_ads_subtab, _amz_ads_subtab = st.tabs(["🅽 إعلانات نون | Noon Ads", "📦 إعلانات أمازون | Amazon Ads"])
+            with _noon_ads_subtab:
+                if not inv_map:
+                    st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+                else:
+                    _render_ads_performance_tab()
+            with _amz_ads_subtab:
+                st.caption("بيانات إعلانات أمازون جايه من شيت AdvertisementsAmz، ومفتاحها ASIN بدل SKU — نفس منطق وتصميم تاب إعلانات نون بالظبط | Amazon ad data comes from the AdvertisementsAmz sheet, keyed by ASIN instead of SKU — identical logic and layout to the Noon Ads tab")
+                _render_ads_performance_tab_amazon()
