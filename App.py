@@ -2289,7 +2289,7 @@ def build_amazon_asin_sales_rows(multi_counts, prices_map, monthly_counts, sales
             "day_counts": day_counts, "day_prices": day_prices_orphan,
             "total_recent": total_recent_orphan,
             "effective_avg": avg_daily_orphan,
-            "days_to_stockout": 9999,
+            "days_to_stockout": 0 if avg_daily_orphan > 0 else 9999,
             "not_in_inventory": True,
         })
 
@@ -5325,13 +5325,14 @@ if st.session_state["nav_page"] == "tab14":
                         if total_recent_orphan <= 0:
                             continue
                         day_prices_orphan = prices_map_t14.get(sku_up, {d: [] for d in sales_dates})
+                        avg_daily_orphan_fbb = (total_recent_orphan / sales_display_days) if sales_display_days > 0 else 0
                         sales_tab_rows.append({
                             "sku": sku_up, "sku_up": sku_up,
                             "stock": 0, "sales_month": 0, "img": links_map_fbb_orphan.get(sku_up, ""),
                             "day_counts": day_counts, "day_prices": day_prices_orphan,
                             "total_recent": total_recent_orphan,
-                            "effective_avg": 0,
-                            "days_to_stockout": 9999,
+                            "effective_avg": avg_daily_orphan_fbb,
+                            "days_to_stockout": 0 if avg_daily_orphan_fbb > 0 else 9999,
                             "not_in_inventory": True,
                         })
 
