@@ -2554,6 +2554,50 @@ def compute_amazon_fba_review_rows():
         sales_dates_amz_rv, sales_days_amz_rv)
     return rows, sales_dates_amz_rv
 
+# ══ نسخة أمازون (FBA بس) من compute_transferred_from_sales — نفس فكرة نون بالظبط،
+#    بس مستقلة تمامًا وبتحسب على ASINs تخزين FBA فقط (مطابق لتاب مراجعة مخزون أمازون
+#    اللي بيقرا FBA بس). دي بتُستخدم كـ default أولي في session_state (زي نون) لحد
+#    ما ساب-تاب "تخزين FBA" في مبيعات أمازون يرسم ويحدّث القائمة بنسخة أدق (فيها فحص
+#    الجدولة الحديثة كمان) | Amazon (FBA-only) counterpart of compute_transferred_from_sales —
+#    same idea as Noon, fully independent, computed over FBA-storage ASINs only (matching
+#    the Amazon Stock Review tab which reads FBA only). Used as the initial session_state
+#    default (like Noon) until the Amazon Sales "FBA Storage" sub-tab renders and refreshes
+#    it with a more precise version (which also checks recent scheduling).
+def compute_transferred_from_sales_amz_fba():
+    """يحسب ASINs (تخزين FBA بس) اللي هتتنقل لمراجعة مخزون أمازون (محتاج جدولة فقط،
+    بدون أي جدولة أو ملاحظات). مستقلة تمامًا عن نون."""
+    if not amz_inv_map_asin:
+        return []
+    settings_now = load_settings()
+    delay_days_now = int(settings_now.get("schedule_delay_days","3") or 3)
+    cov_days_now   = int(settings_now.get("schedule_coverage_days","15") or 15)
+    all_rows, _ = compute_amazon_fba_review_rows()
+    result = []
+    for r in all_rows:
+        if r.get("not_in_inventory"):
+            continue
+        eff_avg    = r.get("effective_avg", 0)
+        days_to_so = r.get("days_to_stockout", 0)
+        # نفس التصحيح اللي في نون: لو مفيش أي متوسط بيع خالص، المخزون مش بينزل أصلاً
+        stock_ok = (eff_avg <= 0) or (days_to_so >= cov_days_now)
+        if stock_ok:
+            continue
+        badge_text, _, sched = schedule_coverage_badge(r["sku"], days_to_so, delay_days_now)
+        un_notes = get_unavailable_ordered_note(r["sku"])
+        is_needs_sched_only = (
+            "محتاج جدولة" in badge_text
+            and not sched
+            and not un_notes
+        )
+        if is_needs_sched_only:
+            result.append({
+                "sku": r["sku"], "sku_up": r["sku_up"], "asin": r.get("asin",""),
+                "stock": r["stock"], "sales_month": r["sales_month"], "img": r["img"],
+                "effective_avg": eff_avg, "days_to_stockout": days_to_so,
+                "day_counts": r.get("day_counts", {}),
+            })
+    return result
+
 def render_day_counts_md(day_counts, dates, labels):
     """يبني سطر Markdown بمبيعات كل يوم من التواريخ المعطاة بجانب بعض."""
     parts = [f"**{lbl}:** {day_counts.get(d,0)}" for d, lbl in zip(dates, labels)]
@@ -2947,6 +2991,11 @@ def compute_transferred_from_sales():
 
 if "transferred_skus_t14" not in st.session_state:
     st.session_state["transferred_skus_t14"] = compute_transferred_from_sales()
+
+# ══ نسخة أمازون (FBA بس) — مفتاح منفصل تمامًا عن نون ومنفصل عن ساب-تاب "عادي FSAB"
+#    (كانا بيتشاركوا نفس المفتاح transferred_skus_tamz قبل كده وبيمسحوا بعض) ══
+if "transferred_skus_tamz_fba" not in st.session_state:
+    st.session_state["transferred_skus_tamz_fba"] = compute_transferred_from_sales_amz_fba()
 
 if "warehouse_stockout_rows" not in st.session_state:
     st.session_state["warehouse_stockout_rows"] = compute_warehouse_stockout_rows()
@@ -5585,15 +5634,21 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                                     "effective_avg": r["effective_avg"], "days_to_stockout": r["days_to_stockout"],
                                     "day_counts": r["day_counts"],
                                 })
-                                st.caption("📌 مرحّل لتاب مراجعة المخزون | Transferred to Stock Review tab")
+                                # ملحوظة: تاب مراجعة مخزون أمازون بيقرا FBA بس (FSAB مستبعد منه)،
+                                # فالقائمة دي بتتحفظ لعرض الشارة هنا فقط ومبتترحّلش فعليًا لأي
+                                # تاب مراجعة — عشان كده الكابشن بيوضح إنها "عادي" مش "Stock Review" |
+                                # Note: the Amazon Stock Review tab reads FBA only (FSAB excluded),
+                                # so this list is kept for the on-screen badge only and is not merged
+                                # into any review tab — hence the caption says "Normal" not "Stock Review".
+                                st.caption("📌 محتاج جدولة (عادي FSAB) — لا يترحّل لمراجعة مخزون أمازون لأنها FBA بس | Needs scheduling (Normal FSAB) — not transferred to Amazon Stock Review (FBA only)")
 
                             if un_notes:
                                 for note in un_notes:
                                     st.markdown(big_note_html(note), unsafe_allow_html=True)
                             render_recent_expired_note(r["sku"])
                         st.divider()
-                    # حفظ المرحلين في session_state بعد اكتمال العرض
-                    st.session_state["transferred_skus_tamz"] = _new_transferred
+                    # حفظ المرحلين في session_state بعد اكتمال العرض — مفتاح منفصل عن ساب-تاب FBA
+                    st.session_state["transferred_skus_tamz_fsab"] = _new_transferred
 
             with _fba_subtab_tamz:
                 st.subheader("📦 مبيعات امازون — تخزين FBA | Amazon Sales — FBA Storage")
@@ -5942,20 +5997,21 @@ if st.session_state["nav_page"] == "tab_sales_amazon":
                             )
                             if is_needs_sched_only:
                                 _new_transferred.append({
-                                    "sku": r["sku"], "sku_up": r["sku_up"], "stock": r["stock"],
-                                    "sales_month": r["sales_month"], "img": r["img"],
+                                    "sku": r["sku"], "sku_up": r["sku_up"], "asin": r.get("asin",""),
+                                    "stock": r["stock"], "sales_month": r["sales_month"], "img": r["img"],
                                     "effective_avg": r["effective_avg"], "days_to_stockout": r["days_to_stockout"],
                                     "day_counts": r["day_counts"],
                                 })
-                                st.caption("📌 مرحّل لتاب مراجعة المخزون | Transferred to Stock Review tab")
+                                st.caption("📌 مرحّل لتاب مراجعة مخزون أمازون | Transferred to Amazon Stock Review tab")
 
                             if un_notes:
                                 for note in un_notes:
                                     st.markdown(big_note_html(note), unsafe_allow_html=True)
                             render_recent_expired_note(r["sku"])
                         st.divider()
-                    # حفظ المرحلين في session_state بعد اكتمال العرض
-                    st.session_state["transferred_skus_tamz"] = _new_transferred
+                    # حفظ المرحلين في session_state بعد اكتمال العرض — مفتاح منفصل عن ساب-تاب FSAB
+                    # وعن نون (transferred_skus_t14) — ده اللي بيتقرا فعليًا في تاب مراجعة مخزون أمازون
+                    st.session_state["transferred_skus_tamz_fba"] = _new_transferred
 
 
 if st.session_state["nav_page"] == "tab_dash":
@@ -6133,17 +6189,15 @@ if st.session_state["nav_page"] == "tab10":
                         "_cov_badge_text": cov_badge_text_tr, "_cov_badge_color": cov_badge_color_tr,
                     })
 
-            # ملحوظة: مفيش دمج هنا لـ transferred_skus_tamz (المرحّلين من تاب مبيعات أمازون) —
-            # المفتاح ده بيتكتب من تابي "عادي FSAB" و"FBA" الاتنين فوق بعض في نفس session_state
-            # (مشكلة موجودة أصلاً في تاب مبيعات أمازون نفسه، متسجلة قبل كده)، فمش أمين إننا نعرف
-            # وقت القراءة هل القائمة دي FSAB (المفروض تتستبعد) ولا FBA (المفروض تتضم). المصدر
-            # الوحيد المضمون لأمازون هنا هو compute_stock_sales_rows فوق (بيقرا FBA مباشرة من
-            # DailyOrdersAmazon، مش من session_state) | Note: transferred_skus_tamz is NOT merged
-            # here — that key is overwritten by both the Amazon "Normal FSAB" and "FBA" sub-tabs
-            # (a pre-existing issue in the Amazon Sales tab itself), so at read time there's no
-            # reliable way to know whether it holds FSAB (should be excluded) or FBA (should be
-            # included) data. The only reliable Amazon source here is compute_stock_sales_rows
-            # above, which reads FBA directly from DailyOrdersAmazon, not from session_state.
+            # ملحوظة: مفيش دمج هنا لـ transferred_skus_tamz_fba (المرحّلين من تاب مبيعات أمازون -
+            # FBA) — دلوقتي بقى ليه مفتاح session_state منفصل تمامًا وموثوق (اتصلح الخلط اللي كان
+            # حاصل قبل كده مع ساب-تاب FSAB)، لكن ده تاب مخزون نون ومفروض يفضل مستقل تمامًا عن
+            # أمازون بقصد — مراجعة مخزون أمازون بتاعته تاب لوحده تحت (tab_stock_review_amz) وفيها
+            # الدمج ده | Note: transferred_skus_tamz_fba (Amazon FBA sales-tab transfers) is
+            # intentionally NOT merged here — it now has its own dedicated, reliable session_state
+            # key (the earlier collision with the FSAB sub-tab is fixed), but this is Noon's stock
+            # tab and should stay fully independent of Amazon by design. Amazon's own Stock Review
+            # tab (tab_stock_review_amz) below is where that merge happens.
 
             stock_review_rows.sort(key=lambda r: (-r["qty"], -r["sales_month"]))
 
@@ -6385,6 +6439,37 @@ if st.session_state["nav_page"] == "tab_stock_review_amz":
                     r["suggested_qty"] = round(r["effective_avg"] * 18) if r["effective_avg"] > 0 else 0
                     r["_cov_badge_text"], r["_cov_badge_color"] = cov_badge_text, cov_badge_color
                     stock_review_rows_amz.append(r)
+
+                # ══ إضافة المرحلين من تاب مبيعات أمازون - FBA (محتاج جدولة فقط) — نفس فكرة نون
+                #    بالظبط (تاب10) بس بمفتاح session_state منفصل تمامًا، مقصور على ASINs
+                #    تخزين FBA بس (مطابق لفلتر التاب ده) | Add SKUs transferred from the Amazon
+                #    FBA sales sub-tab (needs scheduling only) — same idea as Noon's tab10, but
+                #    with its own dedicated session_state key, scoped to FBA-storage ASINs only
+                #    (matching this tab's own filter) ══
+                transferred_from_sales_amz = st.session_state.get("transferred_skus_tamz_fba", [])
+                existing_asins_in_review_amz = {r["sku_up"] for r in stock_review_rows_amz}
+                for tr in transferred_from_sales_amz:
+                    if tr["sku_up"] in recent_sched_map_amz_sr:
+                        continue
+                    if tr["sku_up"] in existing_asins_in_review_amz:
+                        continue
+                    avg_tr = tr.get("effective_avg", 0)
+                    suggested_tr = round(avg_tr * 18) if avg_tr > 0 else 0
+                    days_to_so_tr = tr.get("days_to_stockout", 0)
+                    cov_badge_text_tr, cov_badge_color_tr, _ = schedule_coverage_badge(tr["sku"], days_to_so_tr, delay_days_amz_sr)
+                    if cov_badge_color_tr == "#22c55e":
+                        continue
+                    stock_review_rows_amz.append({
+                        "sku": tr["sku"], "sku_up": tr["sku_up"], "asin": tr.get("asin",""),
+                        "stock": tr["stock"], "sales_month": tr["sales_month"],
+                        "img": tr["img"], "effective_avg": avg_tr,
+                        "suggested_qty": suggested_tr,
+                        "days_to_stockout": days_to_so_tr,
+                        "day_counts": tr.get("day_counts", {}),
+                        "_transferred_from_sales": True,
+                        "_cov_badge_text": cov_badge_text_tr, "_cov_badge_color": cov_badge_color_tr,
+                    })
+
                 stock_review_rows_amz.sort(key=lambda r: -r["day_counts"].get(sales_dates_amz_sr[0], 0))
 
                 if not stock_review_rows_amz:
@@ -6404,6 +6489,8 @@ if st.session_state["nav_page"] == "tab_stock_review_amz":
                         with c_img: show_img(r["img"],70)
                         with c_info:
                             st.markdown(f"**ASIN:** `{r['asin']}` &nbsp;|&nbsp; **SKU:** `{r['sku']}`")
+                            if r.get("_transferred_from_sales"):
+                                st.markdown('<span style="background:#7c3aed;color:white;border-radius:6px;padding:2px 10px;font-size:11px;">📌 مرحّل من تاب مبيعات أمازون FBA — محتاج جدولة | Transferred from Amazon FBA Sales tab — needs scheduling</span>', unsafe_allow_html=True)
                             st.markdown(f"📦 **المخزون | Stock:** {r['stock']} &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly:** {r['sales_month']} &nbsp;|&nbsp; 📊 **يومي أخير | Recent daily:** {r['effective_avg']:.1f}")
                             st.markdown(f"💡 **اقتراح الكمية | Suggested Qty:** **{r['suggested_qty']}** &nbsp;|&nbsp; ⏳ **نفاد خلال | Days to stockout:** {r['days_to_stockout']} يوم")
                             st.markdown(f'<span class="status-badge-lg" style="background:{r["_cov_badge_color"]};">{r["_cov_badge_text"]}</span>', unsafe_allow_html=True)
