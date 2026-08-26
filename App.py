@@ -6627,84 +6627,156 @@ if st.session_state["nav_page"] == "tab16":
     with tab16:
         if _tab_gate("tab16", "📦 مخزون بدون بيع | No Sales"):
             st.subheader("📦 مخزون بدون بيع | Stock With No Sales")
-            st.caption("SKUs موجودة في المخزون لكن ما بيعت في الفترة المحددة | SKUs in inventory with no sales in the selected period")
+            st.caption("SKUs موجودة في المخزون لكن ما بيعت في الفترة المحددة — نون وأمازون كل واحد في تابه، مستقلين تمامًا عن بعض | SKUs in inventory with no sales in the selected period — Noon and Amazon each in their own sub-tab, fully independent")
 
-            if not inv_map:
-                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
-            else:
-                today_t16 = datetime.now().date()
-                sales_display_days_t16 = int(load_settings().get("sales_display_days","7") or 7)
-
-                # تواريخ الفترات الثلاث
-                dates_1d  = [today_t16 - timedelta(days=1)]
-                dates_3d  = [today_t16 - timedelta(days=i) for i in range(1, 4)]
-                dates_7d  = [today_t16 - timedelta(days=i) for i in range(1, 8)]
-
-                all_dates_t16 = list({d for d in dates_1d + dates_3d + dates_7d})
-                counts_t16 = build_daily_orders_counts(all_dates_t16)
-
-                def sku_sold_in(sku_up, dates_list):
-                    dc = counts_t16.get(sku_up, {})
-                    return sum(dc.get(d, 0) for d in dates_list) > 0
-
-                # بناء القوائم الثلاث
-                no_sale_1d, no_sale_3d, no_sale_7d = [], [], []
-                for sku_up, info in inv_map.items():
-                    stock       = info.get("total_stock", 0)
-                    sales_month = info.get("sales", 0)
-                    img         = info.get("img", "")
-                    sku_disp    = info.get("sku", sku_up)
-                    row_t16 = {"sku": sku_disp, "sku_up": sku_up, "stock": stock, "sales_month": sales_month, "img": img}
-                    if not sku_sold_in(sku_up, dates_1d):
-                        no_sale_1d.append(row_t16)
-                    if not sku_sold_in(sku_up, dates_3d):
-                        no_sale_3d.append(row_t16)
-                    if not sku_sold_in(sku_up, dates_7d):
-                        no_sale_7d.append(row_t16)
-                # ترتيب من الأعلى مخزوناً للأقل
-                no_sale_1d.sort(key=lambda x: -x["stock"])
-                no_sale_3d.sort(key=lambda x: -x["stock"])
-                no_sale_7d.sort(key=lambda x: -x["stock"])
-
-                def render_no_sale_list(rows, period_label, dl_key):
-                    if not rows:
-                        st.success(f"✅ لا يوجد SKUs بدون مبيعات في {period_label} | No SKUs without sales in {period_label}")
-                        return
-                    df_ns = pd.DataFrame([{
-                        "SKU": r["sku"], "مخزون | Stock": r["stock"],
-                        "مبيع شهري | Monthly Sales": r["sales_month"],
-                    } for r in rows])
-                    c1, c2 = st.columns(2)
-                    with c1: dl_btn(df_ns, dl_key, key=f"dlbtn_{dl_key}")
-                    with c2: st.warning(f"⚠️ {len(rows)} SKU بدون مبيعات | SKUs without sales")
-                    for r in rows:
-                        c_img, c_info = st.columns([1, 6])
-                        with c_img:
-                            show_img(r["img"], 60)
-                        with c_info:
+            def render_no_sale_list(rows, period_label, dl_key, channel="noon"):
+                if not rows:
+                    st.success(f"✅ لا يوجد {'SKUs' if channel=='noon' else 'ASINs'} بدون مبيعات في {period_label} | No {'SKUs' if channel=='noon' else 'ASINs'} without sales in {period_label}")
+                    return
+                df_ns = pd.DataFrame([{
+                    ("ASIN" if channel=="amazon" else "SKU"): (r["asin"] if channel=="amazon" else r["sku"]),
+                    **({"SKU": r["sku"]} if channel=="amazon" else {}),
+                    "مخزون | Stock": r["stock"],
+                    "مبيع شهري | Monthly Sales": r["sales_month"],
+                } for r in rows])
+                c1, c2 = st.columns(2)
+                with c1: dl_btn(df_ns, dl_key, key=f"dlbtn_{dl_key}")
+                with c2: st.warning(f"⚠️ {len(rows)} {'SKU' if channel=='noon' else 'ASIN'} بدون مبيعات | {'SKUs' if channel=='noon' else 'ASINs'} without sales")
+                for r in rows:
+                    c_img, c_info = st.columns([1, 6])
+                    with c_img:
+                        show_img(r["img"], 60)
+                    with c_info:
+                        if channel == "amazon":
+                            st.markdown(f"**ASIN:** `{r['asin']}` &nbsp;|&nbsp; **SKU:** `{r['sku']}`", unsafe_allow_html=True)
+                        else:
                             st.markdown(f"**SKU:** `{r['sku']}`", unsafe_allow_html=True)
-                            st.markdown(
-                                f"📦 **مخزون:** {r['stock']} &nbsp;|&nbsp; 📈 **شهري:** {r['sales_month']}",
-                            )
+                        st.markdown(
+                            f"📦 **مخزون:** {r['stock']} &nbsp;|&nbsp; 📈 **شهري:** {r['sales_month']}",
+                        )
+                        if channel == "noon":
                             sched_ns = get_latest_schedule_info(r["sku"])
                             if sched_ns:
                                 arrival_ns = (sched_ns["parsed"] + timedelta(days=int(load_settings().get("schedule_delay_days","3") or 3))).date() if sched_ns.get("parsed") else None
                                 st.caption(f"📅 ASN {sched_ns['asn']} بتاريخ {sched_ns['date']}" + (f" — وصول: {arrival_ns}" if arrival_ns else ""))
-                            for note in get_unavailable_ordered_note(r["sku"]):
-                                st.markdown(big_note_html(note), unsafe_allow_html=True)
-                        st.divider()
+                        else:
+                            render_recent_expired_note(r["sku"])
+                        for note in get_unavailable_ordered_note(r["sku"]):
+                            st.markdown(big_note_html(note), unsafe_allow_html=True)
+                    st.divider()
 
-                sub1, sub2, sub3 = st.tabs([
-                    f"📅 بدون مبيع أمس ({len(no_sale_1d)})",
-                    f"📅 بدون مبيع آخر 3 أيام ({len(no_sale_3d)})",
-                    f"📅 بدون مبيع آخر أسبوع ({len(no_sale_7d)})",
-                ])
-                with sub1:
-                    render_no_sale_list(no_sale_1d, "أمس", "no_sale_1d")
-                with sub2:
-                    render_no_sale_list(no_sale_3d, "آخر 3 أيام", "no_sale_3d")
-                with sub3:
-                    render_no_sale_list(no_sale_7d, "آخر أسبوع", "no_sale_7d")
+            channel_tab_noon, channel_tab_amz = st.tabs([
+                "🅽 نون | Noon",
+                "🅰️ أمازون | Amazon",
+            ])
+
+            # ══════════ نون ══════════
+            with channel_tab_noon:
+                if not inv_map:
+                    st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+                else:
+                    today_t16 = datetime.now().date()
+
+                    # تواريخ الفترات الثلاث
+                    dates_1d  = [today_t16 - timedelta(days=1)]
+                    dates_3d  = [today_t16 - timedelta(days=i) for i in range(1, 4)]
+                    dates_7d  = [today_t16 - timedelta(days=i) for i in range(1, 8)]
+
+                    all_dates_t16 = list({d for d in dates_1d + dates_3d + dates_7d})
+                    counts_t16 = build_daily_orders_counts(all_dates_t16)
+
+                    def sku_sold_in(sku_up, dates_list):
+                        dc = counts_t16.get(sku_up, {})
+                        return sum(dc.get(d, 0) for d in dates_list) > 0
+
+                    # بناء القوائم الثلاث
+                    no_sale_1d, no_sale_3d, no_sale_7d = [], [], []
+                    for sku_up, info in inv_map.items():
+                        stock       = info.get("total_stock", 0)
+                        sales_month = info.get("sales", 0)
+                        img         = info.get("img", "")
+                        sku_disp    = info.get("sku", sku_up)
+                        row_t16 = {"sku": sku_disp, "sku_up": sku_up, "stock": stock, "sales_month": sales_month, "img": img}
+                        if not sku_sold_in(sku_up, dates_1d):
+                            no_sale_1d.append(row_t16)
+                        if not sku_sold_in(sku_up, dates_3d):
+                            no_sale_3d.append(row_t16)
+                        if not sku_sold_in(sku_up, dates_7d):
+                            no_sale_7d.append(row_t16)
+                    # ترتيب من الأعلى مخزوناً للأقل
+                    no_sale_1d.sort(key=lambda x: -x["stock"])
+                    no_sale_3d.sort(key=lambda x: -x["stock"])
+                    no_sale_7d.sort(key=lambda x: -x["stock"])
+
+                    sub1, sub2, sub3 = st.tabs([
+                        f"📅 بدون مبيع أمس ({len(no_sale_1d)})",
+                        f"📅 بدون مبيع آخر 3 أيام ({len(no_sale_3d)})",
+                        f"📅 بدون مبيع آخر أسبوع ({len(no_sale_7d)})",
+                    ])
+                    with sub1:
+                        render_no_sale_list(no_sale_1d, "أمس", "no_sale_1d", channel="noon")
+                    with sub2:
+                        render_no_sale_list(no_sale_3d, "آخر 3 أيام", "no_sale_3d", channel="noon")
+                    with sub3:
+                        render_no_sale_list(no_sale_7d, "آخر أسبوع", "no_sale_7d", channel="noon")
+
+            # ══════════ أمازون (تخزين FBA بس — مستقل تمامًا عن نون) ══════════
+            with channel_tab_amz:
+                st.caption("بيقرا بس من تخزين FBA (تخزين عادي/FSAB مستبعد) — نفس فلتر مراجعة مخزون/مبيعات أمازون | Reads FBA storage only (Normal/FSAB excluded) — same filter as the Amazon review tabs")
+                if not amz_inv_map_asin:
+                    st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
+                else:
+                    today_t16_amz = datetime.now().date()
+
+                    dates_1d_amz  = [today_t16_amz - timedelta(days=1)]
+                    dates_3d_amz  = [today_t16_amz - timedelta(days=i) for i in range(1, 4)]
+                    dates_7d_amz  = [today_t16_amz - timedelta(days=i) for i in range(1, 8)]
+                    dates_30d_amz = [today_t16_amz - timedelta(days=i) for i in range(1, 31)]
+
+                    all_dates_t16_amz = list({d for d in dates_1d_amz + dates_3d_amz + dates_7d_amz})
+                    counts_t16_amz         = build_daily_orders_counts_amazon_fba_asin(all_dates_t16_amz)
+                    monthly_counts_t16_amz = build_daily_orders_counts_amazon_fba_asin(dates_30d_amz)
+
+                    links_map_asin_t16 = get_links_map_asin()
+                    links_map_sku_t16  = get_links_map()
+
+                    def asin_sold_in_amz(asin_up, dates_list):
+                        dc = counts_t16_amz.get(asin_up, {})
+                        return sum(dc.get(d, 0) for d in dates_list) > 0
+
+                    no_sale_1d_amz, no_sale_3d_amz, no_sale_7d_amz = [], [], []
+                    for asin_up, info in amz_inv_map_asin.items():
+                        stock    = info.get("stock", 0)
+                        mskus    = info.get("skus", [])
+                        sku_disp = ", ".join(mskus) if mskus else asin_up
+                        mc = monthly_counts_t16_amz.get(asin_up, {})
+                        sales_month = sum(mc.values()) if mc else 0
+                        img = links_map_asin_t16.get(asin_up, "") or (links_map_sku_t16.get(mskus[0].upper(), "") if mskus else "")
+                        row_t16_amz = {
+                            "sku": sku_disp, "sku_up": asin_up, "asin": info.get("asin", asin_up),
+                            "stock": stock, "sales_month": sales_month, "img": img,
+                        }
+                        if not asin_sold_in_amz(asin_up, dates_1d_amz):
+                            no_sale_1d_amz.append(row_t16_amz)
+                        if not asin_sold_in_amz(asin_up, dates_3d_amz):
+                            no_sale_3d_amz.append(row_t16_amz)
+                        if not asin_sold_in_amz(asin_up, dates_7d_amz):
+                            no_sale_7d_amz.append(row_t16_amz)
+                    no_sale_1d_amz.sort(key=lambda x: -x["stock"])
+                    no_sale_3d_amz.sort(key=lambda x: -x["stock"])
+                    no_sale_7d_amz.sort(key=lambda x: -x["stock"])
+
+                    sub1a, sub2a, sub3a = st.tabs([
+                        f"📅 بدون مبيع أمس ({len(no_sale_1d_amz)})",
+                        f"📅 بدون مبيع آخر 3 أيام ({len(no_sale_3d_amz)})",
+                        f"📅 بدون مبيع آخر أسبوع ({len(no_sale_7d_amz)})",
+                    ])
+                    with sub1a:
+                        render_no_sale_list(no_sale_1d_amz, "أمس", "no_sale_1d_amz", channel="amazon")
+                    with sub2a:
+                        render_no_sale_list(no_sale_3d_amz, "آخر 3 أيام", "no_sale_3d_amz", channel="amazon")
+                    with sub3a:
+                        render_no_sale_list(no_sale_7d_amz, "آخر أسبوع", "no_sale_7d_amz", channel="amazon")
 
 if st.session_state["nav_page"] == "tab_ads":
     with tab_ads:
