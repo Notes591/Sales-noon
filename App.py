@@ -148,6 +148,55 @@ TABS_CONFIG = {
                     "condition-type", "Warehouse-Condition-code", "Quantity Available"],
 }
 
+# ══ كاش ══
+# ملحوظة: الدوال دي كانت أصلاً بعد تهيئة الشيتات (get_or_create_worksheet)، لكن
+# اتنقلوا هنا فوق عشان get_or_create_worksheet نفسها تقدر تستخدم safe_get_all_values
+# — ده جزء من إصلاح سبب استهلاك quota القراءة بسرعة (429): كان كل تاب بياخد قراءتين
+# منفصلتين عند بدء أي جلسة جديدة (row_values(1) هنا للتأكد من الهيدر، وبعدين
+# get_all_values() تانية لما بياناته تتستخدم فعلياً)، فبقينا نعمل قراءة واحدة بس لكل
+# تاب ونخزّنها في الكاش من هنا، فـ get_cached() بعد كده بتلاقيها جاهزة | Note: these
+# functions used to sit after the sheets were initialized, but were moved up here so
+# get_or_create_worksheet itself can use safe_get_all_values — part of fixing why the
+# read quota (429) was being burned so fast: every tab used to take two separate reads
+# at the start of each new session (row_values(1) here to check headers, then a second
+# get_all_values() later when its data was actually used), so now we do a single read
+# per tab and prime the cache from here, so get_cached() later finds it already there.
+def safe_get_all_values(sheet, retries=6, delay=1):
+    """زي safe_append بالظبط بس للقراءة — كان ده الناقص اللي بيسبب الكراش."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            return sheet.get_all_values()
+        except gspread.exceptions.APIError as e:
+            last_err = e
+            wait = delay * (2 ** attempt)
+            if "429" in str(e) or "quota" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
+                st.toast(f"⏳ Google Sheets API limit — جاري إعادة المحاولة ({attempt+1}/{retries})...", icon="⏳")
+                time.sleep(wait)
+            else:
+                time.sleep(delay)
+        except Exception as e:
+            last_err = e
+            time.sleep(delay)
+    # خلصت كل المحاولات — ارجع آخر قيمة كانت متخزنة في الكاش لو موجودة بدل ما الابب يقع كله
+    key = f"cache_{sheet.title}"
+    if key in st.session_state:
+        st.warning(f"⚠️ تعذر تحديث '{sheet.title}' من Google Sheets الآن — بيتم عرض آخر نسخة محفوظة | Showing last cached version")
+        return st.session_state[key]
+    st.error(f"❌ تعذر تحميل '{sheet.title}' من Google Sheets — حاول تاني بعد شوية | Could not load this sheet right now, please retry shortly.")
+    st.stop()
+
+def get_cached(sheet, force=False):
+    key = f"cache_{sheet.title}"
+    if force or key not in st.session_state:
+        st.session_state[key] = safe_get_all_values(sheet)
+    return st.session_state[key]
+
+def clear_cache(sheet):
+    key = f"cache_{sheet.title}"
+    if key in st.session_state:
+        del st.session_state[key]
+
 def get_or_create_worksheet(tab, headers, retries=5, delay=2):
     for attempt in range(retries):
         try:
@@ -158,13 +207,25 @@ def get_or_create_worksheet(tab, headers, retries=5, delay=2):
             # ignores case/extra whitespace, so a column that already exists (e.g. "Cost")
             # doesn't get a duplicate appended every new session just from a formatting
             # mismatch.
+            # قراءة واحدة بس (مش row_values(1) منفصلة) وبتتخزن في الكاش فورًا، عشان
+            # get_cached() بعد كده ما يعملش قراءة تانية لنفس الشيت | A single read
+            # (not a separate row_values(1)) that's cached immediately, so a later
+            # get_cached() call for this same sheet doesn't trigger a second read.
             try:
-                existing_hdr = ws.row_values(1)
+                data_ocw = safe_get_all_values(ws)
+                existing_hdr = data_ocw[0] if data_ocw else []
                 existing_hdr_norm = {str(h).strip().lower() for h in existing_hdr}
                 missing = [h for h in headers if h.strip().lower() not in existing_hdr_norm]
                 if missing:
                     for h in missing:
                         ws.append_cols([[h]], value_input_option="RAW")
+                    # الهيدر اتغيّر فعلياً في الشيت الحقيقي — نمسح أي نسخة قديمة كنا
+                    # هنخزنها عشان أول استخدام فعلي يجيب النسخة المحدثة (بقراءة جديدة)
+                    # | Header actually changed on the real sheet — drop any copy we
+                    # were about to cache so the first real use fetches the fresh one.
+                    st.session_state.pop(f"cache_{ws.title}", None)
+                else:
+                    st.session_state[f"cache_{ws.title}"] = data_ocw
             except Exception:
                 pass
             return ws
@@ -306,43 +367,6 @@ ads_sheet             = sheets["Advertisements"]
 ads_amz_sheet         = sheets["AdvertisementsAmz"]
 com_sheet             = sheets["COM"]
 live_sheet            = sheets["LIVE"]
-
-# ══ كاش ══
-def safe_get_all_values(sheet, retries=6, delay=1):
-    """زي safe_append بالظبط بس للقراءة — كان ده الناقص اللي بيسبب الكراش."""
-    last_err = None
-    for attempt in range(retries):
-        try:
-            return sheet.get_all_values()
-        except gspread.exceptions.APIError as e:
-            last_err = e
-            wait = delay * (2 ** attempt)
-            if "429" in str(e) or "quota" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
-                st.toast(f"⏳ Google Sheets API limit — جاري إعادة المحاولة ({attempt+1}/{retries})...", icon="⏳")
-                time.sleep(wait)
-            else:
-                time.sleep(delay)
-        except Exception as e:
-            last_err = e
-            time.sleep(delay)
-    # خلصت كل المحاولات — ارجع آخر قيمة كانت متخزنة في الكاش لو موجودة بدل ما الابب يقع كله
-    key = f"cache_{sheet.title}"
-    if key in st.session_state:
-        st.warning(f"⚠️ تعذر تحديث '{sheet.title}' من Google Sheets الآن — بيتم عرض آخر نسخة محفوظة | Showing last cached version")
-        return st.session_state[key]
-    st.error(f"❌ تعذر تحميل '{sheet.title}' من Google Sheets — حاول تاني بعد شوية | Could not load this sheet right now, please retry shortly.")
-    st.stop()
-
-def get_cached(sheet, force=False):
-    key = f"cache_{sheet.title}"
-    if force or key not in st.session_state:
-        st.session_state[key] = safe_get_all_values(sheet)
-    return st.session_state[key]
-
-def clear_cache(sheet):
-    key = f"cache_{sheet.title}"
-    if key in st.session_state:
-        del st.session_state[key]
 
 # ══ كاش لأي "خريطة مشتقة" من شيت معيّن (زي SKU -> كود، أو كود -> كمية) — بيتم إعادة
 #    بنائها بس أول مرة بعد ما بيانات الشيت الخام تتغيّر (بعد clear_cache)، مش في كل مرة
