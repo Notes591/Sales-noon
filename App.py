@@ -87,13 +87,29 @@ TABS_CONFIG = {
     # تاب الإعلانات — بيتحدّث يدوي من جوجل شيت، وبنعرض أداء كل SKU منه في تاب المبيعات
     "Advertisements":    ["Campaign Name","Sku","Views","Clicks","Orders","ATC","Spends","Revenue",
                            "CTR","ROAS","CPC","CPS","CVR"],
-    # تاب إعلانات أمازون — نفس تاب الإعلانات بالظبط بس بمفتاح ASIN (معرّف منتج أمازون
-    # الحقيقي) بدل SKU، وبنعرض أداء كل ASIN منه في تاب مبيعات أمازون بنفس طريقة نون
-    # تماماً | Amazon ads sheet — identical to Advertisements, but keyed by ASIN
-    # (Amazon's real product identity) instead of SKU; shown in the Amazon Sales tab
-    # exactly the same way Noon's ads are shown.
-    "AdvertisementsAmz": ["Campaign Name","ASIN","Views","Clicks","Orders","ATC","Spends","Revenue",
-                           "CTR","ROAS","CPC","CPS","CVR"],
+    # تاب إعلانات أمازون — بيتحدّث يدوي من تصدير أمازون مباشرة (Sponsored Products
+    # export)، فشكله مختلف تماماً عن تاب الإعلانات بتاع نون: مفيش عمود "Campaign
+    # Name" ولا عمود ASIN مستقل — أول عمود ("المنتجات") ده كود المنتج/العرض
+    # (زي B0C62FXJZF-E5-LJNS-ZTDG)، والـ ASIN الحقيقي هو أول 10 حروف/أرقام منه
+    # بس (شوف get_ads_map_amazon تحت). الهيدرز هنا لازم تفضل مطابقة تماماً لهيدر
+    # الشيت الحقيقي، لأن get_or_create_worksheet بيضيف أي عمود من الليستة دي مش
+    # موجود فعلياً في أول صف بالشيت — لو الليستة غلط بتضيف أعمدة زيادة كل جلسة
+    # وده كان سبب رئيسي للبطء | Amazon ads sheet — updated manually straight from
+    # an Amazon Sponsored Products export, so its shape is completely different
+    # from Noon's Advertisements tab: no "Campaign Name" column and no standalone
+    # ASIN column — the first column ("المنتجات") is the product/offer code (e.g.
+    # B0C62FXJZF-E5-LJNS-ZTDG), and the real ASIN is only its first 10
+    # characters (see get_ads_map_amazon below). These headers must match the
+    # real sheet's header row exactly, because get_or_create_worksheet appends
+    # any header here that isn't already in row 1 — a wrong list here means
+    # extra junk columns get appended every session, which was a real source of
+    # slowness.
+    "AdvertisementsAmz": ["المنتجات","الحالة","النوع","أهلية المنتجات المدعومة","المبيعات(SAR)",
+                           "عائد الإنفاق على الإعلانات (ROAS)","معدل التحويل","مرات الظهور","نقرات",
+                           "CTR","الإنفاق(SAR)","CPC(SAR)","الطلبات","ACOS",
+                           "الطلبات الجديدة بالنسبة للماركة","النسبة المئوية للطلبات الجديدة بالنسبة للماركة",
+                           "المبيعات الجديدة بالنسبة للماركة(SAR)","النسبة المئوية للمبيعات الجديدة بالنسبة للماركة",
+                           "مرات الظهور القابلة للعرض"],
     # تاب العمولة ومصاريف التوصيل — بيتحدّث يدوي، وبنستخدمه لحساب صافي سعر البيع لكل SKU
     "COM":               ["SKU","مصاريف توصيل","العمولة"],
     # تاب LIVE — نسخة من ملف Noon catalog export، بيتحدّث يدوي بره البرنامج (مش من هنا).
@@ -693,12 +709,29 @@ def get_ads_map():
         m.setdefault(sku_up, []).append(entry)
     return m
 
-# ══ خريطة إعلانات أمازون (ASIN -> قائمة كامبينات) | Amazon ads map (ASIN -> list of campaigns) ══
+# ══ خريطة إعلانات أمازون (ASIN -> قائمة صفوف) | Amazon ads map (ASIN -> list of rows) ══
 def get_ads_map_amazon():
-    """نفس get_ads_map() بالظبط، بس بيقرأ من شيت AdvertisementsAmz ومفتاحها ASIN
-    (معرّف منتج أمازون الحقيقي) بدل SKU | Same as get_ads_map(), but reads from
-    the AdvertisementsAmz sheet and is keyed by ASIN (Amazon's real product
-    identity) instead of SKU."""
+    """بتقرأ من شيت AdvertisementsAmz بشكله الجديد — تصدير إعلانات أمازون
+    مباشرة، مفهوش عمود "Campaign Name" ولا عمود ASIN مستقل. عمود "المنتجات"
+    فيه كود المنتج/العرض (زي B0C62FXJZF-E5-LJNS-ZTDG)، والـ ASIN الحقيقي هو
+    أول 10 حروف/أرقام منه بس، فممكن أكتر من صف (أكتر من عرض/تخزين) يترجعوا
+    لنفس الـ ASIN وده طبيعي وبيتجمّعوا مع بعض زي ما كان بيحصل مع الحملات قبل
+    كده. مفيش عمود "Campaign Name" في الشكل الجديد، فبنستخدم قيمة عمود
+    "المنتجات" الكاملة (كود المنتج/العرض) كبديل لعرض/تجميع كل صف على حدة في
+    تاب "تحليل أداء الإعلانات". ومفيش عمود ATC (إضافة للسلة) في الشكل الجديد،
+    فبتفضل صفر دايماً. كل الأعمدة بتتقرا بالاسم مش بالمكان عشان تفضل شغالة لو
+    ترتيب الأعمدة اتغيّر | Reads the new AdvertisementsAmz layout — a direct
+    Amazon ads export with no "Campaign Name" column and no standalone ASIN
+    column. The "المنتجات" column holds the product/offer code (e.g.
+    B0C62FXJZF-E5-LJNS-ZTDG); the real ASIN is only its first 10 characters,
+    so more than one row (more than one offer/storage type) can map to the
+    same ASIN — that's expected and they're summed together just like
+    multiple campaigns used to be. Since there's no "Campaign Name" column
+    anymore, the full "المنتجات" value is used as a stand-in so each row can
+    still be shown/grouped individually in the Ads Performance Analysis tab.
+    There's no ATC (add-to-cart) column in the new layout, so it's always
+    zero. Every column is read by name, not position, so this keeps working
+    if the column order changes."""
     data = get_cached(ads_amz_sheet)
     if not data or len(data) < 2:
         return {}
@@ -712,23 +745,25 @@ def get_ads_map_amazon():
         return ""
     m = {}
     for row in data[1:]:
-        asin_raw = col(row, "ASIN", "Asin", "asin")
-        if not str(asin_raw).strip():
+        product_raw = str(col(row, "المنتجات", "ASIN", "Asin", "asin")).strip()
+        if not product_raw:
             continue
-        asin_up = str(asin_raw).strip().upper()
+        asin_up = product_raw[:10].strip().upper()
+        if not asin_up:
+            continue
         entry = {
-            "campaign": col(row, "Campaign Name") or "—",
-            "views":  _f2(col(row, "Views")),
-            "clicks": _f2(col(row, "Clicks")),
-            "orders": _f2(col(row, "Orders")),
-            "atc":    _f2(col(row, "ATC")),
-            "spends": _f2(col(row, "Spends")),
-            "revenue":_f2(col(row, "Revenue")),
+            "campaign": product_raw,
+            "views":  _f2(col(row, "مرات الظهور", "Views")),
+            "clicks": _f2(col(row, "نقرات", "Clicks")),
+            "orders": _f2(col(row, "الطلبات", "Orders")),
+            "atc":    0.0,
+            "spends": _f2(col(row, "الإنفاق(SAR)", "Spends")),
+            "revenue":_f2(col(row, "المبيعات(SAR)", "Revenue")),
             "ctr":    _f2(col(row, "CTR")),
-            "roas":   _f2(col(row, "ROAS")),
-            "cpc":    _f2(col(row, "CPC")),
-            "cps":    _f2(col(row, "CPS")),
-            "cvr":    _f2(col(row, "CVR")),
+            "roas":   _f2(col(row, "عائد الإنفاق على الإعلانات (ROAS)", "ROAS")),
+            "cpc":    _f2(col(row, "CPC(SAR)", "CPC")),
+            "cps":    0.0,
+            "cvr":    _f2(col(row, "معدل التحويل", "CVR")),
         }
         m.setdefault(asin_up, []).append(entry)
     return m
