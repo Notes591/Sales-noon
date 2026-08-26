@@ -2959,6 +2959,10 @@ NAV_ITEMS = [
     ("tab_dash", "📊", "داشبورد المبيعات | Dashboard"),
     ("tab9",     "📦", "المخزون | Inventory"),
     ("tab_wh",   "🏭", "مخزون المستودع | Warehouse Stockout"),
+    ("tab10",    "🔴", "مراجعة مخزون نون | Noon Stock Review"),
+    ("tab13",    "📈", "مراجعة مبيعات نون | Noon Sales Review"),
+    ("tab_stock_review_amz", "🔴", "مراجعة مخزون امازون | Amazon Stock Review"),
+    ("tab_sales_review_amz", "📈", "مراجعة مبيعات امازون | Amazon Sales Review"),
     ("tab16",    "🗂️", "مخزون بدون بيع | No Sales"),
     ("tab_ads",  "📢", "الإعلانات | Ads"),
 ]
@@ -3116,6 +3120,8 @@ tab_sales_amazon = st.container(key="navpanel_tab_sales_amazon")
 tab_dash = st.container(key="navpanel_tab_dash")
 tab9     = st.container(key="navpanel_tab9")
 tab_wh   = st.container(key="navpanel_tab_wh")
+tab10    = st.container(key="navpanel_tab10")
+tab13    = st.container(key="navpanel_tab13")
 tab_stock_review_amz = st.container(key="navpanel_tab_stock_review_amz")
 tab_sales_review_amz = st.container(key="navpanel_tab_sales_review_amz")
 tab16    = st.container(key="navpanel_tab16")
@@ -6014,6 +6020,343 @@ if st.session_state["nav_page"] == "tab_dash":
 
         # ══ TAB 15 — تحليل الجدولة ══
         # ══ TAB 10 — مراجعة المخزون ══
+if st.session_state["nav_page"] == "tab10":
+    with tab10:
+        if _tab_gate("tab10", "🔴 مراجعة مخزون نون | Noon Stock Review"):
+            st.subheader("🔴 مراجعة مخزون نون | Noon Stock Review")
+            st.caption("نفس منطق استعلام Access \"مراجعة مخزون\" — المخزون أقل من تغطية 10 أيام بيع. "
+                       "المبيعات هنا نون FBN بس (FBB مستبعد لأنه مخزون عند طرف تاني) | Same logic as "
+                       "the Access \"مراجعة مخزون\" query — stock below 10-day sales coverage. Sales "
+                       "here are Noon FBN only (FBB excluded — stock held by another party)")
+
+            with st.expander("📤 رفع بيانات الأوردرز اليومية (نون) | Upload Daily Orders (Noon)", expanded=False):
+                st.caption("ارفع ملف الأوردرز (لازم يحتوي على عمودي sku و order_timestamp) — هيتم استبدال البيانات بالكامل في كل رفعة | Upload orders file (needs sku & order_timestamp columns) — fully replaces existing data each time")
+                st.download_button("⬇️ Template فارغ | Empty Template",
+                    data=make_empty_template(["sku","order_timestamp","status","price","quantity"]),
+                    file_name=f"daily_orders_template_{file_timestamp()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key="dlbtn_do_template_t10")
+                upl_do_t10 = st.file_uploader("ملف الأوردرز | Orders file", type=["xlsx","xls","csv"], key="daily_orders_upload_t10")
+                if upl_do_t10:
+                    try:
+                        df_do_t10 = pd.read_csv(upl_do_t10,dtype=str).fillna("") if upl_do_t10.name.endswith(".csv") else pd.read_excel(upl_do_t10,dtype=str).fillna("")
+                        sku_col_do = ts_col_do = status_col_do = None
+                        for c in df_do_t10.columns:
+                            cl = c.strip().lower()
+                            if cl == "sku": sku_col_do = c
+                            if cl == "order_timestamp" or cl == "order timestamp": ts_col_do = c
+                            if cl == "status": status_col_do = c
+                        if not sku_col_do:
+                            for c in df_do_t10.columns:
+                                if "sku" in c.strip().lower(): sku_col_do = c; break
+                        if not ts_col_do:
+                            for c in df_do_t10.columns:
+                                cl = c.strip().lower()
+                                if "timestamp" in cl or "date" in cl: ts_col_do = c; break
+                        st.info(f"📊 {len(df_do_t10)} صف | SKU:`{sku_col_do}` Timestamp:`{ts_col_do}`")
+                        st.dataframe(df_do_t10.head(10), use_container_width=True, height=150)
+                        if sku_col_do and ts_col_do:
+                            if st.button("🔄 رفع واستبدال | Upload & Replace", type="primary", key="btn_upload_daily_orders_t10"):
+                                dn = now_str()
+                                to_add = []
+                                price_col_do = None
+                                for c in df_do_t10.columns:
+                                    if c.strip().lower() in ("price","base_price","سعر","السعر","price_egp","unit_price","sale_price","selling_price"): price_col_do = c; break
+                                qty_col_do = None
+                                for c in df_do_t10.columns:
+                                    if c.strip().lower() in ("quantity","qty","كمية","الكمية","count"): qty_col_do = c; break
+                                for _,row in df_do_t10.iterrows():
+                                    sku_v   = str(row[sku_col_do]).strip()
+                                    ts_v    = str(row[ts_col_do]).strip()
+                                    st_v    = str(row[status_col_do]).strip() if status_col_do else ""
+                                    price_v = str(row[price_col_do]).strip() if price_col_do else ""
+                                    qty_v   = str(row[qty_col_do]).strip() if qty_col_do else "1"
+                                    if sku_v and sku_v.lower()!="nan":
+                                        to_add.append([sku_v, ts_v, st_v, price_v, qty_v, dn])
+                                safe_delete_all(daily_orders_sheet)
+                                correct_header = ["SKU","Order Timestamp","Status","Price","Quantity","Date Uploaded"]
+                                daily_orders_sheet.update("A1", [correct_header])
+                                if to_add:
+                                    safe_batch_append(daily_orders_sheet, to_add)
+                                clear_cache(daily_orders_sheet)
+                                st.success(f"✅ تم رفع {len(to_add)} صف واستبدال البيانات | Uploaded & replaced {len(to_add)} rows")
+                                st.rerun()
+                        else:
+                            st.error("❌ مش لاقي أعمدة SKU أو order_timestamp | Couldn't detect SKU or order_timestamp columns")
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+            today_d10 = datetime.now().date()
+            d1, d2, d3 = today_d10 - timedelta(days=1), today_d10 - timedelta(days=2), today_d10 - timedelta(days=3)
+            day_dates  = [d1, d2, d3]
+            day_labels = [f"أمس | Yesterday ({d1.strftime('%m-%d')})",
+                          f"أول أمس | Day before ({d2.strftime('%m-%d')})",
+                          f"أول أول أمس | 3 days ago ({d3.strftime('%m-%d')})"]
+            st.caption(f"📅 بيانات يوم | Data for: **{d1.strftime('%Y-%m-%d')}** (أمس | yesterday) — التنبيه نفسه مبني على أمس فقط، والأيام التانية للعرض فقط | Alert itself is based on yesterday only; the other days are for display")
+
+            delay_days_t10 = int(load_settings().get("schedule_delay_days","3") or 3)
+            recent_sched_map_t10_all = get_recent_schedule_rows(days_back=4)
+            all_review_rows = compute_stock_sales_rows(d1, day_dates)
+            stock_review_rows = []
+            for r in all_review_rows:
+                if not r["stock_alert"]:
+                    continue
+                if r["sku_up"] in recent_sched_map_t10_all:
+                    continue
+                cov_badge_text, cov_badge_color, _ = schedule_coverage_badge(r["sku"], r["days_to_stockout"], delay_days_t10)
+                if cov_badge_color == "#22c55e":
+                    continue
+                r["_cov_badge_text"], r["_cov_badge_color"] = cov_badge_text, cov_badge_color
+                stock_review_rows.append(r)
+
+            # إضافة المرحلين من تاب مبيعات نون (محتاج جدولة فقط)
+            transferred_from_sales = st.session_state.get("transferred_skus_t14", [])
+            existing_skus_in_review = {r["sku_up"] for r in stock_review_rows}
+            for tr in transferred_from_sales:
+                if is_sku_only_in_excluded_warehouses(tr["sku_up"], excluded_wh):
+                    continue
+                if tr["sku_up"] in recent_sched_map_t10_all:
+                    continue
+                if tr["sku_up"] not in existing_skus_in_review:
+                    avg_tr = tr.get("effective_avg", 0)
+                    suggested_tr = round(avg_tr * 18) if avg_tr > 0 else 0
+                    days_to_so_tr = tr.get("days_to_stockout", 0)
+                    cov_badge_text_tr, cov_badge_color_tr, _ = schedule_coverage_badge(tr["sku"], days_to_so_tr, delay_days_t10)
+                    if cov_badge_color_tr == "#22c55e":
+                        continue
+                    stock_review_rows.append({
+                        "sku": tr["sku"], "sku_up": tr["sku_up"],
+                        "stock": tr["stock"], "sales_month": tr["sales_month"],
+                        "img": tr["img"], "stock_alert": True, "sales_alert": False,
+                        "suggested_qty": suggested_tr,
+                        "days_to_stockout": days_to_so_tr,
+                        "days_to_stockout_today": days_to_so_tr,
+                        "qty": tr["day_counts"].get(d1, 0) if tr.get("day_counts") else 0,
+                        "day_counts": tr.get("day_counts", {d: 0 for d in day_dates}),
+                        "_transferred_from_sales": True,
+                        "_cov_badge_text": cov_badge_text_tr, "_cov_badge_color": cov_badge_color_tr,
+                    })
+
+            # ملحوظة: مفيش دمج هنا لـ transferred_skus_tamz (المرحّلين من تاب مبيعات أمازون) —
+            # المفتاح ده بيتكتب من تابي "عادي FSAB" و"FBA" الاتنين فوق بعض في نفس session_state
+            # (مشكلة موجودة أصلاً في تاب مبيعات أمازون نفسه، متسجلة قبل كده)، فمش أمين إننا نعرف
+            # وقت القراءة هل القائمة دي FSAB (المفروض تتستبعد) ولا FBA (المفروض تتضم). المصدر
+            # الوحيد المضمون لأمازون هنا هو compute_stock_sales_rows فوق (بيقرا FBA مباشرة من
+            # DailyOrdersAmazon، مش من session_state) | Note: transferred_skus_tamz is NOT merged
+            # here — that key is overwritten by both the Amazon "Normal FSAB" and "FBA" sub-tabs
+            # (a pre-existing issue in the Amazon Sales tab itself), so at read time there's no
+            # reliable way to know whether it holds FSAB (should be excluded) or FBA (should be
+            # included) data. The only reliable Amazon source here is compute_stock_sales_rows
+            # above, which reads FBA directly from DailyOrdersAmazon, not from session_state.
+
+            stock_review_rows.sort(key=lambda r: (-r["qty"], -r["sales_month"]))
+
+            if not inv_map:
+                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+            elif not stock_review_rows:
+                st.success("✅ لا توجد SKUs محتاجة مراجعة مخزون | No SKUs need stock review")
+            else:
+                df_sr = pd.DataFrame([{
+                    "SKU": r["sku"], "Yesterday": r["day_counts"].get(d1,0), "Day Before": r["day_counts"].get(d2,0),
+                    "3 Days Ago": r["day_counts"].get(d3,0), "Stock": r["stock"], "Monthly Sales": r["sales_month"],
+                    "Suggested Qty": r["suggested_qty"], "Days to Stockout": r["days_to_stockout"]
+                } for r in stock_review_rows])
+                c1,c2 = st.columns(2)
+                with c1: dl_btn(df_sr,"stock_review", key="dlbtn_t10_sr")
+                with c2: st.error(f"🔴 SKUs محتاجة مراجعة | Needs Review: {len(stock_review_rows)}")
+
+                pending_approval_skus_t10 = get_pending_approval_skus()
+
+                for r in stock_review_rows:
+                    c_img,c_info = st.columns([1,6])
+                    with c_img: show_img(r["img"],70)
+                    with c_info:
+                        st.markdown(f"**SKU:** `{r['sku']}`")
+                        tc_badge_t10 = warehouse_available_badge(r["sku_up"])
+                        if tc_badge_t10:
+                            st.markdown(tc_badge_t10, unsafe_allow_html=True)
+                        if r.get("_transferred_from_sales"):
+                            src_lbl = "أمازون FBA" if r.get("_from_amazon") else "نون"
+                            st.markdown(f'<span style="background:#7c3aed;color:white;border-radius:6px;padding:2px 10px;font-size:11px;">📌 مرحّل من تاب مبيعات {src_lbl} — محتاج جدولة | Transferred from {src_lbl} Sales tab — needs scheduling</span>', unsafe_allow_html=True)
+                        st.markdown(f"📦 **المخزون | Stock:** {r['stock']} &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly:** {r['sales_month']}")
+                        st.markdown("🛒 " + render_day_counts_md(r["day_counts"], day_dates, day_labels))
+                        st.markdown(f"💡 **اقتراح الكمية | Suggested Qty:** **{r['suggested_qty']}** &nbsp;|&nbsp; ⏳ **نفاد خلال | Days to stockout:** {r['days_to_stockout']} يوم")
+                        if r["sales_alert"]:
+                            st.warning("📈 مبيعات أعلى من المعتاد كمان | Also selling faster than usual")
+                        st.markdown(f'<span class="status-badge-lg" style="background:{r["_cov_badge_color"]};">{r["_cov_badge_text"]}</span>', unsafe_allow_html=True)
+                        if r["sku_up"] in pending_approval_skus_t10:
+                            st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
+                        render_recent_expired_note(r["sku"])
+                        for note in get_unavailable_ordered_note(r["sku"]):
+                            st.markdown(big_note_html(note), unsafe_allow_html=True)
+                    st.divider()
+
+            missing_rows_t10 = compute_missing_inventory_rows(day_dates)
+            filtered_missing_t10 = []
+            for r in missing_rows_t10:
+                if r["sku_up"] in recent_sched_map_t10_all:
+                    continue
+                cov_badge_text, cov_badge_color, _ = schedule_coverage_badge(r["sku"], 0, delay_days_t10)
+                if cov_badge_color == "#22c55e":
+                    continue
+                r["_cov_badge_text"], r["_cov_badge_color"] = cov_badge_text, cov_badge_color
+                filtered_missing_t10.append(r)
+            missing_rows_t10 = filtered_missing_t10
+
+            st.divider()
+            st.subheader("⛔ مخزون منتهي بالكامل | Completely Out of Stock")
+            st.caption("SKUs باعت (نون FBN) في آخر 3 أيام لكن مالهاش سجل في ملف المخزون أصلاً — يبقى مخزونها انتهى وخرجت من الملف | SKUs with Noon FBN sales in the last 3 days but no record in the Inventory file at all — stock fully ran out")
+            if not missing_rows_t10:
+                st.success("✅ لا يوجد SKUs خارجة عن المخزون | No SKUs missing from inventory")
+            else:
+                df_miss10 = pd.DataFrame([{
+                    "SKU": r["sku"], "Yesterday": r["day_counts"].get(d1,0), "Day Before": r["day_counts"].get(d2,0),
+                    "3 Days Ago": r["day_counts"].get(d3,0), "Estimated Monthly Sales": r["est_monthly_sales"]
+                } for r in missing_rows_t10])
+                c1,c2 = st.columns(2)
+                with c1: dl_btn(df_miss10,"out_of_stock", key="dlbtn_oos_t10")
+                with c2: st.error(f"⛔ SKUs منتهية | Out of Stock: {len(missing_rows_t10)}")
+                pending_approval_skus_t10b = get_pending_approval_skus()
+                for r in missing_rows_t10:
+                    c_img,c_info = st.columns([1,6])
+                    with c_img: show_img(r["img"],70)
+                    with c_info:
+                        st.markdown(f"**SKU:** `{r['sku']}`")
+                        tc_badge_t10b = warehouse_available_badge(r["sku_up"])
+                        if tc_badge_t10b:
+                            st.markdown(tc_badge_t10b, unsafe_allow_html=True)
+                        st.error("⛔ مخزونه انتهى — مش موجود في ملف المخزون | Stock ran out — not found in inventory file")
+                        st.markdown("🛒 " + render_day_counts_md(r["day_counts"], day_dates, day_labels))
+                        st.markdown(f"📈 **مبيع شهري تقديري (بناءً على آخر 3 أيام) | Estimated Monthly Sales (based on last 3 days):** **{r['est_monthly_sales']}**")
+                        st.markdown(f'<span class="status-badge-lg" style="background:{r["_cov_badge_color"]};">{r["_cov_badge_text"]}</span>', unsafe_allow_html=True)
+                        if r["sku_up"] in pending_approval_skus_t10b:
+                            st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
+                        render_recent_expired_note(r["sku"])
+                        for note in get_unavailable_ordered_note(r["sku"]):
+                            st.markdown(big_note_html(note), unsafe_allow_html=True)
+                    st.divider()
+
+        # ══ TAB 13 — مراجعة المبيعات ══
+if st.session_state["nav_page"] == "tab13":
+    with tab13:
+        if _tab_gate("tab13", "📈 مراجعة مبيعات نون | Noon Sales Review"):
+            st.subheader("📈 مراجعة مبيعات نون | Noon Sales Review")
+            st.caption("متوسط مبيعات آخر 3 أيام أعلى من المعتاد بشكل مستمر (يومين على الأقل) لكن المخزون لسه كافي — "
+                       "بديل أقل حساسية للـ noise من مجرد يوم واحد شاذ. المبيعات هنا نون FBN بس "
+                       "| Average of the last 3 days consistently above normal (at least 2 elevated days) but stock "
+                       "still sufficient. Sales here are Noon FBN only")
+
+            today_d13 = datetime.now().date()
+            e1, e2, e3 = today_d13 - timedelta(days=1), today_d13 - timedelta(days=2), today_d13 - timedelta(days=3)
+            day_dates2  = [e1, e2, e3]
+            day_labels2 = [f"أمس | Yesterday ({e1.strftime('%m-%d')})",
+                           f"أول أمس | Day before ({e2.strftime('%m-%d')})",
+                           f"أول أول أمس | 3 days ago ({e3.strftime('%m-%d')})"]
+            st.caption(f"📅 بيانات يوم | Data for: **{e1.strftime('%Y-%m-%d')}** (أمس | yesterday) — التنبيه نفسه مبني على أمس فقط، والأيام التانية للعرض فقط | Alert itself is based on yesterday only; the other days are for display")
+
+            delay_days_t13 = int(load_settings().get("schedule_delay_days","3") or 3)
+            recent_sched_map_t13_all = get_recent_schedule_rows(days_back=4)
+            # نفس السكيوهات اللي ظاهرة في مراجعة المخزون (تاب10) متتكررش هنا
+            stock_review_skus_t13 = {r["sku_up"] for r in stock_review_rows} if "stock_review_rows" in dir() else set()
+            all_review_rows2 = compute_stock_sales_rows(e1, day_dates2)
+            valid_days_set = {1,2,3,4,5,6,7,8,10}
+            sales_review_rows = []
+            for r in all_review_rows2:
+                if not (r["days_to_stockout_today"] in valid_days_set
+                        and r["sales_month"] > 0
+                        and r["sales_alert"]
+                        and not r["stock_alert"]
+                        and r["sku_up"] not in recent_sched_map_t13_all
+                        and r["sku_up"] not in stock_review_skus_t13):
+                    continue
+                cov_badge_text, cov_badge_color, _ = schedule_coverage_badge(r["sku"], r["days_to_stockout"], delay_days_t13)
+                if cov_badge_color == "#22c55e":
+                    continue
+                r["_cov_badge_text"], r["_cov_badge_color"] = cov_badge_text, cov_badge_color
+                sales_review_rows.append(r)
+            sales_review_rows.sort(key=lambda r: (-r["qty"], -r["sales_month"]))
+
+            pending_approval_skus_t13 = get_pending_approval_skus()
+
+            if not inv_map:
+                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+            elif not sales_review_rows:
+                st.success("✅ لا توجد SKUs محتاجة مراجعة مبيعات | No SKUs need sales review")
+            else:
+                df_sales = pd.DataFrame([{
+                    "SKU": r["sku"], "Yesterday": r["day_counts"].get(e1,0), "Day Before": r["day_counts"].get(e2,0),
+                    "3 Days Ago": r["day_counts"].get(e3,0), "Stock": r["stock"], "Monthly Sales": r["sales_month"],
+                    "Days to Stockout": r["days_to_stockout"]
+                } for r in sales_review_rows])
+                c1,c2 = st.columns(2)
+                with c1: dl_btn(df_sales,"sales_review", key="dlbtn_t13_sr")
+                with c2: st.warning(f"📈 SKUs محتاجة مراجعة | Needs Review: {len(sales_review_rows)}")
+
+                for r in sales_review_rows:
+                    c_img,c_info = st.columns([1,6])
+                    with c_img: show_img(r["img"],70)
+                    with c_info:
+                        st.markdown(f"**SKU:** `{r['sku']}`")
+                        tc_badge_t13 = warehouse_available_badge(r["sku_up"])
+                        if tc_badge_t13:
+                            st.markdown(tc_badge_t13, unsafe_allow_html=True)
+                        st.markdown(f"📦 **المخزون | Stock:** {r['stock']} &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly:** {r['sales_month']}")
+                        st.markdown("🛒 " + render_day_counts_md(r["day_counts"], day_dates2, day_labels2))
+                        st.markdown(f"⏳ **نفاد خلال | Days to stockout:** {r['days_to_stockout']} يوم")
+                        st.markdown(f'<span class="status-badge-lg" style="background:{r["_cov_badge_color"]};">{r["_cov_badge_text"]}</span>', unsafe_allow_html=True)
+                        if r["sku_up"] in pending_approval_skus_t13:
+                            st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
+                        render_recent_expired_note(r["sku"])
+                        for note in get_unavailable_ordered_note(r["sku"]):
+                            st.markdown(big_note_html(note), unsafe_allow_html=True)
+                    st.divider()
+
+            missing_rows_t13 = compute_missing_inventory_rows(day_dates2)
+            filtered_missing_t13 = []
+            for r in missing_rows_t13:
+                if r["sku_up"] in recent_sched_map_t13_all:
+                    continue
+                cov_badge_text, cov_badge_color, _ = schedule_coverage_badge(r["sku"], 0, delay_days_t13)
+                if cov_badge_color == "#22c55e":
+                    continue
+                r["_cov_badge_text"], r["_cov_badge_color"] = cov_badge_text, cov_badge_color
+                filtered_missing_t13.append(r)
+            missing_rows_t13 = filtered_missing_t13
+
+            st.divider()
+            st.subheader("⛔ مخزون منتهي بالكامل | Completely Out of Stock")
+            st.caption("SKUs باعت (نون FBN) في آخر 3 أيام لكن مالهاش سجل في ملف المخزون أصلاً — يبقى مخزونها انتهى وخرجت من الملف | SKUs with Noon FBN sales in the last 3 days but no record in the Inventory file at all — stock fully ran out")
+            if not missing_rows_t13:
+                st.success("✅ لا يوجد SKUs خارجة عن المخزون | No SKUs missing from inventory")
+            else:
+                df_miss13 = pd.DataFrame([{
+                    "SKU": r["sku"], "Yesterday": r["day_counts"].get(e1,0), "Day Before": r["day_counts"].get(e2,0),
+                    "3 Days Ago": r["day_counts"].get(e3,0), "Estimated Monthly Sales": r["est_monthly_sales"]
+                } for r in missing_rows_t13])
+                c1,c2 = st.columns(2)
+                with c1: dl_btn(df_miss13,"out_of_stock", key="dlbtn_oos_t13")
+                with c2: st.error(f"⛔ SKUs منتهية | Out of Stock: {len(missing_rows_t13)}")
+                pending_approval_skus_t13b = get_pending_approval_skus()
+                for r in missing_rows_t13:
+                    c_img,c_info = st.columns([1,6])
+                    with c_img: show_img(r["img"],70)
+                    with c_info:
+                        st.markdown(f"**SKU:** `{r['sku']}`")
+                        tc_badge_t13b = warehouse_available_badge(r["sku_up"])
+                        if tc_badge_t13b:
+                            st.markdown(tc_badge_t13b, unsafe_allow_html=True)
+                        st.error("⛔ مخزونه انتهى — مش موجود في ملف المخزون | Stock ran out — not found in inventory file")
+                        st.markdown("🛒 " + render_day_counts_md(r["day_counts"], day_dates2, day_labels2))
+                        st.markdown(f"📈 **مبيع شهري تقديري (بناءً على آخر 3 أيام) | Estimated Monthly Sales (based on last 3 days):** **{r['est_monthly_sales']}**")
+                        st.markdown(f'<span class="status-badge-lg" style="background:{r["_cov_badge_color"]};">{r["_cov_badge_text"]}</span>', unsafe_allow_html=True)
+                        if r["sku_up"] in pending_approval_skus_t13b:
+                            st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
+                        render_recent_expired_note(r["sku"])
+                        for note in get_unavailable_ordered_note(r["sku"]):
+                            st.markdown(big_note_html(note), unsafe_allow_html=True)
+                    st.divider()
+
+
         # ══ TAB — مراجعة مخزون أمازون (FBA بس، مستقل تمامًا عن نون) ══
 if st.session_state["nav_page"] == "tab_stock_review_amz":
     with tab_stock_review_amz:
