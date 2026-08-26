@@ -619,6 +619,20 @@ def get_asin_cost(asin_up):
         return get_tacweed_code_cost_map().get(code)
     return None
 
+def resolve_unit_cost(sku_up, asin_up=None):
+    """تكلفة الوحدة الصحيحة سواء المنتج نون أو أمازون: لو معانا ASIN، بيدور
+    الأول في تاب TacweedAmazon (get_asin_cost)، وإلا يرجع لتاب Tacweed العادي
+    بالـ SKU — عشان أي مكان بيحسب صافي الربح (تاب المبيعات أو الداشبورد)
+    يستخدم نفس المصدر الصح بدل ما يفضل بيقرا SKU بس حتى لمنتجات أمازون |
+    Correct unit cost whether the product is Noon or Amazon: if an ASIN is
+    given, checks TacweedAmazon (via get_asin_cost) first, otherwise falls
+    back to the regular Tacweed sheet by SKU."""
+    if asin_up:
+        c = get_asin_cost(asin_up)
+        if c is not None:
+            return c
+    return get_sku_cost(sku_up)
+
 def big_note_html(text):
     """نص ملاحظة (غير متوفر سابقاً / تم طلبه سابقاً) بخط أكبر وأسود بولد بدل الكابشن الصغير الرمادي."""
     return f'<span class="status-badge-lg" style="background:#e5e7eb;">{text}</span>'
@@ -812,7 +826,7 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
     #    after subtracting it — لو التكلفة مش مسجلة بتتحط صفر مع تنبيه، بدل ما
     #    سطر التكلفة يختفي بصمت زي قبل كده | if cost isn't recorded it defaults
     #    to zero with a warning, instead of the cost line silently disappearing ──
-    cost_t14 = get_sku_cost(r["sku_up"])
+    cost_t14 = resolve_unit_cost(r["sku_up"], r.get("asin", "").upper() if r.get("asin") else None)
     cost_missing_t14 = cost_t14 is None
     if cost_missing_t14:
         cost_t14 = 0.0
@@ -4385,6 +4399,7 @@ def _render_ads_performance_tab():
 
     ads_profit_rows_ap, ads_loss_rows_ap = [], []
     _links_map_ads_orphan = get_links_map()
+    _sku_to_asin_ads = build_amazon_orders_asin_map()
     for sku_up_ad, ads_entries_ad in ads_map_dash.items():
         com_info_ad = com_map_dash.get(sku_up_ad)
         if not ads_entries_ad or not com_info_ad:
@@ -4393,13 +4408,15 @@ def _render_ads_performance_tab():
         if latest_price_ad is None:
             continue
         _, net_tax_ad = compute_net_price_after_fees(latest_price_ad, com_info_ad)
-        # ── تكلفة الوحدة من تاب التكويد (لو مسجلة) وصافي الربح الفعلي بعدها، زي
-        #    بالظبط منطق تاب المبيعات — لو التكلفة مش مسجلة بتتحط صفر مع تنبيه،
-        #    بدل ما تختفي بصمت من الحساب | Unit cost from the Tacweed sheet (if
-        #    recorded) and the actual net profit after subtracting it — same
+        # ── تكلفة الوحدة من تاب التكويد (نون أو أمازون حسب المنتج) وصافي
+        #    الربح الفعلي بعدها، زي بالظبط منطق تاب المبيعات — لو التكلفة مش
+        #    مسجلة بتتحط صفر مع تنبيه، بدل ما تختفي بصمت من الحساب | Unit cost
+        #    from the right Tacweed sheet (Noon or Amazon, depending on the
+        #    product) and the actual net profit after subtracting it — same
         #    logic as the Sales tab. Missing cost defaults to zero with a flag,
         #    instead of silently dropping out of the calculation ──
-        cost_ad = get_sku_cost(sku_up_ad)
+        asin_for_ad = _sku_to_asin_ads.get(sku_up_ad, "").upper() or None
+        cost_ad = resolve_unit_cost(sku_up_ad, asin_for_ad)
         cost_missing_ad = cost_ad is None
         if cost_missing_ad:
             cost_ad = 0.0
