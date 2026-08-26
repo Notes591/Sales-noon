@@ -5195,7 +5195,7 @@ def _render_ads_performance_tab_amazon():
                 "صافي الربح بعد التكلفة | Net Total After Cost": round(r["net_total"], 2),
                 "النتيجة | Result": round(r["result"], 2),
             } for r in ads_profit_rows_ap])
-            dl_btn(df_al5, "alert_ads_profit", key="dl_alert_ads_profit_ap")
+            dl_btn(df_al5, "alert_ads_profit_amz", key="dl_alert_ads_profit_ap_amz")
             for r in ads_profit_rows_ap:
                 _render_ads_alert_sku_row(r, badges_html=_ads_insight_html(r))
         else:
@@ -5210,7 +5210,7 @@ def _render_ads_performance_tab_amazon():
                 "صافي الربح بعد التكلفة | Net Total After Cost": round(r["net_total"], 2),
                 "النتيجة | Result": round(r["result"], 2),
             } for r in ads_loss_rows_ap])
-            dl_btn(df_al6, "alert_ads_loss", key="dl_alert_ads_loss_ap")
+            dl_btn(df_al6, "alert_ads_loss_amz", key="dl_alert_ads_loss_ap_amz")
             for r in ads_loss_rows_ap:
                 _render_ads_alert_sku_row(r, badges_html=_ads_insight_html(r))
         else:
