@@ -3109,12 +3109,12 @@ def compute_warehouse_stockout_rows():
     stock_map_wh    = get_warehouse_stock_map()
     links_map_wh    = get_links_map()
 
-    # ── سحب أمازون اللي فعلاً بيتسحب من نفس مستودعنا (WarehouseStock) — طلبات
-    #    "حاوية كاملة الحمولة" = FSAB بس (تخزين عادي/شحن مباشر من عندنا)، مش
-    #    طلبات FBA (دي بتتسحب من مخزون أمازون هو نفسه، مش من مستودعنا) | Only
-    #    Amazon orders actually drawn from OUR warehouse (normal/FSAB storage)
-    #    count here — FBA orders draw from Amazon's own stock, not ours ──
-    multi_counts_amz_wh = build_daily_orders_counts_amazon(dates, mode="normal", group_by="asin")
+    # ── سحب أمازون من نفس مستودعنا (WarehouseStock) — بطلب صريح من المستخدم
+    #    بيتحسب من كل طلبات أمازون (عادي FSAB + FBA مع بعض)، مش الـ FSAB بس |
+    #    Amazon draw from OUR warehouse (WarehouseStock) — per explicit
+    #    request, counts ALL Amazon orders (normal/FSAB + FBA together), not
+    #    just FSAB ──
+    multi_counts_amz_wh = build_daily_orders_counts_amazon(dates, mode="all", group_by="asin")
     reverse_map_amz_wh  = get_tacweed_amazon_reverse_map()
 
     rows = []
