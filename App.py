@@ -947,7 +947,7 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
     offer_price_line_t14 = ""
     if offer_price_t14 is not None and (not price_from_live_t14 or round(offer_price_t14, 2) != round(latest_price_t14, 2)):
         offer_price_line_t14 = f' &nbsp;|&nbsp; 🏷️ سعر العرض (معلومة فقط، غير مستخدم في الحسابات): <b>{offer_price_t14:,.2f}</b> ريال'
-    price_label_t14 = "سعر البيع الأساسي" if price_from_live_t14 else "سعر البيع (سعر العرض)"
+    price_label_t14 = "سعر البيع الأساسي" if price_from_live_t14 else "سعر البيع (آخر طلب)"
 
     profit_color_t14 = "#4ade80" if net_profit_t14 >= 0 else "#f87171"
 
@@ -974,24 +974,25 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
         verdict_html_t14 = (f'<div dir="rtl" style="margin-top:8px;padding:6px 11px;background:{_vc[0]};border:1px solid {_vc[1]};'
                             f'border-radius:7px;"><span style="color:{_vc[2]};font-size:13px;font-weight:800;">{ad_verdict_t14}</span></div>')
 
-    # الظاهر: السعر والتوصيل والعمولة + صافي الربح + حكم الإعلان. الباقي جوه سلايدرات.
+    # الظاهر: سطور عمودية (سعر / توصيل / عمولة) + صافي الربح + حكم الإعلان. الباقي جوه سلايدرات.
+    _row = ('<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;'
+            'font-size:13px;color:#e2e8f0;padding:3px 0;"><span>{k}</span><b dir="ltr">{v}</b></div>')
     st.markdown(
-        f'<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
-        f'padding:8px 14px;margin:4px 0;">'
-        f'<span style="color:#e2e8f0;font-size:13px;">💵 {price_label_t14}: <b>{latest_price_t14:,.2f}</b> ريال'
-        f'{offer_price_line_t14}'
-        f'&nbsp;|&nbsp; 🚚 توصيل: <b>{com_info_t14["delivery"]:,.0f}</b> '
-        f'&nbsp;|&nbsp; 🏷️ عمولة: <b>{com_info_t14["commission_pct"]:,.0f}%</b></span>'
-        f'<br><span style="color:{profit_color_t14};font-size:14px;font-weight:bold;">🧮 صافي الربح الفعلي بعد التكلفة | Net Profit After Cost: {net_profit_t14:,.2f} ريال</span>'
-        f'{missing_note_t14}'
-        f'{verdict_html_t14}'
-        f'</div>',
+        '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:8px 14px;margin:6px 0;">'
+        + _row.format(k=f"💵 {price_label_t14}", v=f"{latest_price_t14:,.2f} ريال")
+        + _row.format(k="🚚 توصيل", v=f'{com_info_t14["delivery"]:,.0f}')
+        + _row.format(k="🏷️ عمولة", v=f'{com_info_t14["commission_pct"]:,.0f}%')
+        + f'<div style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;display:flex;justify-content:space-between;'
+          f'align-items:center;gap:8px;color:{profit_color_t14};font-size:14px;font-weight:800;">'
+          f'<span>🧮 صافي الربح بعد التكلفة</span><span dir="ltr">{net_profit_t14:,.2f} ريال</span></div>'
+        + missing_note_t14 + verdict_html_t14 + '</div>',
         unsafe_allow_html=True)
     with st.expander("💳 تفاصيل الحساب | Calculation details"):
         st.markdown(
             f"💳 **الصافي بعد خصم العمولة والتوصيل:** {net_fees_t14:,.2f} ريال  \n"
             f"🧾 **الصافي بعد خصم 15% ضريبة:** {net_tax_t14:,.2f} ريال  \n"
-            f"📦 **التكلفة | Cost:** {cost_t14:,.2f} ريال")
+            f"📦 **التكلفة | Cost:** {cost_t14:,.2f} ريال"
+            + (f"  \n🏷️ **سعر العرض (معلومة فقط):** {offer_price_t14:,.2f} ريال" if offer_price_t14 is not None else ""))
     if ad_detail_t14:
         with st.expander("📊 تفاصيل الحكم على الإعلان | Ad verdict details"):
             st.markdown(ad_detail_t14)
@@ -7006,23 +7007,6 @@ def _t14_sku_part(r):
     total_spends_t14  = sum(a["spends"]  for a in ads_entries_t14) if ads_entries_t14 else 0.0
     total_revenue_t14 = sum(a["revenue"] for a in ads_entries_t14) if ads_entries_t14 else 0.0
     total_orders_t14  = sum(a["orders"]  for a in ads_entries_t14) if ads_entries_t14 else 0.0
-    if ads_entries_t14:
-        with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ads_entries_t14)} حملة | campaign(s)"):
-            st.markdown(
-                f"💸 **إجمالي المصروف:** {total_spends_t14:,.2f} ريال &nbsp;|&nbsp; "
-                f"💰 **إجمالي الإيراد:** {total_revenue_t14:,.2f} ريال &nbsp;|&nbsp; "
-                f"🛒 **طلبات من الإعلان:** {total_orders_t14:,.0f}")
-            for ad in ads_entries_t14:
-                st.markdown(
-                    f"**{ad['campaign']}**<br>"
-                    f"👁️ ظهور: {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {ad['clicks']:,.0f} &nbsp;|&nbsp; "
-                    f"🛒 طلبات: {ad['orders']:,.0f} &nbsp;|&nbsp; ➕ سلة: {ad['atc']:,.0f}<br>"
-                    f"💸 مصروف: {ad['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {ad['revenue']:,.2f} ريال<br>"
-                    f"📊 CTR: {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {ad['roas']:.2f} &nbsp;|&nbsp; "
-                    f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CPS: {ad['cps']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%",
-                    unsafe_allow_html=True)
-                st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
-
     # ══ مخزون Xdock (من تاب LIVE) — مخزون منفصل عن Inventory، لو قرب يخلص محتاج تزويد ══
     live_info_t14 = live_map_t14.get(r["sku_up"])
     if live_info_t14 is not None:
@@ -7041,6 +7025,22 @@ def _t14_sku_part(r):
     render_price_profit_block_t14(
         r, com_map_t14, live_map_t14, sales_dates,
         ads_entries_t14, total_orders_t14, total_spends_t14)
+    if ads_entries_t14:
+        with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ads_entries_t14)} حملة | campaign(s)"):
+            st.markdown(
+                f"💸 **إجمالي المصروف:** {total_spends_t14:,.2f} ريال &nbsp;|&nbsp; "
+                f"💰 **إجمالي الإيراد:** {total_revenue_t14:,.2f} ريال &nbsp;|&nbsp; "
+                f"🛒 **طلبات من الإعلان:** {total_orders_t14:,.0f}")
+            for ad in ads_entries_t14:
+                st.markdown(
+                    f"**{ad['campaign']}**<br>"
+                    f"👁️ ظهور: {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {ad['clicks']:,.0f} &nbsp;|&nbsp; "
+                    f"🛒 طلبات: {ad['orders']:,.0f} &nbsp;|&nbsp; ➕ سلة: {ad['atc']:,.0f}<br>"
+                    f"💸 مصروف: {ad['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {ad['revenue']:,.2f} ريال<br>"
+                    f"📊 CTR: {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {ad['roas']:.2f} &nbsp;|&nbsp; "
+                    f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CPS: {ad['cps']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%",
+                    unsafe_allow_html=True)
+                st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
 
 def _t14_channel_part(r, ch, with_sku_level):
     """مبيعات قناة واحدة (FBN أو FBB) للـ SKU: أمس، الأيام، المخزون، حالة التغطية، الجدولة.
@@ -7277,6 +7277,9 @@ def _t14_sku_part_amz(r):
     total_spends  = sum(a["spends"]  for a in ads_entries) if ads_entries else 0.0
     total_revenue = sum(a["revenue"] for a in ads_entries) if ads_entries else 0.0
     total_orders  = sum(a["orders"]  for a in ads_entries) if ads_entries else 0.0
+    render_price_profit_block_t14(
+        r, com_map_t14, live_map_t14, sales_dates,
+        ads_entries, total_orders, total_spends)
     if ads_entries:
         with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ads_entries)} عرض | offer(s)"):
             st.markdown(
@@ -7293,9 +7296,6 @@ def _t14_sku_part_amz(r):
                     f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%",
                     unsafe_allow_html=True)
                 st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
-    render_price_profit_block_t14(
-        r, com_map_t14, live_map_t14, sales_dates,
-        ads_entries, total_orders, total_spends)
 
 def _t14_trendyol_placeholder():
     """مكان محجوز لتريندول — هيتملى لما نضيف التكامل بعدين | Reserved slot for Trendyol (filled in later)."""
@@ -7308,7 +7308,7 @@ if st.session_state["nav_page"] == "tab14":
     with tab14:
         if _tab_gate("tab14", "🛒 المبيعات | Sales"):
             st.subheader("🛒 المبيعات اليومية | Daily Sales")
-            st.caption("المفتاح الأساسي هو كود التكويد 🏷️ — كل كود له كارت واحد، وتحته كارت لكل متجر جنب بعض: "
+            st.caption("المفتاح الأساسي هو كود التكويد 🏷️ — كل SKU نون له بلوك مرتب بمبيعاته (والكود بيتكرر)، وتحته كارت لكل متجر جنب بعض: "
                        "نون 🟢 | أمازون 🟠 | تريندول 🟣 (قريبًا) | "
                        "Keyed by Tacweed code: one block per code with a card per store side by side — Noon | Amazon | Trendyol (soon)")
             render_tacweed_upload("sales")
@@ -7392,58 +7392,78 @@ if st.session_state["nav_page"] == "tab14":
                 srch_t14 = st.text_input("🔍 بحث بالكود أو SKU أو ASIN | Search code / SKU / ASIN", key="srch_t14",
                                          placeholder="اكتب كود التكويد أو SKU أو ASIN...")
                 q_t14 = srch_t14.strip().upper()
-                groups_t14 = {}
-                for sku_up, chs in sku_rows_t14.items():
-                    code = (tac_map_t14.get(sku_up, "") or "").strip()
-                    if q_t14 and q_t14 not in sku_up and q_t14 not in code.upper():
-                        continue
-                    key = code or f"__SKU__{sku_up}"
-                    g = groups_t14.setdefault(key, {"code": code, "skus": [], "asins": []})
-                    g["skus"].append(sku_up)
-                for asin_up, chs in asin_rows_t14.items():
-                    code = (tac_amz_map_t14.get(asin_up, "") or "").strip()
-                    r0 = chs.get("FSAB") or chs.get("FBA")
-                    msk_txt = " ".join(r0.get("mskus") or [r0["sku_up"]]).upper()
-                    if q_t14 and q_t14 not in asin_up and q_t14 not in msk_txt and q_t14 not in code.upper():
-                        continue
-                    key = code or f"__ASIN__{asin_up}"
-                    g = groups_t14.setdefault(key, {"code": code, "skus": [], "asins": []})
-                    g["asins"].append(asin_up)
 
                 def _yv(chs, ch):
                     rr = chs.get(ch)
                     return rr["day_counts"].get(sales_dates[0], 0) if (rr and sales_dates) else 0
-                def _g_yday(g):
-                    return (sum(_yv(sku_rows_t14[s], "FBN") + _yv(sku_rows_t14[s], "FBB") for s in g["skus"])
-                            + sum(_yv(asin_rows_t14[a], "FSAB") + _yv(asin_rows_t14[a], "FBA") for a in g["asins"]))
-                groups_sorted_t14 = sorted(groups_t14.values(), key=lambda g: -_g_yday(g))
+                def _tv(chs, ch):
+                    rr = chs.get(ch)
+                    return rr["total_recent"] if rr else 0
+                def _sku_sales(s):
+                    c = sku_rows_t14[s]
+                    return (_yv(c, "FBN") + _yv(c, "FBB"), _tv(c, "FBN") + _tv(c, "FBB"))
+
+                # ══ كل بلوك = SKU نون واحد (مرتب بمبيعاته زي كودنا الأصلي) والكود بيتكرر عادي ══
+                # ASINs أمازون بتتعلق بأعلى SKU نون مبيعًا لنفس الكود؛ ولو الكود مالوش SKU نون يبقى بلوك لكل ASIN.
+                noon_by_code = {}
+                for sku_up in sku_rows_t14:
+                    code = (tac_map_t14.get(sku_up, "") or "").strip()
+                    if code:
+                        noon_by_code.setdefault(code, []).append(sku_up)
+                top_sku_of_code = {c: max(l, key=lambda s: _sku_sales(s)) for c, l in noon_by_code.items()}
+                blocks_t14 = []
+                for sku_up in sku_rows_t14:
+                    code = (tac_map_t14.get(sku_up, "") or "").strip()
+                    blocks_t14.append({"code": code, "sku": sku_up, "asins": []})
+                blk_by_sku = {b["sku"]: b for b in blocks_t14}
+                for asin_up in asin_rows_t14:
+                    code = (tac_amz_map_t14.get(asin_up, "") or "").strip()
+                    if code and code in top_sku_of_code:
+                        blk_by_sku[top_sku_of_code[code]]["asins"].append(asin_up)
+                    else:
+                        blocks_t14.append({"code": code, "sku": None, "asins": [asin_up]})
+                for b in blocks_t14:
+                    b["code_has_other_amz"] = bool(b["sku"] and b["code"] and not b["asins"]
+                                                   and any(tac_amz_map_t14.get(a, "") == b["code"] for a in asin_rows_t14))
+                    ys = (_sku_sales(b["sku"]) if b["sku"] else (0, 0))
+                    ya = sum(_yv(asin_rows_t14[a], "FSAB") + _yv(asin_rows_t14[a], "FBA") for a in b["asins"])
+                    ta = sum(_tv(asin_rows_t14[a], "FSAB") + _tv(asin_rows_t14[a], "FBA") for a in b["asins"])
+                    b["sort"] = (-(ys[0] + ya), -(ys[1] + ta))
+                    # نص البحث
+                    keys = [b["code"], b["sku"] or ""] + list(b["asins"])
+                    for a in b["asins"]:
+                        r0 = asin_rows_t14[a].get("FSAB") or asin_rows_t14[a].get("FBA")
+                        keys += list(r0.get("mskus") or [r0["sku_up"]])
+                    b["hay"] = " ".join(str(k).upper() for k in keys)
+                blocks_t14 = [b for b in blocks_t14 if not q_t14 or q_t14 in b["hay"]]
+                blocks_t14.sort(key=lambda b: b["sort"])
 
                 # جدول تحميل
-                if groups_sorted_t14:
+                if blocks_t14:
                     _dl_rows = []
-                    for g in groups_sorted_t14:
-                        for s in g["skus"]:
-                            chs = sku_rows_t14[s]
+                    for b in blocks_t14:
+                        if b["sku"]:
+                            chs = sku_rows_t14[b["sku"]]
                             rn, rb = chs.get("FBN"), chs.get("FBB")
                             base = rn or rb
                             _dl_rows.append({
-                                "المتجر | Store": "Noon", "تكويد | Code": g["code"], "SKU / ASIN": base["sku"],
+                                "المتجر | Store": "Noon", "تكويد | Code": b["code"], "SKU / ASIN": base["sku"],
                                 **{"FBN " + sales_labels[i]: (rn["day_counts"].get(d, 0) if rn else 0) for i, d in enumerate(sales_dates)},
                                 **{"FBB " + sales_labels[i]: (rb["day_counts"].get(d, 0) if rb else 0) for i, d in enumerate(sales_dates)},
                                 "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
-                        for a in g["asins"]:
+                        for a in b["asins"]:
                             chs = asin_rows_t14[a]
                             rs, rf = chs.get("FSAB"), chs.get("FBA")
                             base = rs or rf
                             _dl_rows.append({
-                                "المتجر | Store": "Amazon", "تكويد | Code": g["code"], "SKU / ASIN": f"{a} ({base['sku']})",
+                                "المتجر | Store": "Amazon", "تكويد | Code": b["code"], "SKU / ASIN": f"{a} ({base['sku']})",
                                 **{"FSAB " + sales_labels[i]: (rs["day_counts"].get(d, 0) if rs else 0) for i, d in enumerate(sales_dates)},
                                 **{"FBA " + sales_labels[i]: (rf["day_counts"].get(d, 0) if rf else 0) for i, d in enumerate(sales_dates)},
                                 "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
                     df_t14 = pd.DataFrame(_dl_rows).fillna(0)
                     c1, c2 = st.columns(2)
                     with c1: dl_btn(df_t14, "sales_daily", key="dlbtn_t14")
-                    with c2: st.info(f"🏷️ أكواد: {len(groups_sorted_t14)} | 📦 صفوف: {len(df_t14)} | 📅 {sales_display_days} يوم")
+                    with c2: st.info(f"📦 بلوكات: {len(blocks_t14)} | 📅 {sales_display_days} يوم")
 
                 # ══ قائمة SKUs المرحلة من المبيعات (محتاج جدولة فقط) ══
                 _new_transferred = []
@@ -7457,34 +7477,28 @@ if st.session_state["nav_page"] == "tab14":
                 live_map_t14 = get_live_map()
                 xdock_threshold_t14 = int(load_settings().get("xdock_low_stock_threshold","10") or 10)
 
-                render_china_sales_status([s for g in groups_sorted_t14 for s in (g["skus"] + g["asins"])])  # 🚢 حالة ربط بيانات الصين
+                render_china_sales_status([k for b in blocks_t14 for k in ([b["sku"]] if b["sku"] else []) + b["asins"]])  # 🚢 حالة ربط بيانات الصين
                 st.divider()
-                y0 = sales_dates[0] if sales_dates else None
                 wh_lookup_t14 = _china_wh_lookup()
-                for g in groups_sorted_t14:
-                    noon_chs = [sku_rows_t14[s] for s in g["skus"]]
-                    amz_chs = [asin_rows_t14[a] for a in g["asins"]]
-                    first_key = g["skus"][0] if g["skus"] else g["asins"][0]
-                    first_row = (((noon_chs[0].get("FBN") or noon_chs[0].get("FBB")) if noon_chs else None)
-                                 or (amz_chs[0].get("FSAB") or amz_chs[0].get("FBA")))
-                    # الصور على أساس الـ SKU: صورة SKU نون الأول، وبعدين صورة أمازون (اللي بدورها SKU/MSKU ثم ASIN)
-                    img_t14 = (next((c.get(k).get("img") for c in noon_chs for k in ("FBN", "FBB") if c.get(k) and c.get(k).get("img")), "")
+                for b in blocks_t14:
+                    noon_chs = sku_rows_t14.get(b["sku"]) if b["sku"] else None
+                    amz_chs = [asin_rows_t14[a] for a in b["asins"]]
+                    first_key = b["sku"] or b["asins"][0]
+                    first_row = ((noon_chs.get("FBN") or noon_chs.get("FBB")) if noon_chs
+                                 else (amz_chs[0].get("FSAB") or amz_chs[0].get("FBA")))
+                    # الصور على أساس الـ SKU: صورة SKU نون، وبعدين صورة أمازون (MSKU ثم ASIN)
+                    img_t14 = ((first_row.get("img") if noon_chs else "")
                                or next((c.get(k).get("img") for c in amz_chs for k in ("FSAB", "FBA") if c.get(k) and c.get(k).get("img")), ""))
-                    y_n = sum(_yv(c, "FBN") for c in noon_chs); y_b = sum(_yv(c, "FBB") for c in noon_chs)
+                    y_n = _yv(noon_chs, "FBN") if noon_chs else 0; y_b = _yv(noon_chs, "FBB") if noon_chs else 0
+                    t_n = _tv(noon_chs, "FBN") if noon_chs else 0; t_b = _tv(noon_chs, "FBB") if noon_chs else 0
                     y_a = sum(_yv(c, "FSAB") for c in amz_chs); y_f = sum(_yv(c, "FBA") for c in amz_chs)
-                    t_n = sum(c["FBN"]["total_recent"] for c in noon_chs if "FBN" in c)
-                    t_b = sum(c["FBB"]["total_recent"] for c in noon_chs if "FBB" in c)
-                    t_a = sum(c["FSAB"]["total_recent"] for c in amz_chs if "FSAB" in c)
-                    t_f = sum(c["FBA"]["total_recent"] for c in amz_chs if "FBA" in c)
+                    t_a = sum(_tv(c, "FSAB") for c in amz_chs); t_f = sum(_tv(c, "FBA") for c in amz_chs)
                     c_img, c_info = st.columns([1, 7])
                     with c_img:
                         show_img(img_t14, 70)
                     with c_info:
                         # ── مستوى الكود: شارات الكود/المستودع/التكلفة/النفاد (محسوبة من سحب نون + أمازون) ──
-                        if g["skus"]:
-                            tc_badge_t14 = warehouse_available_badge(first_key)
-                        else:
-                            tc_badge_t14 = warehouse_available_badge_amazon(first_key)
+                        tc_badge_t14 = warehouse_available_badge(first_key) if b["sku"] else warehouse_available_badge_amazon(first_key)
                         if tc_badge_t14:
                             st.markdown(tc_badge_t14, unsafe_allow_html=True)
                         else:
@@ -7492,27 +7506,29 @@ if st.session_state["nav_page"] == "tab14":
                                         unsafe_allow_html=True)
                         wh_g = wh_lookup_t14.get(first_key)
                         if wh_g and wh_g.get("daily_draw") is not None:
-                            st.caption(f"🧮 سحب المستودع اليومي (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} "
+                            st.caption(f"🧮 سحب المستودع اليومي للكود (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} "
                                        f"= {wh_g['daily_draw']:g} قطعة/يوم — شارة النفاد وموعد الطلب محسوبين على المجموع")
+                        _parts = []
+                        if b["sku"]:
+                            _parts.append(f'🟢 نون — 🅽 FBN <b>{y_n}</b> (إجمالي {sales_display_days} أيام {t_n}) · 🅱 FBB <b>{y_b}</b> ({t_b})')
+                        if b["asins"]:
+                            _parts.append(f'🟠 أمازون — FSAB <b>{y_a}</b> ({t_a}) · FBA <b>{y_f}</b> ({t_f})')
                         st.markdown(
-                            f'<div style="margin:4px 0;font-size:14px;font-weight:700;color:#e2e8f0;">'
-                            f'🛒 اتباع منه أمس: 🟢 نون — 🅽 FBN <b>{y_n}</b> (إجمالي {sales_display_days} أيام {t_n}) · 🅱 FBB <b>{y_b}</b> ({t_b}) '
-                            f'&nbsp;|&nbsp; 🟠 أمازون — FSAB <b>{y_a}</b> ({t_a}) · FBA <b>{y_f}</b> ({t_f})</div>',
+                            f'<div style="margin:4px 0;font-size:14px;font-weight:700;color:#e2e8f0;">🛒 اتباع منه أمس: '
+                            + " &nbsp;|&nbsp; ".join(_parts) + '</div>',
                             unsafe_allow_html=True)
                         render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالتكويد)
 
                     # ══ كروت المتاجر جنب بعض: نون | أمازون | تريندول (مكان محجوز) ══
-                    col_noon, col_amz, col_tr = st.columns(3)
+                    col_noon, col_amz, col_tr = st.columns([5, 5, 3])
                     with col_noon:
                         with st.container(border=True):
                             st.markdown('<span class="wh-badge" style="background:#064e3b;color:#6ee7b7;">🟢 نون | Noon</span>',
                                         unsafe_allow_html=True)
-                            if not g["skus"]:
+                            if not noon_chs:
                                 st.caption("— مفيش منتج على نون مربوط بالكود ده | no Noon product linked to this code")
-                            for si, s in enumerate(g["skus"]):
-                                chs = sku_rows_t14[s]
-                                if si > 0:
-                                    st.markdown("<hr style='margin:8px 0;border-color:#334155;'>", unsafe_allow_html=True)
+                            else:
+                                chs = noon_chs
                                 r_any = chs.get("FBN") or chs.get("FBB")
                                 # الأسعار المجمّعة من القناتين عشان بلوك السعر يلاقي آخر سعر بيع مهما كانت القناة
                                 r_sku = dict(r_any, day_prices={d: list(chs["FBN"]["day_prices"].get(d, [])) if "FBN" in chs else []
@@ -7529,9 +7545,12 @@ if st.session_state["nav_page"] == "tab14":
                         with st.container(border=True):
                             st.markdown('<span class="wh-badge" style="background:#7c2d12;color:#fed7aa;">🟠 أمازون | Amazon</span>',
                                         unsafe_allow_html=True)
-                            if not g["asins"]:
-                                st.caption("— مفيش منتج على أمازون مربوط بالكود ده (تأكد من تاب TacweedAmazon) | no Amazon product linked to this code")
-                            for ai, a in enumerate(g["asins"]):
+                            if not b["asins"]:
+                                if b.get("code_has_other_amz"):
+                                    st.caption("🟠 منتجات أمازون لنفس الكود ظاهرة مع SKU نون الأعلى مبيعًا لهذا الكود | shown with the top-selling Noon SKU of this code")
+                                else:
+                                    st.caption("— مفيش منتج على أمازون مربوط بالكود ده (تأكد من تاب TacweedAmazon) | no Amazon product linked to this code")
+                            for ai, a in enumerate(b["asins"]):
                                 chs = asin_rows_t14[a]
                                 if ai > 0:
                                     st.markdown("<hr style='margin:8px 0;border-color:#334155;'>", unsafe_allow_html=True)
