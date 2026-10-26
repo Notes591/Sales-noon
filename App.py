@@ -7044,208 +7044,212 @@ def _t14_sku_part(r):
                     unsafe_allow_html=True)
                 st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
 
-def _t14_channel_part(r, ch, with_sku_level):
+def _t14_channel_part(r, ch, with_sku_level, part="all"):
     """مبيعات قناة واحدة (FBN أو FBB) للـ SKU: أمس، الأيام، المخزون، حالة التغطية، الجدولة.
     with_sku_level=True بيعرض كمان الجدولة الحديثة/الموافقة المعلقة/الملاحظات (اللي هي على مستوى الـ SKU)
     مرة واحدة بس."""
     _chip = {"FBN": ("#064e3b", "#6ee7b7", "🅽 مبيعات نون FBN"), "FBB": ("#1e3a8a", "#bfdbfe", "🅱 مبيعات نون FBB"),
              "FSAB": ("#7c2d12", "#fed7aa", "🅰 مبيعات أمازون عادي FSAB"), "FBA": ("#78350f", "#fde68a", "📦 مبيعات أمازون FBA")}[ch]
-    st.markdown(f'<span class="wh-badge" style="background:{_chip[0]};color:{_chip[1]};">{_chip[2]}</span>', unsafe_allow_html=True)
-    # ══ أمس بارز ══
-    yesterday_t14 = sales_dates[0] if sales_dates else None
-    yesterday_cnt = r["day_counts"].get(yesterday_t14, 0) if yesterday_t14 else 0
-    yesterday_prices = r["day_prices"].get(yesterday_t14, []) if yesterday_t14 else []
+    if part in ("all", "sales"):
+        st.markdown(f'<span class="wh-badge" style="background:{_chip[0]};color:{_chip[1]};">{_chip[2]}</span>', unsafe_allow_html=True)
+        # ══ أمس بارز ══
+        yesterday_t14 = sales_dates[0] if sales_dates else None
+        yesterday_cnt = r["day_counts"].get(yesterday_t14, 0) if yesterday_t14 else 0
+        yesterday_prices = r["day_prices"].get(yesterday_t14, []) if yesterday_t14 else []
 
-    def fmt_prices(prices_list):
-        """يجمع الأسعار ويرتبها من الأعلى للأقل، ويتجاهل الفاضي.
-        prices_list: قائمة من (price_str, qty) أو strings."""
-        pc = {}  # price_str -> (total_qty, float_val)
-        for item in prices_list:
-            if isinstance(item, tuple):
-                p, qty = item
-            else:
-                p, qty = item, 1
-            if not p or str(p).strip().lower() in ("","nan","none"):
-                # لو مفيش سعر، نعد الكمية بس بدون سعر
-                pc["__no_price__"] = (pc.get("__no_price__",(0,0))[0] + qty, -1)
-                continue
-            p_str = str(p).strip()
-            try:
-                key = float(p_str.replace(",",""))
-            except Exception:
-                key = 0.0
-            prev_qty, _ = pc.get(p_str, (0, key))
-            pc[p_str] = (prev_qty + qty, key)
-        if not pc:
-            return ""
-        # ترتيب من السعر الأعلى للأقل
-        sorted_prices = sorted(pc.items(), key=lambda x: -x[1][1])
-        parts = []
-        for price_str, (total_qty, _) in sorted_prices:
-            if price_str == "__no_price__":
-                parts.append(f"{total_qty}")
-            else:
-                parts.append(f"{total_qty} × {price_str}")
-        return " | ".join(parts)
-
-    def get_min_max_price(prices_list):
-        """يرجع (أقل سعر, أعلى سعر) كـ float من قائمة (price_str, qty)."""
-        vals = []
-        for item in prices_list:
-            p = item[0] if isinstance(item, tuple) else item
-            if p and str(p).strip().lower() not in ("","nan","none"):
+        def fmt_prices(prices_list):
+            """يجمع الأسعار ويرتبها من الأعلى للأقل، ويتجاهل الفاضي.
+            prices_list: قائمة من (price_str, qty) أو strings."""
+            pc = {}  # price_str -> (total_qty, float_val)
+            for item in prices_list:
+                if isinstance(item, tuple):
+                    p, qty = item
+                else:
+                    p, qty = item, 1
+                if not p or str(p).strip().lower() in ("","nan","none"):
+                    # لو مفيش سعر، نعد الكمية بس بدون سعر
+                    pc["__no_price__"] = (pc.get("__no_price__",(0,0))[0] + qty, -1)
+                    continue
+                p_str = str(p).strip()
                 try:
-                    vals.append(float(str(p).replace(",","")))
+                    key = float(p_str.replace(",",""))
                 except Exception:
-                    pass
-        if not vals:
-            return None, None
-        return min(vals), max(vals)
+                    key = 0.0
+                prev_qty, _ = pc.get(p_str, (0, key))
+                pc[p_str] = (prev_qty + qty, key)
+            if not pc:
+                return ""
+            # ترتيب من السعر الأعلى للأقل
+            sorted_prices = sorted(pc.items(), key=lambda x: -x[1][1])
+            parts = []
+            for price_str, (total_qty, _) in sorted_prices:
+                if price_str == "__no_price__":
+                    parts.append(f"{total_qty}")
+                else:
+                    parts.append(f"{total_qty} × {price_str}")
+            return " | ".join(parts)
 
-    if yesterday_t14:
-        if yesterday_cnt > 0:
-            prices_str_y = fmt_prices(yesterday_prices)
-            min_p_y, max_p_y = get_min_max_price(yesterday_prices)
-            price_lines_y = prices_str_y.split(" | ") if prices_str_y else []
-            price_html_y = ""
-            if price_lines_y:
-                price_html_y = "<br>" + "<br>".join(
-                    f'<span style="color:#bbf7d0;font-size:14px;font-weight:bold;">↳ {line}</span>'
-                    for line in price_lines_y
+        def get_min_max_price(prices_list):
+            """يرجع (أقل سعر, أعلى سعر) كـ float من قائمة (price_str, qty)."""
+            vals = []
+            for item in prices_list:
+                p = item[0] if isinstance(item, tuple) else item
+                if p and str(p).strip().lower() not in ("","nan","none"):
+                    try:
+                        vals.append(float(str(p).replace(",","")))
+                    except Exception:
+                        pass
+            if not vals:
+                return None, None
+            return min(vals), max(vals)
+
+        if yesterday_t14:
+            if yesterday_cnt > 0:
+                prices_str_y = fmt_prices(yesterday_prices)
+                min_p_y, max_p_y = get_min_max_price(yesterday_prices)
+                price_lines_y = prices_str_y.split(" | ") if prices_str_y else []
+                price_html_y = ""
+                if price_lines_y:
+                    price_html_y = "<br>" + "<br>".join(
+                        f'<span style="color:#bbf7d0;font-size:14px;font-weight:bold;">↳ {line}</span>'
+                        for line in price_lines_y
+                    )
+                minmax_html_y = ""
+                if min_p_y is not None and max_p_y is not None and min_p_y != max_p_y:
+                    minmax_html_y = (
+                        f'<br><span style="color:#fbbf24;font-size:14px;font-weight:bold;">📉 أقل: {min_p_y:g} &nbsp;|&nbsp; 📈 أعلى: {max_p_y:g}</span>'
+                    )
+                elif min_p_y is not None:
+                    minmax_html_y = f'<br><span style="color:#fbbf24;font-size:14px;font-weight:bold;">💰 سعر: {min_p_y:g}</span>'
+                yesterday_html = (
+                    f'<div style="background:#14532d;border:2px solid #22c55e;border-radius:8px;padding:8px 14px;margin:4px 0;display:inline-block;">' +
+                    f'<span style="color:#86efac;font-size:15px;font-weight:bold;">🟢 أمس: {yesterday_cnt}</span>' +
+                    minmax_html_y +
+                    price_html_y +
+                    '</div>'
                 )
-            minmax_html_y = ""
-            if min_p_y is not None and max_p_y is not None and min_p_y != max_p_y:
-                minmax_html_y = (
-                    f'<br><span style="color:#fbbf24;font-size:14px;font-weight:bold;">📉 أقل: {min_p_y:g} &nbsp;|&nbsp; 📈 أعلى: {max_p_y:g}</span>'
+            else:
+                yesterday_html = (
+                    '<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:8px;padding:8px 14px;margin:4px 0;display:inline-block;">' +
+                    '<span style="color:#fca5a5;font-size:15px;font-weight:bold;">🔴 أمس: 0</span>' +
+                    '</div>'
                 )
-            elif min_p_y is not None:
-                minmax_html_y = f'<br><span style="color:#fbbf24;font-size:14px;font-weight:bold;">💰 سعر: {min_p_y:g}</span>'
-            yesterday_html = (
-                f'<div style="background:#14532d;border:2px solid #22c55e;border-radius:8px;padding:8px 14px;margin:4px 0;display:inline-block;">' +
-                f'<span style="color:#86efac;font-size:15px;font-weight:bold;">🟢 أمس: {yesterday_cnt}</span>' +
-                minmax_html_y +
-                price_html_y +
-                '</div>'
-            )
-        else:
-            yesterday_html = (
-                '<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:8px;padding:8px 14px;margin:4px 0;display:inline-block;">' +
-                '<span style="color:#fca5a5;font-size:15px;font-weight:bold;">🔴 أمس: 0</span>' +
-                '</div>'
-            )
-        st.markdown(yesterday_html, unsafe_allow_html=True)
+            st.markdown(yesterday_html, unsafe_allow_html=True)
 
-    # باقي الأيام — كل يوم في سطر مع الأسعار تنازلياً + أعلى/أقل
-    day_parts = []
-    for i, d in enumerate(sales_dates):
-        if i == 0:
-            continue  # أمس اتعرض فوق
-        cnt = r["day_counts"].get(d, 0)
-        day_prices_list = r["day_prices"].get(d, [])
-        color = "#000000" if cnt > 0 else "#475569"
-        lbl_short = sales_labels[i].split("(")[0].strip()
-        prices_str_d = fmt_prices(day_prices_list)
-        min_p_d, max_p_d = get_min_max_price(day_prices_list)
-        minmax_d = ""
-        if min_p_d is not None and max_p_d is not None and min_p_d != max_p_d:
-            minmax_d = f' <span style="color:#b45309;font-size:13px;font-weight:bold;">(📉{min_p_d:g}–📈{max_p_d:g})</span>'
-        elif min_p_d is not None:
-            minmax_d = f' <span style="color:#b45309;font-size:13px;font-weight:bold;">({min_p_d:g})</span>'
-        if prices_str_d:
-            price_lines_d = prices_str_d.split(" | ")
-            price_detail = " &nbsp; ".join(
-                f'<span style="color:#1d4ed8;font-size:13px;font-weight:bold;">↳ {line}</span>'
-                for line in price_lines_d
-            )
-            day_parts.append(
-                f'<span style="color:{color};font-size:15px;font-weight:bold;">{lbl_short}: <b>{cnt}</b>{minmax_d}</span>' +
-                f'<br><span style="padding-right:8px;">{price_detail}</span>'
-            )
-        else:
-            day_parts.append(f'<span style="color:{color};font-size:11px;">{lbl_short}: <b>{cnt}</b>{minmax_d}</span>')
-    if day_parts:
-        st.markdown("<br>".join(day_parts), unsafe_allow_html=True)
+        # باقي الأيام — كل يوم في سطر مع الأسعار تنازلياً + أعلى/أقل
+        day_parts = []
+        for i, d in enumerate(sales_dates):
+            if i == 0:
+                continue  # أمس اتعرض فوق
+            cnt = r["day_counts"].get(d, 0)
+            day_prices_list = r["day_prices"].get(d, [])
+            color = "#000000" if cnt > 0 else "#475569"
+            lbl_short = sales_labels[i].split("(")[0].strip()
+            prices_str_d = fmt_prices(day_prices_list)
+            min_p_d, max_p_d = get_min_max_price(day_prices_list)
+            minmax_d = ""
+            if min_p_d is not None and max_p_d is not None and min_p_d != max_p_d:
+                minmax_d = f' <span style="color:#b45309;font-size:13px;font-weight:bold;">(📉{min_p_d:g}–📈{max_p_d:g})</span>'
+            elif min_p_d is not None:
+                minmax_d = f' <span style="color:#b45309;font-size:13px;font-weight:bold;">({min_p_d:g})</span>'
+            if prices_str_d:
+                price_lines_d = prices_str_d.split(" | ")
+                price_detail = " &nbsp; ".join(
+                    f'<span style="color:#1d4ed8;font-size:13px;font-weight:bold;">↳ {line}</span>'
+                    for line in price_lines_d
+                )
+                day_parts.append(
+                    f'<span style="color:{color};font-size:15px;font-weight:bold;">{lbl_short}: <b>{cnt}</b>{minmax_d}</span>' +
+                    f'<br><span style="padding-right:8px;">{price_detail}</span>'
+                )
+            else:
+                day_parts.append(f'<span style="color:{color};font-size:11px;">{lbl_short}: <b>{cnt}</b>{minmax_d}</span>')
+        if day_parts:
+            st.markdown("<br>".join(day_parts), unsafe_allow_html=True)
 
-    # مخزون + مبيع شهري
-    st.markdown(
-        f"📦 **مخزون:** {r['stock']} &nbsp;|&nbsp; "
-        f"📈 **شهري:** {r['sales_month']} &nbsp;|&nbsp; "
-        f"📊 **يومي أخير:** {r['effective_avg']:.1f} &nbsp;|&nbsp; "
-        f"⏳ **نفاد خلال:** {r['days_to_stockout'] if r['days_to_stockout'] < 9999 else '—'} يوم"
-    )
-
-    # ══ حالة التغطية ══
-    badge_text_t14, badge_color_t14, sched_t14 = schedule_coverage_badge(r["sku"], r["days_to_stockout"], delay_days_t14)
-    # لو مفيش أي متوسط بيع (لا حديث ولا شهري) يبقى المخزون مش بينزل خالص —
-    # فمينفعش نعتبره "غير كافٍ" لمجرد إن مفيش بيانات بيع (كان ده الخلل قبل كده)
-    stock_self_ok = (r["effective_avg"] <= 0) or (r["days_to_stockout"] >= coverage_days_t14)
-    un_notes = get_unavailable_ordered_note(r["sku"])
-    # ══ مجدولة خلال آخر 4 أيام؟ (بنحسبها الأول عشان نستخدمها في قرار عرض شارة التغطية والترحيل) ══
-    recent_sched_t14 = recent_sched_map_t14.get(r["sku_up"])
-
-    if stock_self_ok and not sched_t14:
-        if r["effective_avg"] <= 0:
-            cov_badge_text = "✅ لا توجد مبيعات حالياً — لا يحتاج جدولة | No sales recorded — no scheduling needed"
-        else:
-            cov_badge_text = f"✅ مخزون كافٍ ({r['days_to_stockout']} يوم) — لا يحتاج جدولة الآن | Stock sufficient"
-        cov_badge_color = "#15803d"
-    elif stock_self_ok and sched_t14:
-        sched_src_t14 = "تشييك" if sched_t14.get("source") == "Check" else "مجدول"
-        arrival_t14 = (sched_t14["parsed"] + timedelta(days=delay_days_t14)).date() if sched_t14.get("parsed") else None
-        stockout_disp_t14 = f"{r['days_to_stockout']} يوم" if r["effective_avg"] > 0 else "لا توجد مبيعات"
-        cov_badge_text  = (f"✅ مخزون كافٍ ({stockout_disp_t14}) + ASN {sched_t14['asn']} بتاريخ {sched_t14['date']}"
-                           + (f" — وصول: {arrival_t14}" if arrival_t14 else "") + f" [{sched_src_t14}]")
-        cov_badge_color = "#15803d"
-    else:
-        cov_badge_text  = badge_text_t14
-        cov_badge_color = badge_color_t14
-
-    # لو السكو فعلاً ليه جدولة خلال آخر 4 أيام، منعرضش شارة "محتاج جدولة الآن"
-    # المتناقضة جنب شارة الجدولة الحديثة (البنفسجي) اللي هتتعرض تحت — عشان محدش يتلخبط
-    show_normal_cov_badge_t14 = not (recent_sched_t14 and "محتاج جدولة" in cov_badge_text)
-    if show_normal_cov_badge_t14:
+    if part in ("all", "stock"):
+        # مخزون + مبيع شهري
         st.markdown(
-            f'<span class="status-badge-lg" style="background:{cov_badge_color};">{cov_badge_text}</span>',
-            unsafe_allow_html=True)
+            f"📦 **مخزون:** {r['stock']} &nbsp;|&nbsp; "
+            f"📈 **شهري:** {r['sales_month']} &nbsp;|&nbsp; "
+            f"📊 **يومي أخير:** {r['effective_avg']:.1f} &nbsp;|&nbsp; "
+            f"⏳ **نفاد خلال:** {r['days_to_stockout'] if r['days_to_stockout'] < 9999 else '—'} يوم"
+        )
 
-    # ══ مجدولة خلال آخر 4 أيام؟ (لو فعلاً ليها جدولة) — تعرض ASN + الكمية + التاريخ ══
-    if recent_sched_t14 and with_sku_level:
-        st.markdown(
-            f'<span class="status-badge-lg" style="background:#7c3aed;">'
-            f'📅 مجدولة خلال آخر 4 أيام | Scheduled in last 4 days — '
-            f'ASN <b>{recent_sched_t14["asn"]}</b> &nbsp;|&nbsp; '
-            f'الكمية | Qty: <b>{recent_sched_t14.get("qty","")}</b> &nbsp;|&nbsp; '
-            f'بتاريخ {recent_sched_t14["date"]} [{recent_sched_t14["source_label"]}]'
-            f'</span>',
-            unsafe_allow_html=True)
+    if part in ("all", "cov"):
+        # ══ حالة التغطية ══
+        badge_text_t14, badge_color_t14, sched_t14 = schedule_coverage_badge(r["sku"], r["days_to_stockout"], delay_days_t14)
+        # لو مفيش أي متوسط بيع (لا حديث ولا شهري) يبقى المخزون مش بينزل خالص —
+        # فمينفعش نعتبره "غير كافٍ" لمجرد إن مفيش بيانات بيع (كان ده الخلل قبل كده)
+        stock_self_ok = (r["effective_avg"] <= 0) or (r["days_to_stockout"] >= coverage_days_t14)
+        un_notes = get_unavailable_ordered_note(r["sku"])
+        # ══ مجدولة خلال آخر 4 أيام؟ (بنحسبها الأول عشان نستخدمها في قرار عرض شارة التغطية والترحيل) ══
+        recent_sched_t14 = recent_sched_map_t14.get(r["sku_up"])
 
-    if with_sku_level and r["sku_up"] in pending_approval_skus_t14:
-        st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
+        if stock_self_ok and not sched_t14:
+            if r["effective_avg"] <= 0:
+                cov_badge_text = "✅ لا توجد مبيعات حالياً — لا يحتاج جدولة | No sales recorded — no scheduling needed"
+            else:
+                cov_badge_text = f"✅ مخزون كافٍ ({r['days_to_stockout']} يوم) — لا يحتاج جدولة الآن | Stock sufficient"
+            cov_badge_color = "#15803d"
+        elif stock_self_ok and sched_t14:
+            sched_src_t14 = "تشييك" if sched_t14.get("source") == "Check" else "مجدول"
+            arrival_t14 = (sched_t14["parsed"] + timedelta(days=delay_days_t14)).date() if sched_t14.get("parsed") else None
+            stockout_disp_t14 = f"{r['days_to_stockout']} يوم" if r["effective_avg"] > 0 else "لا توجد مبيعات"
+            cov_badge_text  = (f"✅ مخزون كافٍ ({stockout_disp_t14}) + ASN {sched_t14['asn']} بتاريخ {sched_t14['date']}"
+                               + (f" — وصول: {arrival_t14}" if arrival_t14 else "") + f" [{sched_src_t14}]")
+            cov_badge_color = "#15803d"
+        else:
+            cov_badge_text  = badge_text_t14
+            cov_badge_color = badge_color_t14
 
-    # ══ ترحيل لتاب مخزون بدون بيع إذا كانت الحالة "محتاج جدولة" فقط بدون أي جدولة
-    #    وبدون تفاصيل أخرى وبدون جدولة حديثة (آخر 4 أيام) — لو ليه جدولة حديثة
-    #    (حتى لو منتهية) يبقى أموره تمام ومينفعش يترحّل لمراجعة المخزون ══
-    is_needs_sched_only = (
-        not stock_self_ok
-        and badge_text_t14 and "محتاج جدولة" in badge_text_t14
-        and not sched_t14
-        and not un_notes
-        and not recent_sched_t14
-    )
-    if is_needs_sched_only and ch in ("FBN", "FBB"):
-        _new_transferred.append({
-            "sku": r["sku"], "sku_up": r["sku_up"], "stock": r["stock"],
-            "sales_month": r["sales_month"], "img": r["img"],
-            "effective_avg": r["effective_avg"], "days_to_stockout": r["days_to_stockout"],
-            "day_counts": r["day_counts"],
-        })
-        st.caption("📌 مرحّل لتاب مراجعة المخزون | Transferred to Stock Review tab")
+        # لو السكو فعلاً ليه جدولة خلال آخر 4 أيام، منعرضش شارة "محتاج جدولة الآن"
+        # المتناقضة جنب شارة الجدولة الحديثة (البنفسجي) اللي هتتعرض تحت — عشان محدش يتلخبط
+        show_normal_cov_badge_t14 = not (recent_sched_t14 and "محتاج جدولة" in cov_badge_text)
+        if show_normal_cov_badge_t14:
+            st.markdown(
+                f'<span class="status-badge-lg" style="background:{cov_badge_color};">{cov_badge_text}</span>',
+                unsafe_allow_html=True)
 
-    if with_sku_level and un_notes:
-        for note in un_notes:
-            st.markdown(big_note_html(note), unsafe_allow_html=True)
-    if with_sku_level:
-        render_recent_expired_note(r["sku"])
+        # ══ مجدولة خلال آخر 4 أيام؟ (لو فعلاً ليها جدولة) — تعرض ASN + الكمية + التاريخ ══
+        if recent_sched_t14 and with_sku_level:
+            st.markdown(
+                f'<span class="status-badge-lg" style="background:#7c3aed;">'
+                f'📅 مجدولة خلال آخر 4 أيام | Scheduled in last 4 days — '
+                f'ASN <b>{recent_sched_t14["asn"]}</b> &nbsp;|&nbsp; '
+                f'الكمية | Qty: <b>{recent_sched_t14.get("qty","")}</b> &nbsp;|&nbsp; '
+                f'بتاريخ {recent_sched_t14["date"]} [{recent_sched_t14["source_label"]}]'
+                f'</span>',
+                unsafe_allow_html=True)
+
+        if with_sku_level and r["sku_up"] in pending_approval_skus_t14:
+            st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
+
+        # ══ ترحيل لتاب مخزون بدون بيع إذا كانت الحالة "محتاج جدولة" فقط بدون أي جدولة
+        #    وبدون تفاصيل أخرى وبدون جدولة حديثة (آخر 4 أيام) — لو ليه جدولة حديثة
+        #    (حتى لو منتهية) يبقى أموره تمام ومينفعش يترحّل لمراجعة المخزون ══
+        is_needs_sched_only = (
+            not stock_self_ok
+            and badge_text_t14 and "محتاج جدولة" in badge_text_t14
+            and not sched_t14
+            and not un_notes
+            and not recent_sched_t14
+        )
+        if is_needs_sched_only and ch in ("FBN", "FBB"):
+            _new_transferred.append({
+                "sku": r["sku"], "sku_up": r["sku_up"], "stock": r["stock"],
+                "sales_month": r["sales_month"], "img": r["img"],
+                "effective_avg": r["effective_avg"], "days_to_stockout": r["days_to_stockout"],
+                "day_counts": r["day_counts"],
+            })
+            st.caption("📌 مرحّل لتاب مراجعة المخزون | Transferred to Stock Review tab")
+
+        if with_sku_level and un_notes:
+            for note in un_notes:
+                st.markdown(big_note_html(note), unsafe_allow_html=True)
+        if with_sku_level:
+            render_recent_expired_note(r["sku"])
+
 
 # ══ أمازون داخل تاب المبيعات الموحد — صفوف ASIN بقناتين: عادي (FSAB) و FBA ══
 # Amazon inside the unified Sales tab — ASIN rows with two channels: normal (FSAB) and FBA.
@@ -7612,22 +7616,24 @@ if st.session_state["nav_page"] == "tab14":
                                 if r_sku: _t14_noon_part(r_sku, _pt)
                             with ca:
                                 if r_asin: _t14_amz_part(r_asin, _pt)
-                        # صف 4: القناة الأولى (FBN | FSAB) — صف 5: القناة التانية (FBB | FBA)
-                        cn, ca, ct = st.columns([5, 5, 3])
-                        with cn:
-                            if noon_chs and "FBN" in noon_chs:
-                                _t14_channel_part(noon_chs["FBN"], "FBN", True)
-                        with ca:
-                            if amz_chs and "FSAB" in amz_chs:
-                                _t14_channel_part(amz_chs["FSAB"], "FSAB", True)
-                        if (noon_chs and "FBB" in noon_chs) or (amz_chs and "FBA" in amz_chs):
-                            cn, ca, ct = st.columns([5, 5, 3])
-                            with cn:
-                                if noon_chs and "FBB" in noon_chs:
-                                    _t14_channel_part(noon_chs["FBB"], "FBB", "FBN" not in noon_chs)
-                            with ca:
-                                if amz_chs and "FBA" in amz_chs:
-                                    _t14_channel_part(amz_chs["FBA"], "FBA", "FSAB" not in amz_chs)
+                        # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
+                        # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
+                        _shown_a = {}
+                        for _ach in ("FSAB", "FBA"):
+                            _shown_a[_ach] = bool(amz_chs and _ach in amz_chs and (q_t14 or _yv(amz_chs, _ach) > 0))
+                        for _nch, _ach in (("FBN", "FSAB"), ("FBB", "FBA")):
+                            _sn = bool(noon_chs and _nch in noon_chs)
+                            _sa = _shown_a[_ach]
+                            if not (_sn or _sa):
+                                continue
+                            _lvl_n = True if _nch == "FBN" else (not noon_chs or "FBN" not in noon_chs)
+                            _lvl_a = True if _ach == "FSAB" else (not _shown_a["FSAB"])
+                            for _pt in ("sales", "stock", "cov"):
+                                cn, ca, ct = st.columns([5, 5, 3])
+                                with cn:
+                                    if _sn: _t14_channel_part(noon_chs[_nch], _nch, _lvl_n, part=_pt)
+                                with ca:
+                                    if _sa: _t14_channel_part(amz_chs[_ach], _ach, _lvl_a, part=_pt)
                     st.divider()
                 # حفظ المرحلين في session_state بعد اكتمال العرض
                 st.session_state["transferred_skus_t14"] = _new_transferred
