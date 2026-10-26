@@ -70,6 +70,14 @@ TABS_CONFIG = {
     "Check":             ["ASN","SKU","Quantity","Schedule Date","Image URL","Date Added","Notes","Flag"],
     "CancelNotifications": ["ASN","SKUs","Schedule Date","Reason","Timestamp"],
     "Tacweed":           ["SKU","Code01","Cost","Date Uploaded"],
+    # تاب تكويد أمازون — نفس فكرة Tacweed بالظبط لكن المفتاح ASIN (هوية منتج
+    # أمازون الحقيقية) بدل SKU، عشان منتجات أمازون (FBA أو العادية) اللي
+    # مالهاش نفس الـ SKU المستخدم في نون تقدر برضه تتربط بكود01 وتكلفة، وتشارك
+    # نفس كمية WarehouseStock | Amazon mapping tab — same idea as Tacweed but
+    # keyed by ASIN (Amazon's real product identity) instead of SKU, so Amazon
+    # products (FBA or normal) that don't share Noon's SKU can still be linked
+    # to a Code01 + cost and share the same WarehouseStock quantity.
+    "TacweedAmazon":     ["ASIN","Code01","Cost","Date Uploaded"],
     "WarehouseStock":    ["Code","Quantity","Item Name","Date Uploaded"],
     # تاب "قيد الموافقة" بيتكتب فيه من برنامج الجدولة المكتبي (schedule_entry_app) لما تتحدد
     # علامة Approval — نفس أعمدة تاب Scheduled الجديدة. هنا بنقراه بس (حسب اسم العمود مش
@@ -79,6 +87,29 @@ TABS_CONFIG = {
     # تاب الإعلانات — بيتحدّث يدوي من جوجل شيت، وبنعرض أداء كل SKU منه في تاب المبيعات
     "Advertisements":    ["Campaign Name","Sku","Views","Clicks","Orders","ATC","Spends","Revenue",
                            "CTR","ROAS","CPC","CPS","CVR"],
+    # تاب إعلانات أمازون — بيتحدّث يدوي من تصدير أمازون مباشرة (Sponsored Products
+    # export)، فشكله مختلف تماماً عن تاب الإعلانات بتاع نون: مفيش عمود "Campaign
+    # Name" ولا عمود ASIN مستقل — أول عمود ("المنتجات") ده كود المنتج/العرض
+    # (زي B0C62FXJZF-E5-LJNS-ZTDG)، والـ ASIN الحقيقي هو أول 10 حروف/أرقام منه
+    # بس (شوف get_ads_map_amazon تحت). الهيدرز هنا لازم تفضل مطابقة تماماً لهيدر
+    # الشيت الحقيقي، لأن get_or_create_worksheet بيضيف أي عمود من الليستة دي مش
+    # موجود فعلياً في أول صف بالشيت — لو الليستة غلط بتضيف أعمدة زيادة كل جلسة
+    # وده كان سبب رئيسي للبطء | Amazon ads sheet — updated manually straight from
+    # an Amazon Sponsored Products export, so its shape is completely different
+    # from Noon's Advertisements tab: no "Campaign Name" column and no standalone
+    # ASIN column — the first column ("المنتجات") is the product/offer code (e.g.
+    # B0C62FXJZF-E5-LJNS-ZTDG), and the real ASIN is only its first 10
+    # characters (see get_ads_map_amazon below). These headers must match the
+    # real sheet's header row exactly, because get_or_create_worksheet appends
+    # any header here that isn't already in row 1 — a wrong list here means
+    # extra junk columns get appended every session, which was a real source of
+    # slowness.
+    "AdvertisementsAmz": ["المنتجات","الحالة","النوع","أهلية المنتجات المدعومة","المبيعات(SAR)",
+                           "عائد الإنفاق على الإعلانات (ROAS)","معدل التحويل","مرات الظهور","نقرات",
+                           "CTR","الإنفاق(SAR)","CPC(SAR)","الطلبات","ACOS",
+                           "الطلبات الجديدة بالنسبة للماركة","النسبة المئوية للطلبات الجديدة بالنسبة للماركة",
+                           "المبيعات الجديدة بالنسبة للماركة(SAR)","النسبة المئوية للمبيعات الجديدة بالنسبة للماركة",
+                           "مرات الظهور القابلة للعرض"],
     # تاب العمولة ومصاريف التوصيل — بيتحدّث يدوي، وبنستخدمه لحساب صافي سعر البيع لكل SKU
     "COM":               ["SKU","مصاريف توصيل","العمولة"],
     # تاب LIVE — نسخة من ملف Noon catalog export، بيتحدّث يدوي بره البرنامج (مش من هنا).
@@ -92,6 +123,29 @@ TABS_CONFIG = {
              "seller_price_max","price_engine_min","price_engine_max","sale_start_date",
              "sale_end_date","is_active","warranty","stock_fbn_net","stock_xdock_gross",
              "stock_xdock_net","mp_code","noon_status"],
+    # تاب مبيعات أمازون اليومية — بيتحدّث يدوي/من نظام أمازون، نفس فكرة DailyOrders
+    # بالظبط بس لشحنات أمازون. الأعمدة هنا بترتيب مختلف عن DailyOrders (نون)،
+    # فبنقراها دايمًا بالاسم مش بالمكان (شوف _amz_col_indexes تحت). عمود "حاوية
+    # كاملة الحمولة": لو قيمته FSAB يبقى تخزين عادي (Easy Ship/شحن مباشر من
+    # التاجر)، ولو أي قيمة تانية يبقى تخزين FBA (مخزون عند أمازون) | Daily Amazon
+    # orders sheet — same idea as DailyOrders (Noon) but for Amazon shipments.
+    # Column order here differs from DailyOrders, so columns are always looked
+    # up by name, not position (see _amz_col_indexes below). "حاوية كاملة
+    # الحمولة" column: FSAB = normal storage (merchant-shipped), anything else
+    # = FBA storage.
+    "DailyOrdersAmazon": ["تاريخ شحنة العميل", "رقم تخزين سلعة التاجر MSKU",
+                          "رقم تخزين السلعة لشبكة نظام الشحن (FNSKU)", "ASIN",
+                          "حاوية كاملة الحمولة", "الكمية", "رقم الطلب من أمازون",
+                          "العملة", "مبلغ المنتج"],
+    # مخزون أمازون — تصدير من Amazon Seller Central (Manage Inventory)، مصدر
+    # مخزون أمازون المستقل تمامًا عن مخزون نون (Inventory). تاب مبيعات امازون
+    # بيبني قايمة منتجاته من الشيت ده (مش من Inventory بتاع نون) عشان تبقى
+    # قايمة منتجات أمازون الحقيقية | Amazon inventory export from Seller
+    # Central — the independent stock source for the Amazon Sales tab (not
+    # Noon's Inventory sheet), so the product list reflects Amazon's actual
+    # catalog.
+    "StockAmazon": ["seller-sku", "fulfillment-channel-sku", "asin",
+                    "condition-type", "Warehouse-Condition-code", "Quantity Available"],
 }
 
 def get_or_create_worksheet(tab, headers, retries=5, delay=2):
@@ -162,6 +216,33 @@ def get_or_create_links_ws(retries=5, delay=2):
 
 links_ws = get_or_create_links_ws()
 
+def get_or_create_links_asin_ws(retries=5, delay=2):
+    """شيت روابط صور أمازون — مفتاح بالـ ASIN (مش SKU زي 'links n' فوق)، عشان
+    ده المعرّف الحقيقي لمنتج أمازون وصورته واحدة بغض النظر عن الـ MSKU |
+    Amazon image-links sheet keyed by ASIN (not SKU like 'links n' above),
+    since ASIN is Amazon's real product identity and its photo is the same
+    regardless of which MSKU sold it."""
+    for attempt in range(retries):
+        try:
+            return ss.worksheet("links a")
+        except gspread.exceptions.WorksheetNotFound:
+            try:
+                ws = ss.add_worksheet(title="links a", rows="2000", cols="2")
+                ws.append_row(["Asin","Image"])
+                return ws
+            except gspread.exceptions.APIError as e:
+                if attempt < retries - 1:
+                    time.sleep(delay * (2 ** attempt))
+                else:
+                    raise e
+        except gspread.exceptions.APIError as e:
+            if attempt < retries - 1:
+                time.sleep(delay * (2 ** attempt))
+            else:
+                raise e
+
+links_asin_ws = get_or_create_links_asin_ws()
+
 requests_sheet    = sheets["Requests"]
 approved_sheet    = sheets["Approved"]
 unavailable_sheet = sheets["Unavailable"]
@@ -214,11 +295,15 @@ reschedule_sheet  = sheets["Rescheduled"]
 expired_sheet     = sheets["Expired"]
 inventory_sheet      = sheets["Inventory"]
 daily_orders_sheet   = sheets["DailyOrders"]
+daily_orders_amazon_sheet = sheets["DailyOrdersAmazon"]
+stock_amazon_sheet   = sheets["StockAmazon"]
 settings_sheet       = sheets["Settings"]
 cancel_notif_sheet   = sheets["CancelNotifications"]
 tacweed_sheet        = sheets["Tacweed"]
+tacweed_amazon_sheet = sheets["TacweedAmazon"]
 warehouse_stock_sheet = sheets["WarehouseStock"]
 ads_sheet             = sheets["Advertisements"]
+ads_amz_sheet         = sheets["AdvertisementsAmz"]
 com_sheet             = sheets["COM"]
 live_sheet            = sheets["LIVE"]
 
@@ -396,6 +481,17 @@ def get_links_map():
             m[row[0].strip().upper()] = row[1].strip()
     return m
 
+def get_links_map_asin():
+    """خريطة ASIN -> رابط صورة من شيت 'links a' — المصدر الأساسي لصور تابات
+    مبيعات أمازون | ASIN -> image URL map from the 'links a' sheet — the
+    primary image source for the Amazon Sales tabs."""
+    data = get_cached(links_asin_ws)
+    m = {}
+    for row in data[1:]:
+        if len(row) >= 2 and row[0].strip():
+            m[row[0].strip().upper()] = row[1].strip()
+    return m
+
 # ══ tacweed data (SKU -> {code, cost}) — مبني على أسماء الأعمدة (مش ترتيبها) عشان يفضل
 #    شغال حتى لو اتغير ترتيب الأعمدة في الشيت، ومكاش بـ _memo_from_sheet عشان متتبنيش
 #    الخريطة من الصفر لكل SKU بيتعرض | Built from column names (not position), so it keeps
@@ -474,6 +570,93 @@ def get_sku_cost(sku_up):
         return bundle["code_cost_map"].get(code)
     return None
 
+# ══ نفس منطق تكويد نون بالظبط (_build_tacweed_bundle وما بعدها) لكن بالمفتاح
+#    ASIN بدل SKU، مبني على تاب TacweedAmazon | Same logic as the Noon Tacweed
+#    bundle above, but keyed by ASIN instead of SKU, built from TacweedAmazon ══
+def _build_tacweed_amazon_bundle(raw):
+    data_map, code_map, cost_map, code_cost_map = {}, {}, {}, {}
+    if raw and len(raw) >= 2:
+        header = [h.strip() for h in raw[0]]
+        idx = {h: i for i, h in enumerate(header)}
+        def col(row, *names):
+            for name in names:
+                i = idx.get(name)
+                if i is not None and i < len(row):
+                    return row[i]
+            return ""
+        for row in raw[1:]:
+            asin_raw = col(row, "ASIN", "Asin", "asin")
+            if not str(asin_raw).strip():
+                continue
+            asin_up = str(asin_raw).strip().upper()
+            code = str(col(row, "Code01", "code01", "Code 01")).strip()
+            cost = _f2_or_none(col(row, "Cost", "cost", "التكلفة", "تكلفة"))
+            data_map[asin_up] = {"code": code, "cost": cost}
+            if code:
+                code_map[asin_up] = code
+            if cost is not None:
+                cost_map[asin_up] = cost
+            if code and cost is not None and code not in code_cost_map:
+                code_cost_map[code] = cost
+    return {"data": data_map, "code_map": code_map, "cost_map": cost_map, "code_cost_map": code_cost_map}
+
+def _get_tacweed_amazon_bundle():
+    return _memo_from_sheet(tacweed_amazon_sheet, "tacweed_amazon_bundle", _build_tacweed_amazon_bundle)
+
+def get_tacweed_amazon_data():
+    return _get_tacweed_amazon_bundle()["data"]
+
+def get_tacweed_amazon_map():
+    """ASIN (upper) -> الكود 01 | ASIN -> Code01."""
+    return _get_tacweed_amazon_bundle()["code_map"]
+
+def get_tacweed_amazon_reverse_map():
+    """كود -> قائمة ASINs المرتبطة بيه (عكس get_tacweed_amazon_map) — نفس فكرة
+    get_tacweed_reverse_map بالظبط بس لأمازون، عشان كود واحد ممكن يشترك بين
+    ASIN أمازون وSKU نون في نفس كمية المستودع."""
+    rev = {}
+    for asin_up, code in get_tacweed_amazon_map().items():
+        rev.setdefault(code, []).append(asin_up)
+    return rev
+
+def get_tacweed_amazon_cost_map():
+    return _get_tacweed_amazon_bundle()["cost_map"]
+
+def get_tacweed_amazon_code_cost_map():
+    return _get_tacweed_amazon_bundle()["code_cost_map"]
+
+def get_asin_cost(asin_up):
+    """يرجع تكلفة الوحدة لهذا الـ ASIN — نفس منطق get_sku_cost بالظبط بس من
+    تاب TacweedAmazon: تكلفة مسجلة على نفس الـ ASIN أولاً، وإلا تكلفة الكود01
+    المشترك (سواء مسجلة على ASIN تاني أو حتى SKU نون بنفس الكود)."""
+    bundle = _get_tacweed_amazon_bundle()
+    info = bundle["data"].get(asin_up)
+    code = info.get("code") if info else None
+    cost = info.get("cost") if info else None
+    if cost is not None:
+        return cost
+    if code:
+        c = bundle["code_cost_map"].get(code)
+        if c is not None:
+            return c
+        # fallback: لو نفس الكود مسجل بتكلفة في تاب نون التقليدي (Tacweed)
+        return get_tacweed_code_cost_map().get(code)
+    return None
+
+def resolve_unit_cost(sku_up, asin_up=None):
+    """تكلفة الوحدة الصحيحة سواء المنتج نون أو أمازون: لو معانا ASIN، بيدور
+    الأول في تاب TacweedAmazon (get_asin_cost)، وإلا يرجع لتاب Tacweed العادي
+    بالـ SKU — عشان أي مكان بيحسب صافي الربح (تاب المبيعات أو الداشبورد)
+    يستخدم نفس المصدر الصح بدل ما يفضل بيقرا SKU بس حتى لمنتجات أمازون |
+    Correct unit cost whether the product is Noon or Amazon: if an ASIN is
+    given, checks TacweedAmazon (via get_asin_cost) first, otherwise falls
+    back to the regular Tacweed sheet by SKU."""
+    if asin_up:
+        c = get_asin_cost(asin_up)
+        if c is not None:
+            return c
+    return get_sku_cost(sku_up)
+
 def big_note_html(text):
     """نص ملاحظة (غير متوفر سابقاً / تم طلبه سابقاً) بخط أكبر وأسود بولد بدل الكابشن الصغير الرمادي."""
     return f'<span class="status-badge-lg" style="background:#e5e7eb;">{text}</span>'
@@ -524,6 +707,65 @@ def get_ads_map():
             "cvr":    _f2(col(row, "CVR")),
         }
         m.setdefault(sku_up, []).append(entry)
+    return m
+
+# ══ خريطة إعلانات أمازون (ASIN -> قائمة صفوف) | Amazon ads map (ASIN -> list of rows) ══
+def get_ads_map_amazon():
+    """بتقرأ من شيت AdvertisementsAmz بشكله الجديد — تصدير إعلانات أمازون
+    مباشرة، مفهوش عمود "Campaign Name" ولا عمود ASIN مستقل. عمود "المنتجات"
+    فيه كود المنتج/العرض (زي B0C62FXJZF-E5-LJNS-ZTDG)، والـ ASIN الحقيقي هو
+    أول 10 حروف/أرقام منه بس، فممكن أكتر من صف (أكتر من عرض/تخزين) يترجعوا
+    لنفس الـ ASIN وده طبيعي وبيتجمّعوا مع بعض زي ما كان بيحصل مع الحملات قبل
+    كده. مفيش عمود "Campaign Name" في الشكل الجديد، فبنستخدم قيمة عمود
+    "المنتجات" الكاملة (كود المنتج/العرض) كبديل لعرض/تجميع كل صف على حدة في
+    تاب "تحليل أداء الإعلانات". ومفيش عمود ATC (إضافة للسلة) في الشكل الجديد،
+    فبتفضل صفر دايماً. كل الأعمدة بتتقرا بالاسم مش بالمكان عشان تفضل شغالة لو
+    ترتيب الأعمدة اتغيّر | Reads the new AdvertisementsAmz layout — a direct
+    Amazon ads export with no "Campaign Name" column and no standalone ASIN
+    column. The "المنتجات" column holds the product/offer code (e.g.
+    B0C62FXJZF-E5-LJNS-ZTDG); the real ASIN is only its first 10 characters,
+    so more than one row (more than one offer/storage type) can map to the
+    same ASIN — that's expected and they're summed together just like
+    multiple campaigns used to be. Since there's no "Campaign Name" column
+    anymore, the full "المنتجات" value is used as a stand-in so each row can
+    still be shown/grouped individually in the Ads Performance Analysis tab.
+    There's no ATC (add-to-cart) column in the new layout, so it's always
+    zero. Every column is read by name, not position, so this keeps working
+    if the column order changes."""
+    data = get_cached(ads_amz_sheet)
+    if not data or len(data) < 2:
+        return {}
+    header = [h.strip() for h in data[0]]
+    idx = {h: i for i, h in enumerate(header)}
+    def col(row, *names):
+        for name in names:
+            i = idx.get(name)
+            if i is not None and i < len(row):
+                return row[i]
+        return ""
+    m = {}
+    for row in data[1:]:
+        product_raw = str(col(row, "المنتجات", "ASIN", "Asin", "asin")).strip()
+        if not product_raw:
+            continue
+        asin_up = product_raw[:10].strip().upper()
+        if not asin_up:
+            continue
+        entry = {
+            "campaign": product_raw,
+            "views":  _f2(col(row, "مرات الظهور", "Views")),
+            "clicks": _f2(col(row, "نقرات", "Clicks")),
+            "orders": _f2(col(row, "الطلبات", "Orders")),
+            "atc":    0.0,
+            "spends": _f2(col(row, "الإنفاق(SAR)", "Spends")),
+            "revenue":_f2(col(row, "المبيعات(SAR)", "Revenue")),
+            "ctr":    _f2(col(row, "CTR")),
+            "roas":   _f2(col(row, "عائد الإنفاق على الإعلانات (ROAS)", "ROAS")),
+            "cpc":    _f2(col(row, "CPC(SAR)", "CPC")),
+            "cps":    0.0,
+            "cvr":    _f2(col(row, "معدل التحويل", "CVR")),
+        }
+        m.setdefault(asin_up, []).append(entry)
     return m
 
 # ══ خريطة العمولة/التوصيل (SKU -> {delivery, commission_pct}) | Commission & delivery map ══
@@ -667,7 +909,7 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
     #    after subtracting it — لو التكلفة مش مسجلة بتتحط صفر مع تنبيه، بدل ما
     #    سطر التكلفة يختفي بصمت زي قبل كده | if cost isn't recorded it defaults
     #    to zero with a warning, instead of the cost line silently disappearing ──
-    cost_t14 = get_sku_cost(r["sku_up"])
+    cost_t14 = resolve_unit_cost(r["sku_up"], r.get("asin", "").upper() if r.get("asin") else None)
     cost_missing_t14 = cost_t14 is None
     if cost_missing_t14:
         cost_t14 = 0.0
@@ -828,6 +1070,7 @@ def render_tacweed_upload(key_prefix):
                     clear_cache(tacweed_sheet)
                     st.session_state.pop("warehouse_stockout_rows", None)
                     st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
                     return len(to_add)
 
                 ca_tc, cb_tc = st.columns(2)
@@ -909,6 +1152,145 @@ def warehouse_available_badge(sku_up):
         f'{stockout_html}'
     )
 
+def tacweed_cost_badge_html_amazon(asin_up):
+    """نفس tacweed_cost_badge_html بالظبط بس لتكلفة أمازون (get_asin_cost)."""
+    cost = get_asin_cost(asin_up)
+    if cost is None:
+        return ""
+    return f'<span class="tacweed-badge" style="background:#0c4a6e;color:#7dd3fc;">💰 التكلفة: {cost:,.2f} ريال</span>'
+
+def warehouse_available_badge_amazon(asin_up):
+    """نفس warehouse_available_badge بالظبط لكن لمنتج أمازون بالـ ASIN — بتقرا
+    الكود01 والتكلفة من تاب TacweedAmazon، وبتاخد نفس كمية WarehouseStock
+    المشتركة مع نون (نفس الكود = نفس المستودع الفعلي)، وشارة توقع النفاد بتتقرا
+    من warehouse_stockout_asin_lookup اللي بيحسب السحب مجمّع من نون + أمازون
+    مع بعض | Same as warehouse_available_badge but for an Amazon ASIN — reads
+    Code01/cost from TacweedAmazon, shares the same WarehouseStock quantity as
+    Noon (same code = same physical stock), and its stockout badge comes from
+    warehouse_stockout_asin_lookup, which already combines Noon + Amazon draw."""
+    code = get_tacweed_amazon_map().get(asin_up, "")
+    if not code:
+        return ""
+    qty = get_warehouse_stock_map().get(code, "")
+    cost_badge_html = tacweed_cost_badge_html_amazon(asin_up)
+    cost_part = f" {cost_badge_html}" if cost_badge_html else ""
+
+    stockout_html = ""
+    wh_row = st.session_state.get("warehouse_stockout_asin_lookup", {}).get(asin_up)
+    if wh_row:
+        dts = wh_row["days_to_stockout"]
+        dts_txt = f"نفاد خلال {dts} يوم" if dts is not None else "لا يوجد سحب مسجل"
+        status_short = wh_row["status"].split(" | ")[0]
+        stockout_html = (
+            f' <span class="tacweed-badge" style="background:{wh_row["color"]}22;'
+            f'color:{wh_row["color"]};border:1px solid {wh_row["color"]}55;">'
+            f'{status_short} — {dts_txt}</span>'
+        )
+
+    if qty == "":
+        return f'<span class="tacweed-badge" style="background:#3b0764;color:#e9d5ff;">🏷️ تكويد: {code}</span>{cost_part}{stockout_html}'
+    return (
+        f'<span class="tacweed-badge" style="background:#3b0764;color:#e9d5ff;">🏷️ تكويد: {code}</span>{cost_part} '
+        f'<span class="tacweed-badge" style="background:#78350f;color:#fde68a;">📦 المتوفر بالمستودع: {qty}</span>'
+        f'{stockout_html}'
+    )
+
+def render_tacweed_amazon_upload(key_prefix):
+    """واجهة رفع ملف تكويد أمازون (ASIN + Code01 + التكلفة) — نفس شكل
+    render_tacweed_upload بالظبط بس بتدور على عمود ASIN بدل SKU، ومفيهاش
+    اكتشاف تلقائي لشيت \"noon\" لأن الملف أصلاً بتاع أمازون."""
+    with st.expander("📤 رفع ملف تكويد أمازون | Upload Amazon Tacweed (ASIN Mapping) File", expanded=False):
+        upl_tca = st.file_uploader(
+            "ارفع ملف تكويد أمازون (xlsx/xlsm/csv) | Upload Amazon Tacweed File",
+            type=["xlsx", "xls", "xlsm", "csv"], key=f"{key_prefix}_tacweed_amz_upload")
+        if upl_tca:
+            try:
+                if upl_tca.name.lower().endswith(".csv"):
+                    df_tca = pd.read_csv(upl_tca, dtype=str).fillna("")
+                else:
+                    xls_a = pd.ExcelFile(upl_tca)
+                    sheet_names_a = xls_a.sheet_names
+                    chosen_sheet_a = None
+                    for sn in sheet_names_a:
+                        if "amazon" in sn.strip().lower() or "امازون" in sn.strip():
+                            chosen_sheet_a = sn
+                            break
+                    if not chosen_sheet_a:
+                        if len(sheet_names_a) > 1:
+                            chosen_sheet_a = st.selectbox(
+                                "اختار الشيت اللي فيه التكويد | Choose the sheet with the mapping",
+                                sheet_names_a, key=f"{key_prefix}_tacweed_amz_sheet_pick")
+                        else:
+                            chosen_sheet_a = sheet_names_a[0]
+                    df_tca = pd.read_excel(upl_tca, sheet_name=chosen_sheet_a, dtype=str).fillna("")
+
+                asin_col_tca = code_col_tca = cost_col_tca = None
+                for c in df_tca.columns:
+                    cl = str(c).strip().lower()
+                    if asin_col_tca is None and "asin" in cl:
+                        asin_col_tca = c
+                    if code_col_tca is None and (("كود" in str(c) and "01" in str(c)) or cl in ("code01", "code 01")):
+                        code_col_tca = c
+                    if cost_col_tca is None and ("cost" in cl or "تكلفة" in str(c)):
+                        cost_col_tca = c
+                if not asin_col_tca:
+                    asin_col_tca = df_tca.columns[0]
+                if not code_col_tca:
+                    for c in df_tca.columns:
+                        if "كود" in str(c):
+                            code_col_tca = c
+                            break
+
+                st.info(f"📊 {len(df_tca)} صف | ASIN: `{asin_col_tca}` | الكود 01: `{code_col_tca}` | التكلفة: `{cost_col_tca or '—'}`")
+                _preview_cols_tca = [asin_col_tca] + ([code_col_tca] if code_col_tca else []) + ([cost_col_tca] if cost_col_tca else [])
+                st.dataframe(df_tca[_preview_cols_tca].head(10),
+                             use_container_width=True, height=180)
+
+                def do_upload_tca(replace=True):
+                    dn = now_str()
+                    to_add = []
+                    for _, row in df_tca.iterrows():
+                        asin = str(row[asin_col_tca]).strip()
+                        code = str(row[code_col_tca]).strip() if code_col_tca else ""
+                        cost = str(row[cost_col_tca]).strip() if cost_col_tca else ""
+                        if cost.lower() == "nan":
+                            cost = ""
+                        if asin and asin.lower() != "nan":
+                            to_add.append([asin, code, cost, dn])
+                    if replace:
+                        safe_delete_all(tacweed_amazon_sheet)
+                    safe_batch_append(tacweed_amazon_sheet, to_add)
+                    clear_cache(tacweed_amazon_sheet)
+                    st.session_state.pop("warehouse_stockout_rows", None)
+                    st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
+                    return len(to_add)
+
+                ca_tca, cb_tca = st.columns(2)
+                with ca_tca:
+                    if st.button("📤 إضافة للموجود | Append", type="primary",
+                                 use_container_width=True, key=f"{key_prefix}_tca_append"):
+                        n = do_upload_tca(replace=False)
+                        st.success(f"✅ أُضيف {n} صف | rows added")
+                        st.rerun()
+                with cb_tca:
+                    if st.button("🔄 استبدال الكل | Replace All", type="secondary",
+                                 use_container_width=True, key=f"{key_prefix}_tca_replace"):
+                        st.session_state[f"{key_prefix}_confirm_replace_tca"] = True
+                if st.session_state.get(f"{key_prefix}_confirm_replace_tca"):
+                    st.warning("⚠️ هيمسح كل تكويد أمازون القديم ويرفع الجديد؟ | Replace all existing Amazon mapping?")
+                    cy_tca, cn_tca = st.columns(2)
+                    if cy_tca.button("✅ نعم | Yes", key=f"{key_prefix}_yes_rep_tca"):
+                        n = do_upload_tca(replace=True)
+                        st.session_state[f"{key_prefix}_confirm_replace_tca"] = False
+                        st.success(f"✅ تم الاستبدال — {n} صف")
+                        st.rerun()
+                    if cn_tca.button("❌ لا | No", key=f"{key_prefix}_no_rep_tca"):
+                        st.session_state[f"{key_prefix}_confirm_replace_tca"] = False
+                        st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
 def render_warehouse_stock_upload(key_prefix):
     """واجهة رفع ملف جرد المستودع (بيتكشف شيت فيه عمود باركود وعمود كمية إجمالية تلقائيًا)."""
     with st.expander("📤 رفع ملف جرد المستودع | Upload Warehouse Stock File", expanded=False):
@@ -976,6 +1358,7 @@ def render_warehouse_stock_upload(key_prefix):
                     clear_cache(warehouse_stock_sheet)
                     st.session_state.pop("warehouse_stockout_rows", None)
                     st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
                     return len(to_add)
 
                 ca_ws, cb_ws = st.columns(2)
@@ -1398,7 +1781,19 @@ def _china_code_to_skus():
     m = {}
     for sku_up, code in get_tacweed_map().items():
         m.setdefault(_china_norm_code(code), []).append(sku_up)
+    # ASINs أمازون المرتبطة بنفس الكود (من TacweedAmazon) | Amazon ASINs on the same code
+    try:
+        for asin_up, code in get_tacweed_amazon_map().items():
+            m.setdefault(_china_norm_code(code), []).append(asin_up)
+    except Exception:
+        pass
     return m
+
+def _china_wh_lookup():
+    """مفتاح (SKU نون أو ASIN أمازون) -> صف المستودع على مستوى الكود (سحب مجمّع نون + أمازون)."""
+    out = dict(st.session_state.get("warehouse_stockout_asin_lookup", {}))
+    out.update(st.session_state.get("warehouse_stockout_sku_lookup", {}))
+    return out
 
 def china_lines_for_sku(sku_up):
     """أسطر الصين المرتبطة بـ SKU: عن طريق كود التكويد = barcode (الأساسي)، وكمان لو
@@ -1408,7 +1803,7 @@ def china_lines_for_sku(sku_up):
     if not b["lines"]:
         return []
     cands = []
-    code = get_tacweed_map().get(sku_up, "")
+    code = get_tacweed_map().get(sku_up, "") or get_tacweed_amazon_map().get(sku_up, "")
     if code:
         cands += b["by_code"].get(_china_norm_code(code), [])
     cands += b["by_noon_sku"].get(sku_up, [])
@@ -1532,9 +1927,9 @@ def _china_cfg():
 def _china_stock_rate(sku_up, row=None):
     """(مخزون, معدل سحب يومي, مصدر, عدد SKUs في الكود). الأساس = المتوفر بالمستودع ومعدل سحب الكود (مجمّع)؛
     لو الكود مالوش مخزون مستودع مسجل بيرجع مخزون نون كبديل بعلامة واضحة."""
-    wh = st.session_state.get("warehouse_stockout_sku_lookup", {}).get(sku_up)
+    wh = _china_wh_lookup().get(sku_up)
     if wh:
-        return float(wh.get("qty") or 0), float(wh.get("daily_draw") or 0), "wh", len(wh.get("skus") or [])
+        return float(wh.get("qty") or 0), float(wh.get("daily_draw") or 0), "wh", len(wh.get("skus") or []) + len(wh.get("asins") or [])
     if row is not None:
         return float(row.get("stock") or 0), float(row.get("effective_avg") or 0), "noon", 1
     return None
@@ -1628,7 +2023,11 @@ def _china_decision_html(inc, sku_up, row, today):
     items = []
     if rate > 0:
         days_left = stock / rate
-        who = f" (سحب الكود كله من {n_sku} SKU)" if n_sku > 1 else ""
+        _whr = _china_wh_lookup().get(sku_up) or {}
+        if _whr.get("asins"):
+            who = (f" (نون {_whr.get('draw_noon', 0):g} + أمازون {_whr.get('draw_amz', 0):g} — سحب الكود كله من {n_sku} منتج)")
+        else:
+            who = f" (سحب الكود كله من {n_sku} SKU)" if n_sku > 1 else ""
         if days_left > 730:
             cover_txt = "يكفي أكتر من سنتين"
         else:
@@ -1801,7 +2200,7 @@ def render_china_sales_status(sku_ups):
             st.caption("🚢 بيانات شحنات الصين: لا توجد بيانات محمّلة — ارفع الملف من قسم «شحنات الصين» | no China data loaded yet")
             return
         n = sum(1 for s in sku_ups if china_lines_for_sku(s))
-        no_code = sum(1 for s in sku_ups if not get_tacweed_map().get(s, ""))
+        no_code = sum(1 for s in sku_ups if not (get_tacweed_map().get(s, "") or get_tacweed_amazon_map().get(s, "")))
         st.caption(f"🚢 بيانات الصين: {len(b['lines'])} سطر محمّل | مربوط بمنتجات هذه القائمة: {n} SKU"
                    + (f" | {no_code} SKU بدون كود تكويد" if no_code else ""))
     except Exception as e:
@@ -2088,7 +2487,7 @@ def render_china_upload(key_prefix, bundle):
 def china_code_decisions(bundle, today, cfg):
     """قرار لكل كود صين عنده كمية قادمة: (مخزون المستودع + معدل سحب الكود + دفعات الصين المؤرخة). بيرجع (rows, no_stock_codes)."""
     code_skus = _china_code_to_skus()
-    lookup = st.session_state.get("warehouse_stockout_sku_lookup", {})
+    lookup = _china_wh_lookup()
     rows, no_stock = [], 0
     for norm, ls in bundle["by_code"].items():
         inc = [l for l in ls if l["_status"] == "incoming"]
@@ -2611,6 +3010,94 @@ def build_inv_map(excluded_wh: set):
         if not inv_map[sku_up]["img"] and img:
             inv_map[sku_up]["img"] = img
     return inv_map
+
+def build_amazon_stock_map():
+    """يبني خريطة مخزون أمازون من شيت StockAmazon (تصدير Seller Central):
+    MSKU (seller-sku) -> ASIN + FNSKU + الكمية المتاحة. ده مصدر مخزون أمازون
+    المستقل تمامًا عن inv_map بتاع نون — تاب مبيعات امازون بيبني قايمة
+    منتجاته من هنا عشان تبقى قايمة منتجات أمازون الحقيقية مش قايمة نون."""
+    data = get_cached(stock_amazon_sheet)
+    stock_map = {}
+    if len(data) <= 1:
+        return stock_map
+    hdr = data[0]
+    idx_sku   = _find_col_idx_amz(hdr, ["seller-sku", "msku"])
+    idx_asin  = _find_col_idx_amz(hdr, ["asin"])
+    idx_fnsku = _find_col_idx_amz(hdr, ["fulfillment-channel-sku", "fnsku"])
+    idx_qty   = _find_col_idx_amz(hdr, ["quantity available", "quantity"])
+    if idx_sku is None:
+        return stock_map
+    known_idx = [i for i in (idx_sku, idx_asin, idx_fnsku, idx_qty) if i is not None]
+    need = (max(known_idx) + 1) if known_idx else 1
+    for row in data[1:]:
+        if len(row) < need:
+            row = row + [""] * (need - len(row))
+        sku = row[idx_sku].strip()
+        if not sku:
+            continue
+        sku_up = sku.upper()
+        asin  = row[idx_asin].strip()  if idx_asin  is not None and len(row) > idx_asin  else ""
+        fnsku = row[idx_fnsku].strip() if idx_fnsku is not None and len(row) > idx_fnsku else ""
+        qty_raw = row[idx_qty] if (idx_qty is not None and len(row) > idx_qty) else "0"
+        try:
+            qty = int(float(str(qty_raw).replace(",", "").strip() or 0))
+        except Exception:
+            qty = 0
+        if sku_up not in stock_map:
+            stock_map[sku_up] = {"sku": sku, "asin": asin, "fnsku": fnsku, "stock": 0}
+        stock_map[sku_up]["stock"] += qty
+        if not stock_map[sku_up]["asin"] and asin:
+            stock_map[sku_up]["asin"] = asin
+    return stock_map
+
+def build_amazon_stock_map_by_asin():
+    """يبني خريطة مخزون أمازون من شيت StockAmazon لكن مجمّعة على أساس ASIN
+    (مش MSKU زي build_amazon_stock_map فوق) — ده المعرّف الحقيقي لمنتج
+    أمازون، فلو نفس الـ ASIN ظاهر تحت أكتر من MSKU (FBA/FBM مختلفين مثلاً)
+    مخزونهم بيتجمع مع بعض بدل ما يتقسّم على صفوف منفصلة. تاب مبيعات أمازون
+    بيستخدم النسخة دي عشان الأرقام (مخزون/شهري/يومي/نفاد) تطلع صح | Amazon
+    stock map from StockAmazon aggregated by ASIN (not MSKU like
+    build_amazon_stock_map above) — ASIN is Amazon's real product identity,
+    so if the same ASIN appears under more than one MSKU (e.g. different
+    FBA/FBM listings) their stock is summed together instead of being split
+    across separate rows. The Amazon Sales tabs use this version so the
+    numbers (stock/monthly/daily/stockout) come out correct."""
+    data = get_cached(stock_amazon_sheet)
+    asin_map = {}
+    if len(data) <= 1:
+        return asin_map
+    hdr = data[0]
+    idx_sku   = _find_col_idx_amz(hdr, ["seller-sku", "msku"])
+    idx_asin  = _find_col_idx_amz(hdr, ["asin"])
+    idx_fnsku = _find_col_idx_amz(hdr, ["fulfillment-channel-sku", "fnsku"])
+    idx_qty   = _find_col_idx_amz(hdr, ["quantity available", "quantity"])
+    if idx_asin is None:
+        return asin_map
+    known_idx = [i for i in (idx_sku, idx_asin, idx_fnsku, idx_qty) if i is not None]
+    need = (max(known_idx) + 1) if known_idx else 1
+    for row in data[1:]:
+        if len(row) < need:
+            row = row + [""] * (need - len(row))
+        asin = row[idx_asin].strip() if len(row) > idx_asin else ""
+        if not asin:
+            continue  # لازم ASIN عشان التجميع يبقى صح
+        asin_up = asin.upper()
+        sku   = row[idx_sku].strip()   if idx_sku   is not None and len(row) > idx_sku   else ""
+        fnsku = row[idx_fnsku].strip() if idx_fnsku is not None and len(row) > idx_fnsku else ""
+        qty_raw = row[idx_qty] if (idx_qty is not None and len(row) > idx_qty) else "0"
+        try:
+            qty = int(float(str(qty_raw).replace(",", "").strip() or 0))
+        except Exception:
+            qty = 0
+        if asin_up not in asin_map:
+            asin_map[asin_up] = {"asin": asin, "fnsku": fnsku, "stock": 0, "skus": []}
+        asin_map[asin_up]["stock"] += qty
+        if not asin_map[asin_up]["fnsku"] and fnsku:
+            asin_map[asin_up]["fnsku"] = fnsku
+        if sku and sku not in asin_map[asin_up]["skus"]:
+            asin_map[asin_up]["skus"].append(sku)
+    return asin_map
+
 
 # ══ Sheets helpers ══
 def safe_append(sheet, row, retries=5, delay=1):
@@ -3209,6 +3696,333 @@ def build_daily_orders_prices_fbb(dates):
                 prices[sku_up] = {dd: [] for dd in dates}
             prices[sku_up][d.date()].append((price_val, qty_val))
     return prices
+
+# ══════════════════════════════════════════════════════════════════════════
+# ══ مبيعات أمازون — نسخة منفصلة تمامًا عن مبيعات نون فوق، بتقرا من شيت
+#    DailyOrdersAmazon (أعمدة عربي بترتيب مختلف تمامًا عن DailyOrders)، فكل
+#    عمود بيتلاقى بالاسم مش بمكانه. عمود "حاوية كاملة الحمولة": FSAB = تخزين
+#    عادي، أي قيمة تانية = تخزين FBA. مفيش أي تعديل على دوال نون فوق خالص |
+#    Amazon sales — fully separate from the Noon sales above, reads
+#    DailyOrdersAmazon (different Arabic headers, completely different column
+#    order), so every column is located by name, not position. "حاوية كاملة
+#    الحمولة" column: FSAB = normal storage, anything else = FBA storage. The
+#    Noon functions above are completely untouched.
+# ══════════════════════════════════════════════════════════════════════════
+def _find_col_idx_amz(header, names):
+    names_norm = {n.strip().lower() for n in names}
+    for ci, h in enumerate(header):
+        if str(h).strip().lower() in names_norm:
+            return ci
+    return None
+
+def _amz_col_indexes(hdr):
+    return {
+        "sku":   _find_col_idx_amz(hdr, ["رقم تخزين سلعة التاجر msku", "msku", "sku"]),
+        "ts":    _find_col_idx_amz(hdr, ["تاريخ شحنة العميل", "order timestamp"]),
+        "cont":  _find_col_idx_amz(hdr, ["حاوية كاملة الحمولة", "fulfillment center"]),
+        "qty":   _find_col_idx_amz(hdr, ["الكمية", "quantity", "qty"]),
+        "price": _find_col_idx_amz(hdr, ["مبلغ المنتج", "price", "amount"]),
+        "asin":  _find_col_idx_amz(hdr, ["asin"]),
+    }
+
+def _amz_row_is_fba(row, cont_idx):
+    """True = تخزين FBA (أي قيمة غير FSAB في عمود حاوية كاملة الحمولة)،
+    False = تخزين عادي (FSAB)."""
+    if cont_idx is None or len(row) <= cont_idx:
+        return False
+    val = str(row[cont_idx]).strip().upper()
+    return val != "FSAB" and val != ""
+
+def _amz_row_matches(row, cont_idx, mode):
+    """mode: 'all' (كل الصفوف) / 'normal' (FSAB بس) / 'fba' (أي حاجة غير FSAB)."""
+    if mode == "all":
+        return True
+    is_fba = _amz_row_is_fba(row, cont_idx)
+    return is_fba if mode == "fba" else not is_fba
+
+def build_amazon_orders_asin_map():
+    """يبني خريطة MSKU -> ASIN من شيت DailyOrdersAmazon نفسه (عمود ASIN موجود
+    جنب كل طلب). ده fallback لما الـ MSKU مش موجود في StockAmazon (يعني
+    ملوش ASIN من خريطة المخزون) — عشان الـ ASIN يفضل ظاهر حتى للـ SKUs
+    اللي "مش موجودة في المخزون المرفوع" | Builds an MSKU -> ASIN map straight
+    from the DailyOrdersAmazon sheet (which has its own ASIN column per
+    order) — a fallback for MSKUs missing from StockAmazon, so ASIN still
+    shows even for "not in uploaded inventory" rows."""
+    data = get_cached(daily_orders_amazon_sheet)
+    asin_map = {}
+    if len(data) <= 1:
+        return asin_map
+    hdr = data[0]
+    idx = _amz_col_indexes(hdr)
+    if idx["sku"] is None or idx["asin"] is None:
+        return asin_map
+    need = max(idx["sku"], idx["asin"]) + 1
+    for row in data[1:]:
+        if len(row) < need:
+            row = row + [""] * (need - len(row))
+        sku = row[idx["sku"]].strip()
+        asin = row[idx["asin"]].strip()
+        if not sku or not asin:
+            continue
+        sku_up = sku.upper()
+        if sku_up not in asin_map:
+            asin_map[sku_up] = asin
+    return asin_map
+
+def build_daily_orders_counts_amazon(dates, mode="all", group_by="sku"):
+    """نفس منطق build_daily_orders_counts بالظبط، لكن من شيت DailyOrdersAmazon
+    وبأعمدة بتتلاقى بالاسم، مع فلترة اختيارية على عمود حاوية كاملة الحمولة.
+    group_by='sku' (زي ما كانت دايمًا) أو 'asin' — التجميع بيبقى على عمود
+    ASIN في الشيت بدل MSKU، عشان صفوف تاب مبيعات أمازون تتجمع صح | group_by
+    controls the aggregation key: 'sku' (unchanged, default) or 'asin' —
+    groups by the sheet's own ASIN column instead of MSKU, so the Amazon
+    Sales tab rows aggregate correctly by ASIN."""
+    data = get_cached(daily_orders_amazon_sheet)
+    dates_set = set(dates)
+    counts = {}
+    if len(data) <= 1:
+        return counts
+    hdr = data[0]
+    idx = _amz_col_indexes(hdr)
+    if idx["sku"] is None or idx["ts"] is None:
+        return counts
+    if group_by == "asin" and idx["asin"] is None:
+        return counts
+    need = max(idx["sku"], idx["ts"], idx["asin"] if idx["asin"] is not None else 0) + 1
+    for row in data[1:]:
+        if len(row) < need:
+            row = row + [""] * (need - len(row))
+        sku = row[idx["sku"]].strip()
+        ts  = row[idx["ts"]].strip()
+        if not sku or not ts:
+            continue
+        if not _amz_row_matches(row, idx["cont"], mode):
+            continue
+        if group_by == "asin":
+            key_raw = row[idx["asin"]].strip() if len(row) > idx["asin"] else ""
+            if not key_raw:
+                continue
+        else:
+            key_raw = sku
+        d = parse_excel_date(ts)
+        if d and d.date() in dates_set:
+            key_up = key_raw.upper()
+            if key_up not in counts:
+                counts[key_up] = {dd: 0 for dd in dates}
+            counts[key_up][d.date()] += 1
+    return counts
+
+def build_daily_orders_prices_amazon(dates, mode="all", group_by="sku"):
+    """نفس منطق build_daily_orders_prices بالظبط، لكن من شيت DailyOrdersAmazon.
+    عمود "مبلغ المنتج" بيتاخد زي ما هو (سعر الحبة الواحدة) من غير أي قسمة على
+    الكمية — بالظبط زي ما بيحصل مع سعر مبيعات نون فوق. group_by زي الدالة
+    اللي فوق بالظبط | Same idea as the function above; group_by works the
+    same way ('sku' default or 'asin')."""
+    data = get_cached(daily_orders_amazon_sheet)
+    dates_set = set(dates)
+    prices = {}
+    if len(data) <= 1:
+        return prices
+    hdr = data[0]
+    idx = _amz_col_indexes(hdr)
+    if idx["sku"] is None or idx["ts"] is None:
+        return prices
+    if group_by == "asin" and idx["asin"] is None:
+        return prices
+    need = max(idx["sku"], idx["ts"], idx["asin"] if idx["asin"] is not None else 0) + 1
+    for row in data[1:]:
+        if len(row) < need:
+            row = row + [""] * (need - len(row))
+        sku = row[idx["sku"]].strip()
+        ts  = row[idx["ts"]].strip()
+        if not sku or not ts:
+            continue
+        if not _amz_row_matches(row, idx["cont"], mode):
+            continue
+        if group_by == "asin":
+            key_raw = row[idx["asin"]].strip() if len(row) > idx["asin"] else ""
+            if not key_raw:
+                continue
+        else:
+            key_raw = sku
+        d = parse_excel_date(ts)
+        if d and d.date() in dates_set:
+            key_up = key_raw.upper()
+            price_val = ""
+            if idx["price"] is not None and len(row) > idx["price"]:
+                raw = str(row[idx["price"]]).strip()
+                price_val = raw if raw and raw.lower() not in ("nan","none","") else ""
+            qty_val = 1
+            if idx["qty"] is not None and len(row) > idx["qty"]:
+                try:
+                    qty_val = int(float(str(row[idx["qty"]]).strip()))
+                except Exception:
+                    qty_val = 1
+            if qty_val < 1:
+                qty_val = 1
+            if key_up not in prices:
+                prices[key_up] = {dd: [] for dd in dates}
+            prices[key_up][d.date()].append((price_val, qty_val))
+    return prices
+
+def build_daily_orders_counts_amazon_all(dates):    return build_daily_orders_counts_amazon(dates, "all")
+def build_daily_orders_counts_amazon_normal(dates): return build_daily_orders_counts_amazon(dates, "normal")
+def build_daily_orders_counts_amazon_fba(dates):    return build_daily_orders_counts_amazon(dates, "fba")
+def build_daily_orders_prices_amazon_all(dates):    return build_daily_orders_prices_amazon(dates, "all")
+def build_daily_orders_prices_amazon_normal(dates): return build_daily_orders_prices_amazon(dates, "normal")
+def build_daily_orders_prices_amazon_fba(dates):    return build_daily_orders_prices_amazon(dates, "fba")
+# ── نسخ مجمّعة على ASIN — تاب مبيعات أمازون (عادي/FBA) بيستخدمها بدل النسخ
+#    اللي فوق المجمّعة على MSKU | ASIN-grouped versions — used by the Amazon
+#    Sales tab (normal/FBA) instead of the MSKU-grouped ones above ──
+def build_daily_orders_counts_amazon_all_asin(dates):    return build_daily_orders_counts_amazon(dates, "all", "asin")
+def build_daily_orders_prices_amazon_all_asin(dates):    return build_daily_orders_prices_amazon(dates, "all", "asin")
+def build_daily_orders_counts_amazon_normal_asin(dates): return build_daily_orders_counts_amazon(dates, "normal", "asin")
+def build_daily_orders_counts_amazon_fba_asin(dates):    return build_daily_orders_counts_amazon(dates, "fba", "asin")
+def build_daily_orders_prices_amazon_normal_asin(dates): return build_daily_orders_prices_amazon(dates, "normal", "asin")
+def build_daily_orders_prices_amazon_fba_asin(dates):    return build_daily_orders_prices_amazon(dates, "fba", "asin")
+
+def build_amazon_asin_sales_rows(multi_counts, prices_map, monthly_counts, sales_dates, sales_display_days):
+    """يبني صفوف تاب مبيعات أمازون (عادي/FBA) مجمّعة على أساس ASIN — المعرّف
+    الحقيقي لمنتج أمازون، مش MSKU. المخزون بييجي من amz_inv_map_asin (مجمّع
+    من كل الـ MSKUs بتاعت نفس الـ ASIN)، والمبيعات اليومية من multi_counts/
+    prices_map (مجمّعة بنفس الطريقة من عمود ASIN في DailyOrdersAmazon).
+    "شهري" بيتحسب من monthly_counts وهو مجموع حقيقي لآخر 30 يوم فعلي من
+    DailyOrdersAmazon — مش تقدير مبني على متوسط الأيام المعروضة (7 أيام
+    افتراضيًا)، عشان منتج بطيء الحركة ما بعش خلال آخر 7 أيام بس باع قبل كده
+    في نفس الشهر يفضل شهريه صحيح مش صفر. أي ASIN باع خلال آخر 30 يوم بيظهر
+    حتى لو مالوش صف مخزون مرفوع في StockAmazon (يبقى مخزونه 0 مع علامة
+    توضيحية) — بالظبط زي تابات نون | Builds Amazon sales-tab rows
+    (normal/FBA) aggregated by ASIN — Amazon's real product identity, not
+    MSKU. Stock comes from amz_inv_map_asin (summed across every MSKU
+    sharing that ASIN); daily figures come from multi_counts/prices_map
+    (grouped the same way, by DailyOrdersAmazon's own ASIN column).
+    "Monthly" is computed from monthly_counts — an actual trailing-30-day
+    sum from DailyOrdersAmazon, not an estimate extrapolated from the
+    (default 7-day) display window, so a slow-moving product with no sales
+    in the last 7 days but sales earlier in the month still shows its real
+    monthly total instead of 0. Any ASIN with sales in the last 30 days
+    shows up even without an uploaded StockAmazon row for it (stock shown
+    as 0 with a note) — same as the Noon tabs' behaviour."""
+    links_map_asin = get_links_map_asin()
+    links_map_sku  = get_links_map()
+    # MSKU -> ASIN من DailyOrdersAmazon نفسه — بنعكسها لـ ASIN -> MSKUs عشان
+    # صفوف الـ ASIN اليتيمة (اللي مالهاش صف في StockAmazon) تفضل عارضة الـ
+    # MSKU الحقيقي بتاعها (لشارات المستودع/الجدولة/الإعلانات...إلخ) | MSKU ->
+    # ASIN from DailyOrdersAmazon itself — inverted to ASIN -> MSKUs so
+    # orphan ASIN rows (no StockAmazon row) still carry their real MSKU for
+    # the warehouse/schedule/ads... badges below.
+    asin_to_mskus = {}
+    for sku_o, asin_o in build_amazon_orders_asin_map().items():
+        asin_to_mskus.setdefault(asin_o.upper(), []).append(sku_o)
+
+    def _monthly_total(asin_up):
+        mc = monthly_counts.get(asin_up)
+        return sum(mc.values()) if mc else 0
+
+    rows = []
+    for asin_up, info in amz_inv_map_asin.items():
+        stock = info.get("stock", 0)
+        mskus = list(info.get("skus", []))
+        for extra_sku in asin_to_mskus.get(asin_up, []):
+            if extra_sku not in mskus:
+                mskus.append(extra_sku)
+        sku_disp    = ", ".join(mskus) if mskus else asin_up
+        primary_sku = mskus[0] if mskus else asin_up
+        # الصور على أساس الـ SKU/MSKU الأول (زي نون)، وبعدين صورة الـ ASIN كبديل
+        img = next((links_map_sku.get(m.upper(), "") for m in mskus if links_map_sku.get(m.upper(), "")), "") or links_map_asin.get(asin_up, "")
+        day_counts = multi_counts.get(asin_up, {d: 0 for d in sales_dates})
+        day_prices = prices_map.get(asin_up, {d: [] for d in sales_dates})
+        total_recent = sum(day_counts.get(d, 0) for d in sales_dates)
+        avg_daily = (total_recent / sales_display_days) if sales_display_days > 0 else 0
+        effective_avg = avg_daily
+        days_to_stockout = round(stock / effective_avg) if effective_avg > 0 else 9999
+        rows.append({
+            "sku": sku_disp, "sku_up": primary_sku.upper(), "asin": info.get("asin", asin_up),
+            "mskus": mskus,
+            "stock": stock, "sales_month": _monthly_total(asin_up), "img": img,
+            "day_counts": day_counts, "day_prices": day_prices,
+            "total_recent": total_recent,
+            "effective_avg": effective_avg,
+            "days_to_stockout": days_to_stockout,
+        })
+
+    # ── ASINs باعت خلال آخر 30 يوم (يومي أو شهري) لكن مالهاش صف مخزون مرفوع
+    #    في StockAmazon — بتتضاف كمان عشان كل مبيعة تظهر في القائمة، حتى لو
+    #    آخر بيعة ليها كانت قبل الـ 7 أيام المعروضة | ASINs with sales in
+    #    the last 30 days (recent or monthly) but no uploaded StockAmazon
+    #    row — added too so every sale shows up, even if its last sale was
+    #    before the displayed 7-day window.
+    asins_seen = set(amz_inv_map_asin.keys())
+    orphan_asins = (set(multi_counts.keys()) | set(monthly_counts.keys())) - asins_seen
+    for asin_up in orphan_asins:
+        day_counts = multi_counts.get(asin_up, {d: 0 for d in sales_dates})
+        total_recent_orphan = sum(day_counts.get(d, 0) for d in sales_dates)
+        monthly_orphan = _monthly_total(asin_up)
+        if total_recent_orphan <= 0 and monthly_orphan <= 0:
+            continue
+        mskus = asin_to_mskus.get(asin_up, [])
+        sku_disp    = ", ".join(mskus) if mskus else asin_up
+        primary_sku = mskus[0] if mskus else asin_up
+        day_prices_orphan = prices_map.get(asin_up, {d: [] for d in sales_dates})
+        avg_daily_orphan = (total_recent_orphan / sales_display_days) if sales_display_days > 0 else 0
+        rows.append({
+            "sku": sku_disp, "sku_up": primary_sku.upper(), "asin": asin_up,
+            "mskus": mskus,
+            "stock": 0, "sales_month": monthly_orphan,
+            "img": next((links_map_sku.get(m.upper(), "") for m in mskus if links_map_sku.get(m.upper(), "")), "") or links_map_asin.get(asin_up, ""),
+            "day_counts": day_counts, "day_prices": day_prices_orphan,
+            "total_recent": total_recent_orphan,
+            "effective_avg": avg_daily_orphan,
+            "days_to_stockout": 0 if avg_daily_orphan > 0 else 9999,
+            "not_in_inventory": True,
+        })
+
+    # ترتيب: الأكتر مبيعاً أمس أولاً — نفس ترتيب تابات نون بالظبط
+    rows.sort(key=lambda r: -r["day_counts"].get(sales_dates[0], 0) if sales_dates else 0)
+    return rows
+
+# ══ داشبورد أمازون — مفيش عمود Family في شيت DailyOrdersAmazon، فبنرجع إحصائية
+#    أقسام فاضية دايمًا (نفس فكرة "لو العمود مش موجود الكود بيكمل عادي" تحت) ══
+def build_daily_orders_family_stats_amazon_all(dates, live_map=None):    return {}
+def build_daily_orders_family_stats_amazon_normal(dates, live_map=None): return {}
+def build_daily_orders_family_stats_amazon_fba(dates, live_map=None):    return {}
+
+def build_amazon_asin_link(asin: str):
+    if not asin:
+        return None
+    a = str(asin).strip().upper()
+    if not a:
+        return None
+    return f"https://www.amazon.sa/dp/{a}"
+
+def asin_link_html(asin: str, extra_style: str = ""):
+    """ASIN كنص قابل للنسخ جنبه أيقونة 🔗 صغيرة تودّي على صفحة المنتج على أمازون
+    في تاب جديد — هو المعرّف الأساسي لمنتجات أمازون (زي ما الـ SKU هو المعرّف
+    الأساسي لمنتجات نون) | ASIN rendered as copyable text with a small 🔗 link
+    to the amazon.sa product page — the primary identifier for Amazon products
+    (the way SKU is the primary identifier for Noon products)."""
+    asin_disp = asin if asin else "—"
+    link = build_amazon_asin_link(asin)
+    asin_span = (
+        f'<span style="font-family:monospace;font-weight:700;color:#e2e8f0;'
+        f'background:#1e293b;border:1px solid #334155;border-radius:6px;padding:2px 10px;'
+        f'user-select:all;-webkit-user-select:all;{extra_style}">{asin_disp}</span>'
+    )
+    if not link:
+        return asin_span
+    return (
+        f'{asin_span} <a href="{link}" target="_blank" rel="noopener" '
+        f'style="text-decoration:none;font-size:14px;" title="فتح صفحة المنتج على أمازون | Open on amazon.sa">🔗</a>'
+    )
+
+# ══ خريطة مخزون أمازون (StockAmazon) — بتتبنى مرة واحدة بس زي inv_map بالظبط،
+#    وهي مصدر قايمة منتجات تاب مبيعات امازون المستقل عن inv_map بتاع نون ══
+# ══ خريطة مخزون أمازون مجمّعة على ASIN — المصدر اللي تاب مبيعات أمازون
+#    (عادي/FBA) بيبني منه صفوفه، عشان مخزون نفس الـ ASIN يتجمع حتى لو ظاهر
+#    تحت أكتر من MSKU | Amazon stock map aggregated by ASIN — what the
+#    Amazon Sales tab (normal/FBA) builds its rows from, so the same ASIN's
+#    stock is combined even when it appears under more than one MSKU ══
+amz_inv_map_asin = build_amazon_stock_map_by_asin()
 
 # ══ الأقسام | Departments (عمود Family في DailyOrders — اختياري، لو مش موجود الكود بيكمل عادي) ══
 FAMILY_HOME_GROUP = {"kitchen_dining", "home_improvement", "gardening", "home_decor", "furniture", "bedding"}
@@ -3899,6 +4713,14 @@ def compute_warehouse_stockout_rows():
     stock_map_wh    = get_warehouse_stock_map()
     links_map_wh    = get_links_map()
 
+    # ── سحب أمازون من نفس مستودعنا (WarehouseStock) — بطلب صريح من المستخدم
+    #    بيتحسب من كل طلبات أمازون (عادي FSAB + FBA مع بعض)، مش الـ FSAB بس |
+    #    Amazon draw from OUR warehouse (WarehouseStock) — per explicit
+    #    request, counts ALL Amazon orders (normal/FSAB + FBA together), not
+    #    just FSAB ──
+    multi_counts_amz_wh = build_daily_orders_counts_amazon(dates, mode="all", group_by="asin")
+    reverse_map_amz_wh  = get_tacweed_amazon_reverse_map()
+
     rows = []
     for code, qty_str in stock_map_wh.items():
         try:
@@ -3907,7 +4729,10 @@ def compute_warehouse_stockout_rows():
             continue
 
         skus = reverse_map_wh.get(code, [])
-        total_sold = sum(sum(multi_counts_wh.get(sku_up, {}).values()) for sku_up in skus)
+        asins = reverse_map_amz_wh.get(code, [])
+        total_sold_noon = sum(sum(multi_counts_wh.get(sku_up, {}).values()) for sku_up in skus)
+        total_sold_amz  = sum(sum(multi_counts_amz_wh.get(asin_up, {}).values()) for asin_up in asins)
+        total_sold = total_sold_noon + total_sold_amz
         daily_draw = (total_sold / window_days) if window_days > 0 else 0
 
         if daily_draw <= 0:
@@ -3927,8 +4752,10 @@ def compute_warehouse_stockout_rows():
         img = next((links_map_wh.get(s) for s in skus if links_map_wh.get(s)), "")
 
         rows.append({
-            "code": code, "skus": skus, "qty": qty,
+            "code": code, "skus": skus, "asins": asins, "qty": qty,
             "daily_draw": round(daily_draw, 2),
+            "draw_noon": round(total_sold_noon / window_days, 2) if window_days > 0 else 0,
+            "draw_amz": round(total_sold_amz / window_days, 2) if window_days > 0 else 0,
             "days_to_stockout": round(days_to_stockout) if days_to_stockout is not None else None,
             "reorder_in": round(reorder_in) if reorder_in is not None else None,
             "status": status, "color": color, "suggested_qty": suggested_qty, "img": img,
@@ -3944,6 +4771,18 @@ def build_warehouse_stockout_sku_lookup(rows):
     for r in rows:
         for sku_up in r["skus"]:
             lookup[sku_up] = r
+    return lookup
+
+def build_warehouse_stockout_asin_lookup(rows):
+    """نفس build_warehouse_stockout_sku_lookup بالظبط بس بمفتاح ASIN — لبادچة
+    warehouse_available_badge_amazon، والسحب المحسوب في كل صف أصلاً مجمّع من
+    نون + أمازون مع بعض (شوف compute_warehouse_stockout_rows) | Same idea as
+    build_warehouse_stockout_sku_lookup but keyed by ASIN — the draw in each
+    row already combines Noon + Amazon (see compute_warehouse_stockout_rows)."""
+    lookup = {}
+    for r in rows:
+        for asin_up in r["asins"]:
+            lookup[asin_up] = r
     return lookup
 
 def compute_no_sale_rows(days=7):
@@ -3962,6 +4801,32 @@ def compute_no_sale_rows(days=7):
             "sku": info.get("sku", sku_up), "sku_up": sku_up,
             "stock": info.get("total_stock", 0), "sales_month": info.get("sales", 0),
             "img": info.get("img", ""),
+        })
+    rows.sort(key=lambda x: -x["stock"])
+    return rows
+
+def compute_no_sale_rows_amazon(days=7):
+    """نسخة أمازون من compute_no_sale_rows فوق — مستقلة تمامًا عن نون: بتقرا من
+    amz_inv_map_asin (StockAmazon) ومبيعات DailyOrdersAmazon مجمّعة على ASIN،
+    ومقصورة على تخزين FBA بس (نفس فلتر تاب مراجعة/مبيعات أمازون وتاب مخزون بدون
+    بيع) | Amazon counterpart of compute_no_sale_rows above — fully independent
+    of Noon: reads amz_inv_map_asin (StockAmazon) and DailyOrdersAmazon sales
+    grouped by ASIN, restricted to FBA storage only (matching the Amazon
+    review/sales tabs and the No-Sales tab's own Amazon filter)."""
+    today_ns_amz = datetime.now().date()
+    dates_ns_amz = [today_ns_amz - timedelta(days=i) for i in range(1, days + 1)]
+    counts_ns_amz = build_daily_orders_counts_amazon_fba_asin(dates_ns_amz)
+    rows = []
+    for asin_up, info in amz_inv_map_asin.items():
+        dc = counts_ns_amz.get(asin_up, {})
+        if sum(dc.get(d, 0) for d in dates_ns_amz) > 0:
+            continue
+        mskus = info.get("skus", [])
+        rows.append({
+            "sku": ", ".join(mskus) if mskus else asin_up, "sku_up": asin_up,
+            "asin": info.get("asin", asin_up),
+            "stock": info.get("stock", 0), "sales_month": 0,
+            "img": "",
         })
     rows.sort(key=lambda x: -x["stock"])
     return rows
@@ -4022,6 +4887,8 @@ if "transferred_skus_t14" not in st.session_state:
 if "warehouse_stockout_rows" not in st.session_state:
     st.session_state["warehouse_stockout_rows"] = compute_warehouse_stockout_rows()
     st.session_state["warehouse_stockout_sku_lookup"] = build_warehouse_stockout_sku_lookup(
+        st.session_state["warehouse_stockout_rows"])
+    st.session_state["warehouse_stockout_asin_lookup"] = build_warehouse_stockout_asin_lookup(
         st.session_state["warehouse_stockout_rows"])
 
 NAV_ITEMS = [
@@ -4197,106 +5064,155 @@ for _key, _i, _l in NAV_ITEMS:
 if st.session_state["nav_page"] == "tab9":
     with tab9:
         if _tab_gate("tab9", "📊 المخزون | Inventory"):
-            st.subheader("📊 المخزون والمبيع الشهري | Inventory & Monthly Sales")
-            links_map = get_links_map()
-            render_tacweed_upload("inv")
-            render_warehouse_stock_upload("inv")
-            col_t,_ = st.columns([1,3])
-            with col_t:
-                st.download_button("⬇️ Template المخزون | Inventory Template",
-                    data=make_empty_template(["warehouse_code","sku","STOCCCCK.QTY","مبيع شهر جدول.QTY"]),
-                    file_name=f"inventory_template_{file_timestamp()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True)
-            upl_inv = st.file_uploader("ارفع ملف المخزون | Upload Inventory File", type=["xlsx","xls","xlsm","csv"], key="inv_upload")
-            if upl_inv:
-                try:
-                    df_inv = pd.read_csv(upl_inv,dtype=str).fillna("") if upl_inv.name.endswith(".csv") else pd.read_excel(upl_inv,dtype=str).fillna("")
-                    wh_col=sku_col=stock_col=sales_col=None
-                    for c in df_inv.columns:
-                        cl = c.strip().lower()
-                        if "warehouse" in cl: wh_col=c
-                        if cl in ("sku","item nr","item_nr"): sku_col=c
-                        if "stock" in cl: stock_col=c
-                        if "مبيع" in cl or "sales" in cl: sales_col=c
-                        if "qty" in cl and sales_col is None: sales_col=c
-                    if not wh_col:    wh_col    = df_inv.columns[0]
-                    if not sku_col:   sku_col   = df_inv.columns[1] if len(df_inv.columns)>1 else df_inv.columns[0]
-                    if not stock_col: stock_col = df_inv.columns[2] if len(df_inv.columns)>2 else None
-                    if not sales_col: sales_col = df_inv.columns[3] if len(df_inv.columns)>3 else None
-                    st.info(f"📊 {len(df_inv)} صف | WH:`{wh_col}` SKU:`{sku_col}` Stock:`{stock_col}` Sales:`{sales_col}`")
-                    st.dataframe(df_inv.head(10), use_container_width=True, height=180)
-                    def do_upload(replace=False):
-                        dn = now_str()
-                        to_add = []
-                        for _,row in df_inv.iterrows():
-                            wh  = str(row[wh_col]).strip()    if wh_col    else ""
-                            sku = str(row[sku_col]).strip()   if sku_col   else ""
-                            stk = str(row[stock_col]).strip() if stock_col else ""
-                            sal = str(row[sales_col]).strip() if sales_col else ""
-                            img = links_map.get(sku.upper(),"")
-                            if sku and sku.lower()!="nan":
-                                to_add.append([sku,wh,stk,sal,img,dn])
-                        if replace: safe_delete_all(inventory_sheet)
-                        safe_batch_append(inventory_sheet,to_add)
-                        clear_cache(inventory_sheet)
-                        return len(to_add)
-                    ca,cb = st.columns(2)
-                    with ca:
-                        if st.button("📤 إضافة للموجود | Append", type="primary", use_container_width=True):
-                            n = do_upload(replace=False)
-                            st.success(f"✅ أُضيف {n} صف | rows added"); st.rerun()
-                    with cb:
-                        if st.button("🔄 استبدال الكل | Replace All", type="secondary", use_container_width=True):
-                            st.session_state["confirm_replace_inv"] = True
-                    if st.session_state.get("confirm_replace_inv"):
-                        st.warning("⚠️ هيمسح الكل ويرفع الجديد؟ | Replace all data?")
-                        cy,cn = st.columns(2)
-                        if cy.button("✅ نعم | Yes", key="yes_rep_inv"):
-                            n = do_upload(replace=True)
-                            st.session_state["confirm_replace_inv"] = False
-                            st.success(f"✅ تم الاستبدال — {n} صف"); st.rerun()
-                        if cn.button("❌ لا | No", key="no_rep_inv"):
-                            st.session_state["confirm_replace_inv"] = False; st.rerun()
-                except Exception as e:
-                    st.error(f"❌ {e}")
-            st.divider()
-            st.subheader("📋 بيانات المخزون الحالية | Current Inventory")
-            if not inv_map:
-                st.info("لم يُرفع ملف مخزون بعد | No inventory uploaded yet.")
-            else:
-                if excluded_wh:
-                    st.info(f"⚙️ مستثنى من الإجمالي | Excluded: **{', '.join(sorted(excluded_wh))}**")
-                srch = st.text_input("🔍 بحث SKU | Search SKU", key="srch_inv", placeholder="اكتب SKU...")
-                raw_inv = get_cached(inventory_sheet)
-                df_inv_dl = pd.DataFrame(raw_inv[1:], columns=raw_inv[0])
-                c1,c2 = st.columns(2)
-                with c1: dl_btn(df_inv_dl,"inventory")
-                with c2:
-                    if st.button("🗑️ مسح الكل | Clear All", type="secondary", key="btn_clear_inv", use_container_width=True):
-                        st.session_state["confirm_clear_inv"] = True
-                confirm_clear("clear_inv", inventory_sheet, "المخزون | Inventory")
-                filtered_inv = {k:v for k,v in inv_map.items() if not srch or srch.strip().upper() in k}
-                st.write(f"**SKUs: {len(filtered_inv)}**")
-                for sku_key,info in filtered_inv.items():
-                    c_img,c_info = st.columns([1,6])
-                    with c_img: show_img(info["img"],70)
-                    with c_info:
-                        st.markdown(f"**SKU:** `{info['sku']}`")
-                        tc_badge = warehouse_available_badge(sku_key)
-                        if tc_badge:
-                            st.markdown(tc_badge, unsafe_allow_html=True)
-                        st.markdown(f"📦 **إجمالي المخزون | Stock:** **{info['total_stock']}** &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly Sales:** **{info['sales']}**")
-                        badges = []
-                        for wh,stk in sorted(info["warehouses"].items()):
-                            is_ex=wh.upper() in excluded_wh
-                            bg="#4b1010" if is_ex else "#1e3a5f"
-                            color="#fca5a5" if is_ex else "#93c5fd"
-                            strike="text-decoration:line-through;" if is_ex else ""
-                            badges.append(f'<span class="wh-badge" style="background:{bg};color:{color};{strike}">{wh}: {stk}</span>')
-                        st.markdown("🏭 "+"".join(badges), unsafe_allow_html=True)
-                        st.caption(f"📅 {info['date']}")
-                    st.divider()
+            noon_stock_subtab, amazon_stock_subtab = st.tabs(
+                ["🅽 مخزون نون | Noon Stock", "📦 مخزون أمازون | Amazon Stock"])
+            with noon_stock_subtab:
+                st.subheader("📊 المخزون والمبيع الشهري | Inventory & Monthly Sales")
+                links_map = get_links_map()
+                render_tacweed_upload("inv")
+                render_tacweed_amazon_upload("inv")
+                render_warehouse_stock_upload("inv")
+                col_t,_ = st.columns([1,3])
+                with col_t:
+                    st.download_button("⬇️ Template المخزون | Inventory Template",
+                        data=make_empty_template(["warehouse_code","sku","STOCCCCK.QTY","مبيع شهر جدول.QTY"]),
+                        file_name=f"inventory_template_{file_timestamp()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True)
+                upl_inv = st.file_uploader("ارفع ملف المخزون | Upload Inventory File", type=["xlsx","xls","xlsm","csv"], key="inv_upload")
+                if upl_inv:
+                    try:
+                        df_inv = pd.read_csv(upl_inv,dtype=str).fillna("") if upl_inv.name.endswith(".csv") else pd.read_excel(upl_inv,dtype=str).fillna("")
+                        wh_col=sku_col=stock_col=sales_col=None
+                        for c in df_inv.columns:
+                            cl = c.strip().lower()
+                            if "warehouse" in cl: wh_col=c
+                            if cl in ("sku","item nr","item_nr"): sku_col=c
+                            if "stock" in cl: stock_col=c
+                            if "مبيع" in cl or "sales" in cl: sales_col=c
+                            if "qty" in cl and sales_col is None: sales_col=c
+                        if not wh_col:    wh_col    = df_inv.columns[0]
+                        if not sku_col:   sku_col   = df_inv.columns[1] if len(df_inv.columns)>1 else df_inv.columns[0]
+                        if not stock_col: stock_col = df_inv.columns[2] if len(df_inv.columns)>2 else None
+                        if not sales_col: sales_col = df_inv.columns[3] if len(df_inv.columns)>3 else None
+                        st.info(f"📊 {len(df_inv)} صف | WH:`{wh_col}` SKU:`{sku_col}` Stock:`{stock_col}` Sales:`{sales_col}`")
+                        st.dataframe(df_inv.head(10), use_container_width=True, height=180)
+                        def do_upload(replace=False):
+                            dn = now_str()
+                            to_add = []
+                            for _,row in df_inv.iterrows():
+                                wh  = str(row[wh_col]).strip()    if wh_col    else ""
+                                sku = str(row[sku_col]).strip()   if sku_col   else ""
+                                stk = str(row[stock_col]).strip() if stock_col else ""
+                                sal = str(row[sales_col]).strip() if sales_col else ""
+                                img = links_map.get(sku.upper(),"")
+                                if sku and sku.lower()!="nan":
+                                    to_add.append([sku,wh,stk,sal,img,dn])
+                            if replace: safe_delete_all(inventory_sheet)
+                            safe_batch_append(inventory_sheet,to_add)
+                            clear_cache(inventory_sheet)
+                            return len(to_add)
+                        ca,cb = st.columns(2)
+                        with ca:
+                            if st.button("📤 إضافة للموجود | Append", type="primary", use_container_width=True):
+                                n = do_upload(replace=False)
+                                st.success(f"✅ أُضيف {n} صف | rows added"); st.rerun()
+                        with cb:
+                            if st.button("🔄 استبدال الكل | Replace All", type="secondary", use_container_width=True):
+                                st.session_state["confirm_replace_inv"] = True
+                        if st.session_state.get("confirm_replace_inv"):
+                            st.warning("⚠️ هيمسح الكل ويرفع الجديد؟ | Replace all data?")
+                            cy,cn = st.columns(2)
+                            if cy.button("✅ نعم | Yes", key="yes_rep_inv"):
+                                n = do_upload(replace=True)
+                                st.session_state["confirm_replace_inv"] = False
+                                st.success(f"✅ تم الاستبدال — {n} صف"); st.rerun()
+                            if cn.button("❌ لا | No", key="no_rep_inv"):
+                                st.session_state["confirm_replace_inv"] = False; st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+                st.divider()
+                st.subheader("📋 بيانات المخزون الحالية | Current Inventory")
+                if not inv_map:
+                    st.info("لم يُرفع ملف مخزون بعد | No inventory uploaded yet.")
+                else:
+                    if excluded_wh:
+                        st.info(f"⚙️ مستثنى من الإجمالي | Excluded: **{', '.join(sorted(excluded_wh))}**")
+                    srch = st.text_input("🔍 بحث SKU | Search SKU", key="srch_inv", placeholder="اكتب SKU...")
+                    raw_inv = get_cached(inventory_sheet)
+                    df_inv_dl = pd.DataFrame(raw_inv[1:], columns=raw_inv[0])
+                    c1,c2 = st.columns(2)
+                    with c1: dl_btn(df_inv_dl,"inventory")
+                    with c2:
+                        if st.button("🗑️ مسح الكل | Clear All", type="secondary", key="btn_clear_inv", use_container_width=True):
+                            st.session_state["confirm_clear_inv"] = True
+                    confirm_clear("clear_inv", inventory_sheet, "المخزون | Inventory")
+                    filtered_inv = {k:v for k,v in inv_map.items() if not srch or srch.strip().upper() in k}
+                    st.write(f"**SKUs: {len(filtered_inv)}**")
+                    for sku_key,info in filtered_inv.items():
+                        c_img,c_info = st.columns([1,6])
+                        with c_img: show_img(info["img"],70)
+                        with c_info:
+                            st.markdown(f"**SKU:** `{info['sku']}`")
+                            tc_badge = warehouse_available_badge(sku_key)
+                            if tc_badge:
+                                st.markdown(tc_badge, unsafe_allow_html=True)
+                            st.markdown(f"📦 **إجمالي المخزون | Stock:** **{info['total_stock']}** &nbsp;|&nbsp; 📈 **مبيع شهري | Monthly Sales:** **{info['sales']}**")
+                            badges = []
+                            for wh,stk in sorted(info["warehouses"].items()):
+                                is_ex=wh.upper() in excluded_wh
+                                bg="#4b1010" if is_ex else "#1e3a5f"
+                                color="#fca5a5" if is_ex else "#93c5fd"
+                                strike="text-decoration:line-through;" if is_ex else ""
+                                badges.append(f'<span class="wh-badge" style="background:{bg};color:{color};{strike}">{wh}: {stk}</span>')
+                            st.markdown("🏭 "+"".join(badges), unsafe_allow_html=True)
+                            st.caption(f"📅 {info['date']}")
+                        st.divider()
+
+            with amazon_stock_subtab:
+                st.subheader("📦 مخزون أمازون | Amazon Stock")
+                st.caption("مصدره شيت StockAmazon (تصدير Amazon Seller Central) — مستقل تمامًا عن مخزون نون فوق، ومجمّع على أساس ASIN (معرّف منتج أمازون الحقيقي) مش MSKU | Sourced from the StockAmazon sheet (Amazon Seller Central export) — fully independent from Noon's stock above, aggregated by ASIN (Amazon's real product identity), not MSKU.")
+                if not amz_inv_map_asin:
+                    st.info("لا يوجد مخزون أمازون مرفوع بعد — الشيت StockAmazon بيتحدّث يدوي بره البرنامج | No Amazon stock uploaded yet — the StockAmazon sheet is updated manually outside the app")
+                else:
+                    links_map_asin_inv = get_links_map_asin()
+                    srch_amz_inv = st.text_input("🔍 بحث ASIN / SKU | Search ASIN / SKU", key="srch_amz_inv", placeholder="اكتب ASIN أو SKU...")
+                    df_amz_inv_dl = pd.DataFrame([{
+                        "ASIN": info.get("asin", asin_up),
+                        "MSKUs": ", ".join(info.get("skus", [])),
+                        "FNSKU": info.get("fnsku", ""),
+                        "الكمية المتاحة | Quantity Available": info.get("stock", 0),
+                    } for asin_up, info in amz_inv_map_asin.items()])
+                    c1_amz_inv, c2_amz_inv = st.columns(2)
+                    with c1_amz_inv: dl_btn(df_amz_inv_dl, "inventory_amazon")
+                    with c2_amz_inv:
+                        srch_up_amz_inv = srch_amz_inv.strip().upper()
+                        filtered_amz_inv = {
+                            asin_up: info for asin_up, info in amz_inv_map_asin.items()
+                            if not srch_up_amz_inv
+                            or srch_up_amz_inv in asin_up
+                            or any(srch_up_amz_inv in s.upper() for s in info.get("skus", []))
+                        }
+                        st.info(f"📦 ASINs: {len(filtered_amz_inv)}")
+                    for asin_up, info in filtered_amz_inv.items():
+                        c_img_amz_inv, c_info_amz_inv = st.columns([1, 6])
+                        mskus_amz_inv = info.get("skus", [])
+                        img_amz_inv = links_map_asin_inv.get(asin_up, "") or (
+                            links_map.get(mskus_amz_inv[0].upper(), "") if mskus_amz_inv else "")
+                        with c_img_amz_inv:
+                            show_img(img_amz_inv, 70)
+                        with c_info_amz_inv:
+                            st.markdown(asin_link_html(info.get("asin", asin_up)), unsafe_allow_html=True)
+                            if mskus_amz_inv:
+                                st.markdown(f"**MSKU:** `{', '.join(mskus_amz_inv)}`")
+                            tc_badge_amz_inv = warehouse_available_badge_amazon(asin_up)
+                            if tc_badge_amz_inv:
+                                st.markdown(tc_badge_amz_inv, unsafe_allow_html=True)
+                            st.markdown(f"📦 **الكمية المتاحة | Quantity Available:** **{info.get('stock', 0)}**")
+                            if info.get("fnsku"):
+                                st.caption(f"FNSKU: {info['fnsku']}")
+                        st.divider()
+
 
         # ══ TAB 10 — مراجعة المخزون ══
 
@@ -4327,6 +5243,7 @@ if st.session_state["nav_page"] == "tab_wh":
                 if st.button("🔄 إعادة الحساب | Recalculate", use_container_width=True, key="wh_recalc_btn"):
                     st.session_state.pop("warehouse_stockout_rows", None)
                     st.session_state.pop("warehouse_stockout_sku_lookup", None)
+                    st.session_state.pop("warehouse_stockout_asin_lookup", None)
                     st.rerun()
 
             wh_rows = st.session_state.get("warehouse_stockout_rows", [])
@@ -4384,22 +5301,42 @@ if st.session_state["nav_page"] == "tab_wh":
                             st.markdown(f"🗓️ **الأيام المتبقية لموعد الطلب:** {rin_txt}")
                         if r["suggested_qty"] > 0:
                             st.markdown(f"💡 **الكمية المقترحة للطلب:** {r['suggested_qty']:,}")
-                        with st.expander(f"📋 الـ SKUs التابعة لهذا الكود ({len(r['skus'])})"):
-                            st.write(", ".join(r["skus"]) if r["skus"] else "—")
+                        with st.expander(f"📋 الـ SKUs/ASINs التابعة لهذا الكود ({len(r['skus']) + len(r.get('asins', []))})"):
+                            st.write("SKU (نون): " + (", ".join(r["skus"]) if r["skus"] else "—"))
+                            st.write("ASIN (أمازون): " + (", ".join(r.get("asins", [])) if r.get("asins") else "—"))
                     st.divider()
 
         # ══ TAB 14 — المبيعات ══
     # ══ TAB DASHBOARD — داشبورد تحليلات المبيعات (تاب جديدة منفصلة) ══
     # ══ TAB DASHBOARD — داشبورد تحليلات المبيعات (تاب جديدة منفصلة) ══
-def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suffix):
+def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suffix, channel="noon"):
     """يعرض كل محتوى داشبورد المبيعات (KPIs + تنبيهات سريعة + تحليل إعلانات + رسوم
-    بيانية + أعلى/أبطأ الأصناف + تحليل SKU فردي) — بيتفعّل مرتين: مرة بأرقام FBN
-    (counts_fn/prices_fn/family_stats_fn = النسخة الأصلية غير المفلترة) ومرة بأرقام
-    FBB (النسخة المفلترة _fbb) — نفس الكود بالظبط في الحالتين، غير بس مصدر البيانات
-    و key_suffix (عشان مفاتيح عناصر Streamlit متتكررش) | Renders the entire sales
-    dashboard content — called twice: once with the original (FBN) data-builder
-    functions, once with the _fbb-filtered ones. Identical code both times; only the
-    data source and the widget key_suffix differ."""
+    بيانية + أعلى/أبطأ الأصناف + تحليل SKU فردي) — بيتفعّل 6 مرات: 3 لنون
+    (الكل/FBN/FBB) و3 لأمازون (الكل/عادي/FBA)، نفس الكود بالظبط في كل الحالات،
+    غير بس مصدر البيانات و key_suffix (عشان مفاتيح عناصر Streamlit متتكررش).
+    channel="noon" أو "amazon" بيتحكم في مصدر المنتجات (مخزون/صور) اللي
+    الأرقام بتتربط بيه — عشان تابات داشبورد أمازون تفضل عن منتجات أمازون بس
+    ومتظهرش أي منتج أو تنبيه خاص بنون | Renders the entire sales dashboard
+    content — called 6 times: 3 for Noon (All/FBN/FBB) and 3 for Amazon
+    (All/Normal/FBA). Identical code every time; only the data source and the
+    widget key_suffix differ. channel="noon" or "amazon" controls which
+    product/stock/image source the numbers are joined against, so the Amazon
+    dashboard tabs stay scoped to Amazon products only and never surface a
+    Noon-only product or alert."""
+    is_amz_chan = (channel == "amazon")
+    if is_amz_chan:
+        _links_map_chan = get_links_map_asin()
+        chan_product_map = {
+            asin_up: {
+                "sku": ", ".join(info.get("skus", [])) or info.get("asin", asin_up),
+                "img": _links_map_chan.get(asin_up, ""),
+                "total_stock": info.get("stock", 0),
+            }
+            for asin_up, info in amz_inv_map_asin.items()
+        }
+    else:
+        _links_map_chan = get_links_map()
+        chan_product_map = inv_map
     analysis_period_map_td = {
         "آخر 7 أيام | Last 7 days": 7,
         "آخر 15 يوم | Last 15 days": 15,
@@ -4455,7 +5392,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
         return total
 
     rows_td = []
-    for sku_up_td, info_td in inv_map.items():
+    for sku_up_td, info_td in chan_product_map.items():
         cur_t_td  = _td_total(cur_counts_td, sku_up_td, cur_dates_td)
         prev_t_td = _td_total(prev_counts_td, sku_up_td, prev_dates_td)
         cur_rev_td  = _td_revenue_total(cur_prices_td, sku_up_td, cur_dates_td, live_map_dash)
@@ -4476,9 +5413,9 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     #    image is looked up from the "links n" sheet (the same source
     #    Inventory itself pulls images from), since this SKU has no Inventory
     #    row to carry an image column at all.
-    _inv_skus_seen_td = set(inv_map.keys())
+    _inv_skus_seen_td = set(chan_product_map.keys())
     _orphan_skus_td = (set(cur_counts_td.keys()) | set(prev_counts_td.keys())) - _inv_skus_seen_td
-    _links_map_dash_orphan = get_links_map()
+    _links_map_dash_orphan = _links_map_chan
     for sku_up_td in _orphan_skus_td:
         cur_t_td  = _td_total(cur_counts_td, sku_up_td, cur_dates_td)
         prev_t_td = _td_total(prev_counts_td, sku_up_td, prev_dates_td)
@@ -4592,30 +5529,35 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     # ── مخزون Xdock قارب على النفاد (من تاب LIVE) — مخزون منفصل عن Inventory، محتاج تزويد
     #    لو قرب يخلص، مش جدولة | Xdock stock running low (from LIVE sheet) — a separate
     #    stock pool from Inventory; low means it needs restocking, not scheduling ──
+    # Xdock مخزون خاص بنون بس (عمود stock_xdock_net في تاب LIVE بتاع نون) — مبيتحسبش
+    # ولا بيتعرض خالص في تابات داشبورد أمازون | Xdock is a Noon-only stock pool
+    # (the stock_xdock_net column in Noon's LIVE sheet) — never computed or shown
+    # on the Amazon dashboard tabs.
     xdock_threshold_dash = int(load_settings().get("xdock_low_stock_threshold", "10") or 10)
     xdock_low_rows_td = []
-    for sku_up_x, live_info_x in live_map_dash.items():
-        xnet_x = live_info_x.get("stock_xdock_net")
-        if xnet_x is None or xnet_x > xdock_threshold_dash:
-            continue
-        inv_info_x = inv_map.get(sku_up_x, {})
-        other_stock_x = inv_info_x.get("total_stock", 0)
-        sales_month_x = inv_info_x.get("sales", 0)
-        xdock_low_rows_td.append({
-            "sku_up": sku_up_x,
-            "sku": inv_info_x.get("sku", sku_up_x),
-            "img": inv_info_x.get("img", ""),
-            "stock_xdock_net": xnet_x,
-            "other_stock": other_stock_x,
-            "has_other_stock": other_stock_x > 0,
-            "sales_month": sales_month_x,
-            "price": live_info_x.get("price"),
-            "noon_title": live_info_x.get("noon_title", ""),
-        })
-    # ترتيب من الأعلى مبيعاً للأقل — عشان نعرف الصنف مهم (بيتباع كتير) ولا لأ
-    # قبل ما نقرر مدى إلحاح تزويد مخزون Xdock بتاعه | Sort by monthly sales
-    # (highest → lowest) so it's clear which low-Xdock-stock SKUs actually matter
-    xdock_low_rows_td.sort(key=lambda r: -r["sales_month"])
+    if not is_amz_chan:
+        for sku_up_x, live_info_x in live_map_dash.items():
+            xnet_x = live_info_x.get("stock_xdock_net")
+            if xnet_x is None or xnet_x > xdock_threshold_dash:
+                continue
+            inv_info_x = inv_map.get(sku_up_x, {})
+            other_stock_x = inv_info_x.get("total_stock", 0)
+            sales_month_x = inv_info_x.get("sales", 0)
+            xdock_low_rows_td.append({
+                "sku_up": sku_up_x,
+                "sku": inv_info_x.get("sku", sku_up_x),
+                "img": inv_info_x.get("img", ""),
+                "stock_xdock_net": xnet_x,
+                "other_stock": other_stock_x,
+                "has_other_stock": other_stock_x > 0,
+                "sales_month": sales_month_x,
+                "price": live_info_x.get("price"),
+                "noon_title": live_info_x.get("noon_title", ""),
+            })
+        # ترتيب من الأعلى مبيعاً للأقل — عشان نعرف الصنف مهم (بيتباع كتير) ولا لأ
+        # قبل ما نقرر مدى إلحاح تزويد مخزون Xdock بتاعه | Sort by monthly sales
+        # (highest → lowest) so it's clear which low-Xdock-stock SKUs actually matter
+        xdock_low_rows_td.sort(key=lambda r: -r["sales_month"])
     xdock_low_with_other_td = sum(1 for r in xdock_low_rows_td if r["has_other_stock"])
     xdock_low_without_other_td = len(xdock_low_rows_td) - xdock_low_with_other_td
 
@@ -4649,7 +5591,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     #    stock + Warehouse Stockout) — using the exact same computation as
     #    inside those tabs themselves, so the number here always matches what
     #    you'd see by opening the tab directly.
-    no_sale_rows_dash = compute_no_sale_rows(days=7)
+    no_sale_rows_dash = compute_no_sale_rows_amazon(days=7) if is_amz_chan else compute_no_sale_rows(days=7)
     wh_stockout_rows_dash = st.session_state.get("warehouse_stockout_rows", [])
     wh_urgent_rows_dash = [r for r in wh_stockout_rows_dash if "🚨" in r["status"] or "🟠" in r["status"]]
     wh_now_dash = sum(1 for r in wh_urgent_rows_dash if "🚨" in r["status"])
@@ -4664,12 +5606,13 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                     f"{len(wh_urgent_rows_dash):,}",
                     f"{wh_now_dash} اطلب الآن، {wh_soon_dash} قرب موعد الطلب"), unsafe_allow_html=True)
 
-    ac7 = st.columns(1)[0]
-    with ac7:
-        st.markdown(_alert_chip_html("🟣", "#faf5ff", "#a855f7", "مخزون Xdock قارب على النفاد",
-                    f"{len(xdock_low_rows_td):,}",
-                    f"{xdock_threshold_dash} قطعة أو أقل — منهم {xdock_low_with_other_td} عندهم مخزون FBN و {xdock_low_without_other_td} من غيره"),
-                    unsafe_allow_html=True)
+    if not is_amz_chan:
+        ac7 = st.columns(1)[0]
+        with ac7:
+            st.markdown(_alert_chip_html("🟣", "#faf5ff", "#a855f7", "مخزون Xdock قارب على النفاد",
+                        f"{len(xdock_low_rows_td):,}",
+                        f"{xdock_threshold_dash} قطعة أو أقل — منهم {xdock_low_with_other_td} عندهم مخزون FBN و {xdock_low_without_other_td} من غيره"),
+                        unsafe_allow_html=True)
 
     # ── تفاصيل الأصناف تحت كل تنبيه — عشان تبان الـ SKUs نفسها اللي بتكوّن الرقم،
     #    مع سياق كافي (غير متوفر؟ ليها جدولة حديثة؟ في انتظار اعتماد؟) عشان التحليل يكون مفهوم ──
@@ -4678,7 +5621,8 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
         with ci_al:
             show_img(r["img"], 55)
         with cinfo_al:
-            st.markdown(f"{sku_link_html(r['sku'])}", unsafe_allow_html=True)
+            _link_html = asin_link_html(r["sku_up"]) if is_amz_chan else sku_link_html(r["sku"])
+            st.markdown(f"{_link_html}", unsafe_allow_html=True)
             for line in (lines or []):
                 st.caption(line)
             if badges_html:
@@ -4782,28 +5726,29 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
         else:
             st.caption("لا توجد أصناف ارتفعت مبيعاتها بنسبة 20%+ حالياً")
 
-    with st.expander(f"🟣 عرض أصناف مخزون Xdock قارب على النفاد ({len(xdock_low_rows_td):,} — {xdock_low_with_other_td} عندهم مخزون FBN | {xdock_low_without_other_td} من غيره) | Show low Xdock-stock SKUs"):
-        st.caption("ℹ️ ده مخزون Xdock من تاب LIVE، منفصل عن مخزون Inventory العادي — لو قرب يخلص محتاج تزويد (مش جدولة) لو متوفر عندنا. الأصناف اللي معاها مخزون FBN (Inventory) أقل إلحاحاً من اللي مفيش عندها غير مخزون Xdock بس. الترتيب هنا من الأعلى مبيعاً للأقل عشان تعرف الصنف مهم ولا لأ | This is Xdock stock from the LIVE sheet, separate from regular Inventory — running low means it needs restocking (not scheduling) if available with us. SKUs that also have FBN (Inventory) stock are less urgent than ones relying on Xdock stock alone. Sorted by monthly sales (highest → lowest) so you can tell if it actually matters")
-        if xdock_low_rows_td:
-            df_al7 = pd.DataFrame([{
-                "SKU": r["sku"], "مخزون Xdock | Xdock Stock": r["stock_xdock_net"],
-                "مخزون FBN | FBN Stock": r["other_stock"],
-                "مبيع شهري | Monthly Sales": r["sales_month"],
-                "السعر | Price": r["price"] if r["price"] is not None else "—",
-            } for r in xdock_low_rows_td])
-            dl_btn(df_al7, "alert_xdock_low", key=f"dl_alert_xdock_td_{key_suffix}")
-            for r in xdock_low_rows_td:
-                if r["has_other_stock"]:
-                    other_badge = f'<span style="color:#4ade80;font-size:12px;">📦 عنده مخزون FBN (Inventory): {r["other_stock"]:,} — أقل إلحاحاً</span>'
-                else:
-                    other_badge = '<span style="color:#f87171;font-size:12px;font-weight:700;">🚫 لا يوجد مخزون FBN — الاعتماد على Xdock بس</span>'
-                _render_alert_sku_row(
-                    r,
-                    lines=[f"🟣 مخزون Xdock: {r['stock_xdock_net']:,} — 📈 مبيع شهري: {r['sales_month']:,}"
-                           + (f" — 💵 {r['price']:,.2f} ريال" if r["price"] is not None else "")],
-                    badges_html=other_badge)
-        else:
-            st.caption(f"لا توجد أصناف مخزون Xdock عندها {xdock_threshold_dash} قطعة أو أقل حالياً")
+    if not is_amz_chan:
+        with st.expander(f"🟣 عرض أصناف مخزون Xdock قارب على النفاد ({len(xdock_low_rows_td):,} — {xdock_low_with_other_td} عندهم مخزون FBN | {xdock_low_without_other_td} من غيره) | Show low Xdock-stock SKUs"):
+            st.caption("ℹ️ ده مخزون Xdock من تاب LIVE، منفصل عن مخزون Inventory العادي — لو قرب يخلص محتاج تزويد (مش جدولة) لو متوفر عندنا. الأصناف اللي معاها مخزون FBN (Inventory) أقل إلحاحاً من اللي مفيش عندها غير مخزون Xdock بس. الترتيب هنا من الأعلى مبيعاً للأقل عشان تعرف الصنف مهم ولا لأ | This is Xdock stock from the LIVE sheet, separate from regular Inventory — running low means it needs restocking (not scheduling) if available with us. SKUs that also have FBN (Inventory) stock are less urgent than ones relying on Xdock stock alone. Sorted by monthly sales (highest → lowest) so you can tell if it actually matters")
+            if xdock_low_rows_td:
+                df_al7 = pd.DataFrame([{
+                    "SKU": r["sku"], "مخزون Xdock | Xdock Stock": r["stock_xdock_net"],
+                    "مخزون FBN | FBN Stock": r["other_stock"],
+                    "مبيع شهري | Monthly Sales": r["sales_month"],
+                    "السعر | Price": r["price"] if r["price"] is not None else "—",
+                } for r in xdock_low_rows_td])
+                dl_btn(df_al7, "alert_xdock_low", key=f"dl_alert_xdock_td_{key_suffix}")
+                for r in xdock_low_rows_td:
+                    if r["has_other_stock"]:
+                        other_badge = f'<span style="color:#4ade80;font-size:12px;">📦 عنده مخزون FBN (Inventory): {r["other_stock"]:,} — أقل إلحاحاً</span>'
+                    else:
+                        other_badge = '<span style="color:#f87171;font-size:12px;font-weight:700;">🚫 لا يوجد مخزون FBN — الاعتماد على Xdock بس</span>'
+                    _render_alert_sku_row(
+                        r,
+                        lines=[f"🟣 مخزون Xdock: {r['stock_xdock_net']:,} — 📈 مبيع شهري: {r['sales_month']:,}"
+                               + (f" — 💵 {r['price']:,.2f} ريال" if r["price"] is not None else "")],
+                        badges_html=other_badge)
+            else:
+                st.caption(f"لا توجد أصناف مخزون Xdock عندها {xdock_threshold_dash} قطعة أو أقل حالياً")
 
     def _render_wh_alert_row(r):
         """يعرض صف كود مستودع واحد جوه تفاصيل تنبيه — نفس شكل عرضه في تاب مخزون
@@ -4828,7 +5773,12 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 st.markdown(f"🗓️ **الأيام المتبقية لموعد الطلب:** {rin_txt_wh}")
             if r["suggested_qty"] > 0:
                 st.markdown(f"💡 **الكمية المقترحة للطلب:** {r['suggested_qty']:,}")
-            st.caption(", ".join(r["skus"]) if r["skus"] else "—")
+            skus_asins_txt = []
+            if r["skus"]:
+                skus_asins_txt.append("SKU (نون): " + ", ".join(r["skus"]))
+            if r.get("asins"):
+                skus_asins_txt.append("ASIN (أمازون): " + ", ".join(r["asins"]))
+            st.caption(" | ".join(skus_asins_txt) if skus_asins_txt else "—")
         st.divider()
 
     wh_order_now_rows = sorted(
@@ -5148,6 +6098,7 @@ def _render_ads_performance_tab():
 
     ads_profit_rows_ap, ads_loss_rows_ap = [], []
     _links_map_ads_orphan = get_links_map()
+    _sku_to_asin_ads = build_amazon_orders_asin_map()
     for sku_up_ad, ads_entries_ad in ads_map_dash.items():
         com_info_ad = com_map_dash.get(sku_up_ad)
         if not ads_entries_ad or not com_info_ad:
@@ -5156,13 +6107,15 @@ def _render_ads_performance_tab():
         if latest_price_ad is None:
             continue
         _, net_tax_ad = compute_net_price_after_fees(latest_price_ad, com_info_ad)
-        # ── تكلفة الوحدة من تاب التكويد (لو مسجلة) وصافي الربح الفعلي بعدها، زي
-        #    بالظبط منطق تاب المبيعات — لو التكلفة مش مسجلة بتتحط صفر مع تنبيه،
-        #    بدل ما تختفي بصمت من الحساب | Unit cost from the Tacweed sheet (if
-        #    recorded) and the actual net profit after subtracting it — same
+        # ── تكلفة الوحدة من تاب التكويد (نون أو أمازون حسب المنتج) وصافي
+        #    الربح الفعلي بعدها، زي بالظبط منطق تاب المبيعات — لو التكلفة مش
+        #    مسجلة بتتحط صفر مع تنبيه، بدل ما تختفي بصمت من الحساب | Unit cost
+        #    from the right Tacweed sheet (Noon or Amazon, depending on the
+        #    product) and the actual net profit after subtracting it — same
         #    logic as the Sales tab. Missing cost defaults to zero with a flag,
         #    instead of silently dropping out of the calculation ──
-        cost_ad = get_sku_cost(sku_up_ad)
+        asin_for_ad = _sku_to_asin_ads.get(sku_up_ad, "").upper() or None
+        cost_ad = resolve_unit_cost(sku_up_ad, asin_for_ad)
         cost_missing_ad = cost_ad is None
         if cost_missing_ad:
             cost_ad = 0.0
@@ -5529,6 +6482,460 @@ def _render_ads_performance_tab():
             "history to compare against. Enabling it would require snapshotting the ads sheet with dates.")
 
 
+def _render_ads_performance_tab_amazon():
+    """نسخة أمازون من تاب "الإعلانات" المستقل — نفس بالظبط منطق وتصميم
+    _render_ads_performance_tab (تنبيهات ربح/خسارة + تحليل أداء الحملات)، بس
+    بيانات الإعلانات هنا جايه من شيت AdvertisementsAmz ومفتاحها ASIN (معرّف
+    منتج أمازون الحقيقي) بدل SKU، زي بالظبط ما بيانات نون بتُعرض في تابها |
+    Amazon version of the standalone "Ads" tab — identical logic and layout to
+    _render_ads_performance_tab (profit/loss alerts + campaign performance
+    analysis), but ad data here comes from the AdvertisementsAmz sheet and is
+    keyed by ASIN (Amazon's real product identity) instead of SKU, shown next
+    to Noon's tab exactly the same way."""
+    live_map_dash = get_live_map()
+
+    # ── كروت رئيسية (نظرة عامة) | Main overview cards ──
+    def _kpi_card_html(icon, icon_bg, label, value, delta_text=None, delta_positive=True):
+        delta_html = ""
+        if delta_text is not None:
+            arrow = "↑" if delta_positive else "↓"
+            color = "#16a34a" if delta_positive else "#dc2626"
+            delta_html = f'<div style="font-size:12px;color:{color};margin-top:6px;font-weight:600;">{arrow} {delta_text}</div>'
+        return (
+            f'<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;'
+            f'padding:14px 16px;direction:rtl;min-height:118px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">'
+            f'<div style="width:34px;height:34px;border-radius:9px;background:{icon_bg}1f;'
+            f'display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:10px;">{icon}</div>'
+            f'<div style="font-size:12px;color:#6b7280;margin-bottom:4px;">{label}</div>'
+            f'<div style="font-size:21px;font-weight:800;color:#111827;">{value}</div>'
+            f'{delta_html}</div>'
+        )
+
+    # ── ربحية الإعلانات لكل SKU (نفس منطق تاب المبيعات: صافي الربح الفعلي بعد خصم
+    #    تكلفة المنتج من طلبات الإعلان، مقابل إجمالي المصروف عليه) — عشان تظهر في
+    #    التنبيهات السريعة تحت | Same logic as the Sales tab: actual net profit
+    #    after subtracting product cost from ad orders, vs total ad spend ──
+    ads_map_dash = get_ads_map_amazon()
+    com_map_dash = get_com_map()
+
+    _ads_fallback_dates = [datetime.now().date() - timedelta(days=i) for i in range(1, 91)]
+    _ads_fallback_prices = build_daily_orders_prices_amazon_all_asin(_ads_fallback_dates)
+
+    def _ads_latest_price_for_asin(asin_up, primary_sku_up):
+        """السعر الأساسي لهذا الـ ASIN: عمود sale_price من تاب LIVE أولاً (لو المنتج
+        موجود فيه تحت الـ MSKU الأساسي بتاعه)، ولو مش موجود بيدوّر في أسعار آخر 90
+        يوم من طلبات أمازون (مجمّعة على ASIN، كل الطلبات، غير مقسومة Normal/FBA
+        لأن الإعلانات نفسها مش مقسومة كده) كبديل | Base price for this ASIN: the
+        LIVE sheet's sale_price column first (if the product exists there under
+        its primary MSKU), falling back to the last 90 days of Amazon order
+        prices (grouped by ASIN, all orders, unsplit — ads data itself isn't
+        split by fulfillment type)."""
+        live_info = live_map_dash.get(primary_sku_up)
+        if live_info and live_info.get("price") is not None:
+            return live_info["price"]
+        vals = []
+        for d in _ads_fallback_dates:
+            for p, qty in _ads_fallback_prices.get(asin_up, {}).get(d, []):
+                if p and str(p).strip().lower() not in ("", "nan", "none"):
+                    try:
+                        vals.append((float(str(p).replace(",", "")), qty))
+                    except Exception:
+                        pass
+        if vals:
+            vals.sort(key=lambda x: -x[1])
+            return vals[0][0]
+        return None
+
+    ads_profit_rows_ap, ads_loss_rows_ap = [], []
+    _links_map_ads_orphan = get_links_map_asin()
+    for asin_up_ad, ads_entries_ad in ads_map_dash.items():
+        asin_info_ad = amz_inv_map_asin.get(asin_up_ad, {})
+        mskus_ad = list(asin_info_ad.get("skus", []))
+        primary_sku_ad = mskus_ad[0].upper() if mskus_ad else asin_up_ad
+        com_info_ad = com_map_dash.get(primary_sku_ad)
+        if not ads_entries_ad or not com_info_ad:
+            continue
+        latest_price_ad = _ads_latest_price_for_asin(asin_up_ad, primary_sku_ad)
+        if latest_price_ad is None:
+            continue
+        _, net_tax_ad = compute_net_price_after_fees(latest_price_ad, com_info_ad)
+        # ── تكلفة الوحدة من تاب التكويد الخاص بأمازون (TacweedAmazon) عن طريق
+        #    الـ ASIN، وصافي الربح الفعلي بعدها، زي بالظبط منطق تاب المبيعات —
+        #    لو التكلفة مش مسجلة بتتحط صفر مع تنبيه، بدل ما تختفي بصمت من
+        #    الحساب | Unit cost from the Amazon Tacweed sheet (TacweedAmazon)
+        #    via the ASIN, and the actual net profit after subtracting it —
+        #    same logic as the Sales tab. Missing cost defaults to zero with a
+        #    flag, instead of silently dropping out of the calculation ──
+        cost_ad = resolve_unit_cost(primary_sku_ad, asin_up_ad)
+        cost_missing_ad = cost_ad is None
+        if cost_missing_ad:
+            cost_ad = 0.0
+        net_profit_ad = net_tax_ad - cost_ad
+        total_spends_ad = sum(a["spends"] for a in ads_entries_ad)
+        total_orders_ad = sum(a["orders"] for a in ads_entries_ad)
+        total_net_ad = total_orders_ad * net_profit_ad
+        result_ad = total_net_ad - total_spends_ad
+        # الصورة من خريطة ASIN مباشرة (شيت links a) | Image straight from the
+        # ASIN links map ("links a" sheet)
+        img_ad = _links_map_ads_orphan.get(asin_up_ad, "")
+        sku_disp_ad = ", ".join(mskus_ad) if mskus_ad else asin_up_ad
+        entry_ad = {"sku_up": asin_up_ad, "sku": sku_disp_ad, "asin": asin_up_ad,
+                    "img": img_ad,
+                    "spends": total_spends_ad, "orders": total_orders_ad,
+                    "net_total": total_net_ad, "result": result_ad,
+                    "cost": cost_ad, "cost_missing": cost_missing_ad}
+        if total_orders_ad <= 0 or result_ad < 0:
+            ads_loss_rows_ap.append(entry_ad)
+        else:
+            ads_profit_rows_ap.append(entry_ad)
+    ads_profit_rows_ap.sort(key=lambda r: -r["result"])
+    ads_loss_rows_ap.sort(key=lambda r: r["result"])  # الأكثر خسارة أولاً
+
+    st.markdown("##### 🔔 تنبيهات الإعلانات | Ads Alerts")
+    acp1, acp2 = st.columns(2)
+    with acp1:
+        st.markdown(
+            f'<div style="background:#f0fdf4;border:1px solid #22c55e;border-right:4px solid #22c55e;'
+            f'border-radius:12px;padding:12px 14px;direction:rtl;min-height:92px;">'
+            f'<div style="font-size:12px;color:#374151;margin-bottom:6px;">🎯 منتجات ربحانة من الإعلانات</div>'
+            f'<div style="font-size:22px;font-weight:800;color:#111827;">{len(ads_profit_rows_ap):,}</div>'
+            f'<div style="font-size:11px;color:#6b7280;">صافي ربح الطلبات &gt; المصروف على الإعلان</div></div>',
+            unsafe_allow_html=True)
+    with acp2:
+        st.markdown(
+            f'<div style="background:#fef2f2;border:1px solid #ef4444;border-right:4px solid #ef4444;'
+            f'border-radius:12px;padding:12px 14px;direction:rtl;min-height:92px;">'
+            f'<div style="font-size:12px;color:#374151;margin-bottom:6px;">🚨 منتجات خسرانة من الإعلانات</div>'
+            f'<div style="font-size:22px;font-weight:800;color:#111827;">{len(ads_loss_rows_ap):,}</div>'
+            f'<div style="font-size:11px;color:#6b7280;">المصروف على الإعلان أكبر من صافي الربح (أو من غير طلبات)</div></div>',
+            unsafe_allow_html=True)
+
+    def _render_ads_alert_sku_row(r, badges_html=""):
+        ci_al, cinfo_al = st.columns([1, 6])
+        with ci_al:
+            show_img(r["img"], 55)
+        with cinfo_al:
+            st.markdown(f"{asin_link_html(r.get('asin', r['sku']))}", unsafe_allow_html=True)
+            st.caption(f"MSKU: {r['sku']}")
+            if badges_html:
+                st.markdown(badges_html, unsafe_allow_html=True)
+
+    def _ads_insight_html(r):
+        # ── سطر التكلفة + تنبيه لو غير مسجلة | Cost line + warning if unrecorded ──
+        cost_note_ad = f' &nbsp;|&nbsp; 📦 التكلفة | Cost: <b>{r["cost"]:,.2f}</b> ريال'
+        missing_note_ad = ""
+        if r.get("cost_missing"):
+            missing_note_ad = (' <span style="color:#fbbf24;">⚠️ تكلفة المنتج غير مسجلة '
+                                '(تاب التكويد) — اعتُبرت صفر</span>')
+        if r["orders"] <= 0:
+            return (f'<span style="color:#f87171;font-size:12px;font-weight:700;">🚨 مفدتش لحد دلوقتي: '
+                    f'اتصرف {r["spends"]:,.2f} ريال ولسه ما جابش أي طلبات فعلية</span>'
+                    f'{cost_note_ad}{missing_note_ad}')
+        if r["result"] >= 0:
+            return (f'<span style="color:#4ade80;font-size:12px;font-weight:700;">🎯 الاعلان مربح: '
+                    f'عدد طلبات الاعلان {r["orders"]:,.0f} طلب بصافي ربح فعلي بعد التكلفة إجمالي {r["net_total"]:,.2f} ريال مقابل '
+                    f'{r["spends"]:,.2f} ريال مدفوع — حقق {r["result"]:,.2f} ريال 👌</span>'
+                    f'{cost_note_ad}{missing_note_ad}')
+        return (f'<span style="color:#f87171;font-size:12px;font-weight:700;">🚨 الاعلان غير مربح: '
+                f'مدفوع {r["spends"]:,.2f} ريال، لكن صافي الربح الفعلي بعد التكلفة من {r["orders"]:,.0f} طلب بس {r["net_total"]:,.2f} ريال — '
+                f'خسران {abs(r["result"]):,.2f} ريال إجمالي</span>'
+                f'{cost_note_ad}{missing_note_ad}')
+
+    with st.expander(f"🎯 عرض منتجات ربحانة من الإعلانات ({len(ads_profit_rows_ap):,}) | Show profitable-ads SKUs"):
+        if ads_profit_rows_ap:
+            df_al5 = pd.DataFrame([{
+                "ASIN": r.get("asin", ""), "MSKU": r["sku"], "طلبات الإعلان | Ad Orders": r["orders"],
+                "المصروف | Spends": round(r["spends"], 2),
+                "التكلفة | Cost": round(r["cost"], 2),
+                "صافي الربح بعد التكلفة | Net Total After Cost": round(r["net_total"], 2),
+                "النتيجة | Result": round(r["result"], 2),
+            } for r in ads_profit_rows_ap])
+            dl_btn(df_al5, "alert_ads_profit_amz", key="dl_alert_ads_profit_ap_amz")
+            for r in ads_profit_rows_ap:
+                _render_ads_alert_sku_row(r, badges_html=_ads_insight_html(r))
+        else:
+            st.caption("لا توجد أصناف ربحانة من الإعلانات حالياً")
+
+    with st.expander(f"🚨 عرض منتجات خسرانة من الإعلانات ({len(ads_loss_rows_ap):,}) | Show losing-ads SKUs"):
+        if ads_loss_rows_ap:
+            df_al6 = pd.DataFrame([{
+                "ASIN": r.get("asin", ""), "MSKU": r["sku"], "طلبات الإعلان | Ad Orders": r["orders"],
+                "المصروف | Spends": round(r["spends"], 2),
+                "التكلفة | Cost": round(r["cost"], 2),
+                "صافي الربح بعد التكلفة | Net Total After Cost": round(r["net_total"], 2),
+                "النتيجة | Result": round(r["result"], 2),
+            } for r in ads_loss_rows_ap])
+            dl_btn(df_al6, "alert_ads_loss_amz", key="dl_alert_ads_loss_ap_amz")
+            for r in ads_loss_rows_ap:
+                _render_ads_alert_sku_row(r, badges_html=_ads_insight_html(r))
+        else:
+            st.caption("لا توجد أصناف خسرانة من الإعلانات حالياً 🎉")
+
+    st.divider()
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 📢 تحليل أداء الإعلانات (على مستوى الحملة) | Ads Performance Analysis
+    # (Campaign level) — ده معتمد بس على بيانات الإعلانات الموجودة فعليًا
+    # (Views/Clicks/Orders/ATC/Spends/Revenue) من غير أي افتراض لتكلفة المنتج أو
+    # هامش ربح حقيقي. كل حساب هنا بيتجمّع من *كل* الحملات/الصفوف الخاصة بالـ SKU
+    # أو الحملة قبل ما يتحسب — مش بياخد رقم من صف واحد بس لو فيه أكتر من حملة |
+    # Based only on ad data that actually exists, no product-cost or profit-margin
+    # assumptions. Every number here is summed across *all* matching campaign rows
+    # before any ratio is computed — never taken from a single row when more than
+    # one campaign exists.
+    st.markdown("---")
+    st.markdown("## 📢 تحليل أداء الإعلانات | Ads Performance Analysis")
+    st.caption("مبني فقط على بيانات الإعلانات الموجودة في النظام حاليًا — بدون أي افتراض لتكلفة المنتج أو هامش الربح | Based only on ad data currently in the system — no product cost or profit margin assumptions")
+
+    def _apa_ratios(views, clicks, atc, orders, spends, revenue):
+        """يعيد حساب كل النسب من الأرقام الخام المجمّعة (مش من عمود جاهز في صف واحد)
+        عشان أي SKU/حملة ليها أكتر من صف تتحسب صح | Recomputes every ratio from the
+        summed raw totals (never from a single pre-computed column), so multi-row
+        SKUs/campaigns are calculated correctly."""
+        ctr = (clicks / views * 100) if views > 0 else 0.0
+        cpc = (spends / clicks) if clicks > 0 else 0.0
+        cpa = (spends / orders) if orders > 0 else 0.0
+        cvr = (orders / clicks * 100) if clicks > 0 else 0.0
+        roas = (revenue / spends) if spends > 0 else 0.0
+        click_to_atc = (atc / clicks * 100) if clicks > 0 else 0.0
+        atc_to_order = (orders / atc * 100) if atc > 0 else 0.0
+        return {"ctr": ctr, "cpc": cpc, "cpa": cpa, "cvr": cvr, "roas": roas,
+                "click_to_atc": click_to_atc, "atc_to_order": atc_to_order}
+
+    # ── تجميع كل صفوف الإعلانات (Sku × Campaign) على مستوى الحملة نفسها —
+    #    عشان أي حملة بتستهدف أكتر من SKU تتحسب مجمّعة صح ومتاخدش من صف واحد ──
+    campaigns_apa = {}
+    for sku_up_c, entries_c in ads_map_dash.items():
+        for e in entries_c:
+            cname_c = e["campaign"] or "—"
+            agg_c = campaigns_apa.setdefault(cname_c, {
+                "campaign": cname_c, "views": 0.0, "clicks": 0.0, "orders": 0.0,
+                "atc": 0.0, "spends": 0.0, "revenue": 0.0, "skus": set(),
+            })
+            agg_c["views"]   += e["views"]
+            agg_c["clicks"]  += e["clicks"]
+            agg_c["orders"]  += e["orders"]
+            agg_c["atc"]     += e["atc"]
+            agg_c["spends"]  += e["spends"]
+            agg_c["revenue"] += e["revenue"]
+            agg_c["skus"].add(sku_up_c)
+
+    for _cname, _agg in campaigns_apa.items():
+        _agg.update(_apa_ratios(_agg["views"], _agg["clicks"], _agg["atc"], _agg["orders"], _agg["spends"], _agg["revenue"]))
+        _agg["sku_count"] = len(_agg["skus"])
+        # نتيجة الإعلان بعد الإنفاق الإعلاني فقط — مش ربح حقيقي (مفيش تكلفة منتج) |
+        # Ad result after ad spend only — not real profit (no product cost known)
+        _agg["ad_result"] = _agg["revenue"] - _agg["spends"]
+
+    campaigns_list_apa = list(campaigns_apa.values())
+
+    def _apa_render_related_skus(asin_up_set, max_show=6):
+        """يعرض المنتجات (ASIN) المرتبطة بالحملة مع صورها | Renders the ASINs linked
+        to this campaign, each with its product image."""
+        asin_list_r = sorted(asin_up_set)
+        shown_r = asin_list_r[:max_show]
+        _links_map_apa_orphan = get_links_map_asin()
+        for asin_up_r in shown_r:
+            asin_info_r = amz_inv_map_asin.get(asin_up_r, {})
+            # الصورة من خريطة ASIN مباشرة (شيت links a) | Image straight from
+            # the ASIN links map ("links a" sheet)
+            img_r = _links_map_apa_orphan.get(asin_up_r, "")
+            ci_r, cinfo_r = st.columns([1, 6])
+            with ci_r:
+                show_img(img_r, 45)
+            with cinfo_r:
+                st.markdown(asin_link_html(asin_up_r), unsafe_allow_html=True)
+                mskus_r = asin_info_r.get("skus", [])
+                if mskus_r:
+                    st.caption(f"MSKU: {', '.join(mskus_r)}")
+        if len(asin_list_r) > max_show:
+            st.caption(f"+ {len(asin_list_r) - max_show} ASIN إضافي | more ASINs")
+
+    if not campaigns_list_apa:
+        st.info("لا توجد بيانات إعلانات مرفوعة حالياً | No ad data uploaded yet")
+    else:
+        # ── 1) مؤشرات أداء الإعلانات | Ad Performance Metrics (إجمالي كل الحملات) ──
+        tot_views_apa   = sum(c["views"] for c in campaigns_list_apa)
+        tot_clicks_apa  = sum(c["clicks"] for c in campaigns_list_apa)
+        tot_atc_apa     = sum(c["atc"] for c in campaigns_list_apa)
+        tot_orders_apa  = sum(c["orders"] for c in campaigns_list_apa)
+        tot_spends_apa  = sum(c["spends"] for c in campaigns_list_apa)
+        tot_revenue_apa = sum(c["revenue"] for c in campaigns_list_apa)
+        tot_ratios_apa  = _apa_ratios(tot_views_apa, tot_clicks_apa, tot_atc_apa, tot_orders_apa, tot_spends_apa, tot_revenue_apa)
+
+        st.markdown("#### 📊 مؤشرات أداء الإعلانات | Ad Performance Metrics")
+        st.caption("ℹ️ كل النسب (CTR/CPC/CPS/CVR/ROAS) بتتحسب من إجمالي الأرقام الخام لكل الحملات مجمّعة — مش من عمود جاهز في صف واحد | All ratios are computed from the raw totals across every campaign combined — never from a single pre-computed column")
+        mrow1 = st.columns(4)
+        with mrow1[0]:
+            st.markdown(_kpi_card_html("🛒", "#2563eb", "الطلبات | Orders", f"{tot_orders_apa:,.0f}"), unsafe_allow_html=True)
+        with mrow1[1]:
+            st.markdown(_kpi_card_html("👁️", "#0891b2", "مرات الظهور | Impressions", f"{tot_views_apa:,.0f}"), unsafe_allow_html=True)
+        with mrow1[2]:
+            st.markdown(_kpi_card_html("🖱️", "#7c3aed", "النقرات | Clicks", f"{tot_clicks_apa:,.0f}"), unsafe_allow_html=True)
+        with mrow1[3]:
+            st.markdown(_kpi_card_html("➕", "#059669", "الإضافة إلى السلة | Add to Cart", f"{tot_atc_apa:,.0f}"), unsafe_allow_html=True)
+        mrow2 = st.columns(4)
+        with mrow2[0]:
+            st.markdown(_kpi_card_html("📈", "#0891b2", "معدل النقر | CTR", f"{tot_ratios_apa['ctr']:.2f}%"), unsafe_allow_html=True)
+        with mrow2[1]:
+            st.markdown(_kpi_card_html("💵", "#f59e0b", "تكلفة النقرة | CPC", f"{tot_ratios_apa['cpc']:.2f} ريال"), unsafe_allow_html=True)
+        with mrow2[2]:
+            st.markdown(_kpi_card_html("🎯", "#dc2626", "تكلفة الطلب | CPS / CPA", f"{tot_ratios_apa['cpa']:.2f} ريال"), unsafe_allow_html=True)
+        with mrow2[3]:
+            st.markdown(_kpi_card_html("📊", "#9333ea", "معدل التحويل | CVR", f"{tot_ratios_apa['cvr']:.2f}%"), unsafe_allow_html=True)
+        mrow3 = st.columns(3)
+        with mrow3[0]:
+            st.markdown(_kpi_card_html("🎯", "#16a34a", "العائد على الإنفاق الإعلاني | ROAS", f"{tot_ratios_apa['roas']:.2f}"), unsafe_allow_html=True)
+        with mrow3[1]:
+            st.markdown(_kpi_card_html("💰", "#16a34a", "الإيراد | Revenue", f"{tot_revenue_apa:,.2f} ريال"), unsafe_allow_html=True)
+        with mrow3[2]:
+            st.markdown(_kpi_card_html("💸", "#dc2626", "الإنفاق الإعلاني | Ad Spend", f"{tot_spends_apa:,.2f} ريال"), unsafe_allow_html=True)
+
+        st.write("")
+
+        # ── 2) تحليل مسار الإعلان | Advertising Funnel ──
+        st.markdown("#### 🔻 تحليل مسار الإعلان | Advertising Funnel")
+        st.caption("عشان تعرف أين يحدث انخفاض الأداء في مسار الإعلان | See exactly where performance drops along the funnel")
+        fcols_apa = st.columns(4)
+        funnel_stages_apa = [
+            ("👁️ مرات الظهور | Impressions", tot_views_apa, None),
+            ("🖱️ النقرات | Clicks", tot_clicks_apa, tot_ratios_apa["ctr"]),
+            ("➕ الإضافة إلى السلة | Add to Cart", tot_atc_apa, tot_ratios_apa["click_to_atc"]),
+            ("🛒 الطلبات | Orders", tot_orders_apa, tot_ratios_apa["atc_to_order"]),
+        ]
+        for fc_apa, (label_f, val_f, rate_f) in zip(fcols_apa, funnel_stages_apa):
+            with fc_apa:
+                rate_html_f = (f'<div style="font-size:11px;color:#f59e0b;margin-top:4px;">↓ {rate_f:.1f}%</div>'
+                               if rate_f is not None else "")
+                st.markdown(
+                    f'<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    f'padding:12px 10px;text-align:center;">'
+                    f'<div style="font-size:11px;color:#94a3b8;">{label_f}</div>'
+                    f'<div style="font-size:20px;font-weight:800;color:#e2e8f0;">{val_f:,.0f}</div>'
+                    f'{rate_html_f}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="margin-top:8px;font-size:12px;color:#94a3b8;">'
+            f'📈 معدل النقر | CTR: <b style="color:#e2e8f0;">{tot_ratios_apa["ctr"]:.2f}%</b> &nbsp;|&nbsp; '
+            f'النقر → السلة | Click → Cart: <b style="color:#e2e8f0;">{tot_ratios_apa["click_to_atc"]:.1f}%</b> &nbsp;|&nbsp; '
+            f'السلة → الطلب | Cart → Order: <b style="color:#e2e8f0;">{tot_ratios_apa["atc_to_order"]:.1f}%</b> &nbsp;|&nbsp; '
+            f'معدل التحويل الكلي | CVR: <b style="color:#e2e8f0;">{tot_ratios_apa["cvr"]:.2f}%</b>'
+            f'</div>', unsafe_allow_html=True)
+
+        st.write("")
+
+        # ── دوال التحليل التلقائي / التصنيف / التوصية — مبنية على أكتر من مؤشر مع
+        #    بعض (ROAS+CPA+CVR+CTR+CPC+Orders+Spend+Revenue) مش مؤشر واحد بس ──
+        def _apa_insight(c):
+            if c["orders"] <= 0:
+                return ("🔴", "أداء ضعيف | Poor Performance",
+                        f"اتصرف {c['spends']:,.2f} ريال على الحملة ولسه ما جابتش أي طلبات فعلية.")
+            score_c = 0
+            if c["roas"] >= 3: score_c += 2
+            elif c["roas"] >= 1.5: score_c += 1
+            elif c["roas"] < 1: score_c -= 2
+            if c["cvr"] >= 3: score_c += 1
+            elif c["cvr"] < 1: score_c -= 1
+            if c["ctr"] >= 1: score_c += 1
+            elif c["ctr"] < 0.3: score_c -= 1
+            if c["spends"] > 0 and c["revenue"] < c["spends"]:
+                score_c -= 2
+            if score_c >= 3:
+                return ("🟢", "أداء جيد | Good Performance",
+                        f"الحملة تحقق ROAS {c['roas']:.2f} مع معدل تحويل {c['cvr']:.2f}% جيد.")
+            elif score_c >= 0:
+                return ("🟡", "يحتاج إلى تحسين | Needs Improvement",
+                        f"الحملة بتاخد نقرات معقولة (CTR {c['ctr']:.2f}%)، لكن التحويل للطلبات ({c['cvr']:.2f}%) أو الـ ROAS ({c['roas']:.2f}) لسه محتاج تحسين.")
+            else:
+                return ("🔴", "أداء ضعيف | Poor Performance",
+                        f"تكلفة الطلب {c['cpa']:,.2f} ريال مرتفعة مقارنة بعدد الطلبات ({c['orders']:,.0f}) والـ ROAS {c['roas']:.2f}.")
+
+        def _apa_classification(c):
+            icon_i, _t, _d = _apa_insight(c)
+            if c["orders"] <= 0:
+                return "🔴", "أداء ضعيف | Poor Performance"
+            if icon_i == "🟢":
+                return "🟢", "أداء قوي | Strong Performance"
+            if icon_i == "🟡":
+                if c["roas"] < 1.5 and c["cvr"] < 2:
+                    return "🟠", "يحتاج إلى تحسين | Needs Improvement"
+                return "🟡", "يحتاج إلى مراقبة | Needs Monitoring"
+            return "🔴", "أداء ضعيف | Poor Performance"
+
+        def _apa_recommendation(c):
+            cls_icon_c, _l = _apa_classification(c)
+            if c["orders"] <= 0 and c["spends"] > 0:
+                return "قلل الإنفاق | Reduce Spend"
+            if cls_icon_c == "🟢":
+                return "استمر | Continue"
+            if cls_icon_c == "🟡":
+                return "راقب | Monitor"
+            if cls_icon_c == "🟠":
+                return "حسّن الحملة | Optimize"
+            return "راجع الحملة | Review"
+
+        # ── 5) مقارنة الحملات | Campaign Comparison (قبل التفاصيل عشان تبان الأهم فوق) ──
+        st.markdown("#### 🏆 مقارنة الحملات | Campaign Comparison")
+        camps_with_orders_apa = [c for c in campaigns_list_apa if c["orders"] > 0]
+        camps_with_clicks_apa = [c for c in campaigns_list_apa if c["clicks"] > 0]
+        comp_specs_apa = [
+            ("🏆", "أفضل حملة حسب ROAS | Best by ROAS", camps_with_orders_apa, lambda c: c["roas"], lambda c: f"ROAS {c['roas']:.2f}"),
+            ("💰", "أعلى إيراد | Highest Revenue", campaigns_list_apa, lambda c: c["revenue"], lambda c: f"{c['revenue']:,.2f} ريال"),
+            ("🛒", "أكثر طلبات | Most Orders", campaigns_list_apa, lambda c: c["orders"], lambda c: f"{c['orders']:,.0f} طلب"),
+            ("💸", "أعلى إنفاق إعلاني | Highest Ad Spend", campaigns_list_apa, lambda c: c["spends"], lambda c: f"{c['spends']:,.2f} ريال"),
+            ("🎯", "أفضل تكلفة طلب | Best CPA", camps_with_orders_apa, lambda c: -c["cpa"], lambda c: f"{c['cpa']:.2f} ريال"),
+            ("📈", "أفضل معدل تحويل | Best CVR", camps_with_clicks_apa, lambda c: c["cvr"], lambda c: f"{c['cvr']:.2f}%"),
+            ("👁️", "أفضل معدل نقر | Best CTR", campaigns_list_apa, lambda c: c["ctr"], lambda c: f"{c['ctr']:.2f}%"),
+        ]
+        comp_cols_apa = st.columns(2)
+        for i_apa, (icon_s, label_s, pool_s, key_s, fmt_s) in enumerate(comp_specs_apa):
+            best_c_apa = max(pool_s, key=key_s, default=None)
+            with comp_cols_apa[i_apa % 2]:
+                if best_c_apa:
+                    st.markdown(_kpi_card_html(icon_s, "#2563eb", label_s, best_c_apa["campaign"]), unsafe_allow_html=True)
+                    st.caption(fmt_s(best_c_apa))
+                    with st.expander(f"🏷️ الأصناف (ASIN) | ASINs ({best_c_apa['sku_count']})"):
+                        _apa_render_related_skus(best_c_apa["skus"])
+                else:
+                    st.markdown(_kpi_card_html(icon_s, "#6b7280", label_s, "—"), unsafe_allow_html=True)
+
+        st.write("")
+
+        # ── 3+6+7) التحليل التلقائي + التصنيف + التوصية لكل حملة | Automatic
+        #    insight + classification + recommendation per campaign ──
+        st.markdown("#### 🔎 تحليل كل حملة | Per-Campaign Analysis")
+        for c_apa in sorted(campaigns_list_apa, key=lambda x: -x["spends"]):
+            icon_i, title_i, desc_i = _apa_insight(c_apa)
+            icon_c, label_c = _apa_classification(c_apa)
+            rec_c = _apa_recommendation(c_apa)
+            bg_i = {"🟢": "#052e1655", "🟡": "#78350f33", "🔴": "#4c051655"}[icon_i]
+            border_i = {"🟢": "#16a34a", "🟡": "#f59e0b", "🔴": "#dc2626"}[icon_i]
+            with st.expander(f"{icon_i} {c_apa['campaign']} — {c_apa['sku_count']} ASIN | {c_apa['orders']:,.0f} طلب"):
+                st.markdown(
+                    f'<div dir="rtl" style="background:{bg_i};border:1px solid {border_i};border-radius:8px;padding:8px 12px;margin-bottom:8px;">'
+                    f'<b>{icon_i} {title_i}</b><br><span style="font-size:13px;">{desc_i}</span>'
+                    f'</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f"👁️ ظهور: {c_apa['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {c_apa['clicks']:,.0f} &nbsp;|&nbsp; "
+                    f"➕ سلة: {c_apa['atc']:,.0f} &nbsp;|&nbsp; 🛒 طلبات: {c_apa['orders']:,.0f}<br>"
+                    f"📊 CTR: {c_apa['ctr']:.2f}% &nbsp;|&nbsp; 💵 CPC: {c_apa['cpc']:.2f} &nbsp;|&nbsp; "
+                    f"🎯 CPS/CPA: {c_apa['cpa']:.2f} &nbsp;|&nbsp; 📈 CVR: {c_apa['cvr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {c_apa['roas']:.2f}<br>"
+                    f"💸 إنفاق: {c_apa['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {c_apa['revenue']:,.2f} ريال &nbsp;|&nbsp; "
+                    f"📉 نتيجة الإعلان بعد الإنفاق الإعلاني | Ad Result After Ad Spend: <b>{c_apa['ad_result']:,.2f} ريال</b>")
+                st.markdown(f"🏷️ التصنيف | Classification: **{icon_c} {label_c}**")
+                st.markdown(f"✅ التوصية | Recommendation: **{rec_c}**")
+                st.markdown("🏷️ **الأصناف المرتبطة | Related ASINs**")
+                _apa_render_related_skus(c_apa["skus"])
+
+        st.caption(
+            "ℹ️ مقارنة الفترة الحالية بالفترة السابقة (📈/📉 Revenue, Orders, Ad Spend, ROAS, CPA, CTR, CVR, "
+            "Clicks, Add to Cart) مش متاحة هنا لسه — لأن تاب الإعلانات بيحفظ إجمالي كل حملة لحظيًا من غير "
+            "تاريخ يومي، فمفيش فترة سابقة نقارن بيها. لو حبينا نفعّلها، محتاجين نبدأ نسجّل نسخة/تاريخ لكل "
+            "تحديث في شيت الإعلانات | Current-vs-previous-period comparison isn't available yet because the "
+            "Advertisements sheet only stores each campaign's live cumulative totals, with no daily date "
+            "history to compare against. Enabling it would require snapshotting the ads sheet with dates.")
+
+
+
 # ══ تاب المبيعات الموحد — المفتاح الأساسي = كود التكويد | Unified Sales tab keyed by Tacweed code ══
 # بدل تابين (FBN / FBB): كل كود تكويد له كارت واحد فيه (صورة، شارات المستودع/التكلفة، شحنات الصين)،
 # وتحته كل SKU تابع للكود، وتحت كل SKU مبيعات FBN ومبيعات FBB (لو فيه) بنفس التفاصيل القديمة بالظبط.
@@ -5639,7 +7046,8 @@ def _t14_channel_part(r, ch, with_sku_level):
     """مبيعات قناة واحدة (FBN أو FBB) للـ SKU: أمس، الأيام، المخزون، حالة التغطية، الجدولة.
     with_sku_level=True بيعرض كمان الجدولة الحديثة/الموافقة المعلقة/الملاحظات (اللي هي على مستوى الـ SKU)
     مرة واحدة بس."""
-    _chip = {"FBN": ("#064e3b", "#6ee7b7", "🅽 مبيعات نون FBN"), "FBB": ("#1e3a8a", "#bfdbfe", "🅱 مبيعات نون FBB")}[ch]
+    _chip = {"FBN": ("#064e3b", "#6ee7b7", "🅽 مبيعات نون FBN"), "FBB": ("#1e3a8a", "#bfdbfe", "🅱 مبيعات نون FBB"),
+             "FSAB": ("#7c2d12", "#fed7aa", "🅰 مبيعات أمازون عادي FSAB"), "FBA": ("#78350f", "#fde68a", "📦 مبيعات أمازون FBA")}[ch]
     st.markdown(f'<span class="wh-badge" style="background:{_chip[0]};color:{_chip[1]};">{_chip[2]}</span>', unsafe_allow_html=True)
     # ══ أمس بارز ══
     yesterday_t14 = sales_dates[0] if sales_dates else None
@@ -5822,7 +7230,7 @@ def _t14_channel_part(r, ch, with_sku_level):
         and not un_notes
         and not recent_sched_t14
     )
-    if is_needs_sched_only:
+    if is_needs_sched_only and ch in ("FBN", "FBB"):
         _new_transferred.append({
             "sku": r["sku"], "sku_up": r["sku_up"], "stock": r["stock"],
             "sales_month": r["sales_month"], "img": r["img"],
@@ -5837,13 +7245,74 @@ def _t14_channel_part(r, ch, with_sku_level):
     if with_sku_level:
         render_recent_expired_note(r["sku"])
 
+# ══ أمازون داخل تاب المبيعات الموحد — صفوف ASIN بقناتين: عادي (FSAB) و FBA ══
+# Amazon inside the unified Sales tab — ASIN rows with two channels: normal (FSAB) and FBA.
+def _t14_build_rows_amz(kind, sales_dates, sales_display_days):
+    """نفس بناء تابي مبيعات أمازون في App.py بالظبط (مجمّع على ASIN، شهري = مجموع 30 يوم فعلي).
+    kind: 'FSAB' (تخزين عادي) أو 'FBA'. بيرجع (rows, multi_counts)."""
+    today_a = datetime.now().date()
+    dates_30d = [today_a - timedelta(days=i) for i in range(1, 31)]
+    if kind == "FSAB":
+        mc = build_daily_orders_counts_amazon_normal_asin(sales_dates)
+        pm = build_daily_orders_prices_amazon_normal_asin(sales_dates)
+        mo = build_daily_orders_counts_amazon_normal_asin(dates_30d)
+    else:
+        mc = build_daily_orders_counts_amazon_fba_asin(sales_dates)
+        pm = build_daily_orders_prices_amazon_fba_asin(sales_dates)
+        mo = build_daily_orders_counts_amazon_fba_asin(dates_30d)
+    rows = build_amazon_asin_sales_rows(mc, pm, mo, sales_dates, sales_display_days)
+    return rows, mc
+
+def _t14_sku_part_amz(r):
+    """الجزء الخاص بالـ ASIN نفسه (مرة واحدة لكل ASIN): الرابط، MSKU، الإعلانات، السعر والربح وحكم الإعلان."""
+    asin_up = (r.get("asin") or "").upper()
+    st.markdown(f"**ASIN:** {asin_link_html(r.get('asin', ''))}", unsafe_allow_html=True)
+    st.caption(f"MSKU: {r['sku']}")
+    if r.get("not_in_inventory"):
+        st.markdown(
+            '<span style="background:#78350f;color:#fde68a;padding:2px 8px;'
+            'border-radius:6px;font-size:12px;">⚠️ مش موجود في مخزون أمازون المرفوع | Not in uploaded Amazon stock</span>',
+            unsafe_allow_html=True)
+    ads_entries = ads_map_amz_t14.get(asin_up)
+    total_spends  = sum(a["spends"]  for a in ads_entries) if ads_entries else 0.0
+    total_revenue = sum(a["revenue"] for a in ads_entries) if ads_entries else 0.0
+    total_orders  = sum(a["orders"]  for a in ads_entries) if ads_entries else 0.0
+    if ads_entries:
+        with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ads_entries)} عرض | offer(s)"):
+            st.markdown(
+                f"💸 **إجمالي المصروف:** {total_spends:,.2f} ريال &nbsp;|&nbsp; "
+                f"💰 **إجمالي الإيراد:** {total_revenue:,.2f} ريال &nbsp;|&nbsp; "
+                f"🛒 **طلبات من الإعلان:** {total_orders:,.0f}")
+            for ad in ads_entries:
+                st.markdown(
+                    f"**{ad['campaign']}**<br>"
+                    f"👁️ ظهور: {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {ad['clicks']:,.0f} &nbsp;|&nbsp; "
+                    f"🛒 طلبات: {ad['orders']:,.0f}<br>"
+                    f"💸 مصروف: {ad['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {ad['revenue']:,.2f} ريال<br>"
+                    f"📊 CTR: {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {ad['roas']:.2f} &nbsp;|&nbsp; "
+                    f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%",
+                    unsafe_allow_html=True)
+                st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+    render_price_profit_block_t14(
+        r, com_map_t14, live_map_t14, sales_dates,
+        ads_entries, total_orders, total_spends)
+
+def _t14_trendyol_placeholder():
+    """مكان محجوز لتريندول — هيتملى لما نضيف التكامل بعدين | Reserved slot for Trendyol (filled in later)."""
+    with st.container(border=True):
+        st.markdown('<span class="wh-badge" style="background:#4c1d95;color:#ddd6fe;">🟣 تريندول | Trendyol</span>',
+                    unsafe_allow_html=True)
+        st.caption("🔜 قريبًا — مكان محجوز لمبيعات تريندول | Reserved for Trendyol sales")
+
 if st.session_state["nav_page"] == "tab14":
     with tab14:
         if _tab_gate("tab14", "🛒 المبيعات | Sales"):
             st.subheader("🛒 المبيعات اليومية | Daily Sales")
-            st.caption("المفتاح الأساسي هو كود التكويد 🏷️ — كل كود له كارت واحد، وتحته كل SKU تابع له، وتحت كل SKU مبيعات FBN وFBB | "
-                       "Keyed by Tacweed code: one card per code, with its SKUs and their FBN / FBB sales underneath")
+            st.caption("المفتاح الأساسي هو كود التكويد 🏷️ — كل كود له كارت واحد، وتحته كارت لكل متجر جنب بعض: "
+                       "نون 🟢 | أمازون 🟠 | تريندول 🟣 (قريبًا) | "
+                       "Keyed by Tacweed code: one block per code with a card per store side by side — Noon | Amazon | Trendyol (soon)")
             render_tacweed_upload("sales")
+            render_tacweed_amazon_upload("sales")
             render_warehouse_stock_upload("sales")
 
             sales_display_days = int(load_settings().get("sales_display_days","7") or 7)
@@ -5861,23 +7330,31 @@ if st.session_state["nav_page"] == "tab14":
             delay_days_t14 = int(load_settings().get("schedule_delay_days","3") or 3)
             coverage_days_t14 = int(load_settings().get("schedule_coverage_days","15") or 15)
 
-            if not inv_map:
-                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+            if not inv_map and not amz_inv_map_asin:
+                st.info("ارفع ملف المخزون أولاً (نون: تاب المخزون / أمازون: StockAmazon) | Upload Inventory first")
             else:
                 rows_fbn_t14, multi_fbn_t14 = _t14_build_rows("fbn", sales_dates, sales_display_days)
                 rows_fbb_all_t14, multi_fbb_t14 = _t14_build_rows("fbb", sales_dates, sales_display_days)
                 # FBB: بنعرض بس SKUs اللي باعت FBB في الفترة (أو مش في ملف المخزون) — عشان الكارت ميتملاش بصفوف صفرية
                 rows_fbb_t14 = [r for r in rows_fbb_all_t14 if r["total_recent"] > 0 or r.get("not_in_inventory")]
+                # أمازون: عادي FSAB (كل ASIN في مخزون أمازون + اليتامى اللي باعت) و FBA (اللي باع بس)
+                rows_fsab_t14, multi_fsab_t14 = _t14_build_rows_amz("FSAB", sales_dates, sales_display_days)
+                rows_fba_all_t14, multi_fba_t14 = _t14_build_rows_amz("FBA", sales_dates, sales_display_days)
+                rows_fba_t14 = [r for r in rows_fba_all_t14 if r["total_recent"] > 0 or r.get("not_in_inventory")]
 
-                # ══ إجماليات اليومية في الأعلى (FBN + FBB) من صفوف الأوردرز الخام ══
+                # ══ إجماليات اليومية في الأعلى (نون FBN+FBB + أمازون FSAB+FBA) من صفوف الأوردرز الخام ══
                 tot_fbn = {d: sum(dc.get(d, 0) for dc in multi_fbn_t14.values()) for d in sales_dates}
                 tot_fbb = {d: sum(dc.get(d, 0) for dc in multi_fbb_t14.values()) for d in sales_dates}
+                tot_fsab = {d: sum(dc.get(d, 0) for dc in multi_fsab_t14.values()) for d in sales_dates}
+                tot_fba = {d: sum(dc.get(d, 0) for dc in multi_fba_t14.values()) for d in sales_dates}
                 st.markdown("#### 📊 إجمالي المبيعات اليومية | Daily Sales Totals")
                 total_cols = st.columns(min(len(sales_dates), sales_display_days))
                 for ci, (d, lbl) in enumerate(zip(sales_dates, sales_labels)):
                     if ci < len(total_cols):
                         with total_cols[ci]:
-                            day_total = tot_fbn.get(d, 0) + tot_fbb.get(d, 0)
+                            day_noon = tot_fbn.get(d, 0) + tot_fbb.get(d, 0)
+                            day_amz = tot_fsab.get(d, 0) + tot_fba.get(d, 0)
+                            day_total = day_noon + day_amz
                             is_yesterday = (ci == 0)
                             if is_yesterday:
                                 bg    = "#14532d" if day_total > 0 else "#7f1d1d"
@@ -5892,20 +7369,28 @@ if st.session_state["nav_page"] == "tab14":
                                 f'<div style="font-size:11px;color:#94a3b8;">{"🔴 " if is_yesterday and day_total==0 else ("🟢 " if is_yesterday else "")}{lbl.split("(")[0].strip()}</div>' +
                                 f'<div style="font-size:13px;color:#6b7280;">{d.strftime("%m-%d")}</div>' +
                                 f'<div style="font-size:{"28" if is_yesterday else "22"}px;font-weight:bold;color:{num_color};">{day_total}</div>' +
-                                f'<div style="font-size:11px;color:#94a3b8;">FBN {tot_fbn.get(d, 0)} · FBB {tot_fbb.get(d, 0)}</div>' +
+                                f'<div style="font-size:11px;color:#94a3b8;">🟢 نون {day_noon} (FBN {tot_fbn.get(d, 0)} · FBB {tot_fbb.get(d, 0)})</div>' +
+                                f'<div style="font-size:11px;color:#94a3b8;">🟠 أمازون {day_amz} (FSAB {tot_fsab.get(d, 0)} · FBA {tot_fba.get(d, 0)})</div>' +
                                 '</div>',
                                 unsafe_allow_html=True)
                 st.divider()
 
-                # ══ تجميع بالكود: code -> {SKU -> {"FBN": row, "FBB": row}} ══
+                # ══ تجميع بالكود: code -> {SKUs نون} + {ASINs أمازون} ══
                 tac_map_t14 = get_tacweed_map()
+                tac_amz_map_t14 = get_tacweed_amazon_map()
                 sku_rows_t14 = {}
                 for r in rows_fbn_t14:
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBN"] = r
                 for r in rows_fbb_t14:
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBB"] = r
+                asin_rows_t14 = {}
+                for r in rows_fsab_t14:
+                    asin_rows_t14.setdefault((r.get("asin") or r["sku_up"]).upper(), {})["FSAB"] = r
+                for r in rows_fba_t14:
+                    asin_rows_t14.setdefault((r.get("asin") or r["sku_up"]).upper(), {})["FBA"] = r
 
-                srch_t14 = st.text_input("🔍 بحث بالكود أو SKU | Search code / SKU", key="srch_t14", placeholder="اكتب كود التكويد أو SKU...")
+                srch_t14 = st.text_input("🔍 بحث بالكود أو SKU أو ASIN | Search code / SKU / ASIN", key="srch_t14",
+                                         placeholder="اكتب كود التكويد أو SKU أو ASIN...")
                 q_t14 = srch_t14.strip().upper()
                 groups_t14 = {}
                 for sku_up, chs in sku_rows_t14.items():
@@ -5913,13 +7398,24 @@ if st.session_state["nav_page"] == "tab14":
                     if q_t14 and q_t14 not in sku_up and q_t14 not in code.upper():
                         continue
                     key = code or f"__SKU__{sku_up}"
-                    g = groups_t14.setdefault(key, {"code": code, "skus": []})
+                    g = groups_t14.setdefault(key, {"code": code, "skus": [], "asins": []})
                     g["skus"].append(sku_up)
+                for asin_up, chs in asin_rows_t14.items():
+                    code = (tac_amz_map_t14.get(asin_up, "") or "").strip()
+                    r0 = chs.get("FSAB") or chs.get("FBA")
+                    msk_txt = " ".join(r0.get("mskus") or [r0["sku_up"]]).upper()
+                    if q_t14 and q_t14 not in asin_up and q_t14 not in msk_txt and q_t14 not in code.upper():
+                        continue
+                    key = code or f"__ASIN__{asin_up}"
+                    g = groups_t14.setdefault(key, {"code": code, "skus": [], "asins": []})
+                    g["asins"].append(asin_up)
 
+                def _yv(chs, ch):
+                    rr = chs.get(ch)
+                    return rr["day_counts"].get(sales_dates[0], 0) if (rr and sales_dates) else 0
                 def _g_yday(g):
-                    return sum((chs.get("FBN", {}).get("day_counts", {}).get(sales_dates[0], 0) if sales_dates else 0)
-                               + (chs.get("FBB", {}).get("day_counts", {}).get(sales_dates[0], 0) if sales_dates else 0)
-                               for chs in (sku_rows_t14[s] for s in g["skus"]))
+                    return (sum(_yv(sku_rows_t14[s], "FBN") + _yv(sku_rows_t14[s], "FBB") for s in g["skus"])
+                            + sum(_yv(asin_rows_t14[a], "FSAB") + _yv(asin_rows_t14[a], "FBA") for a in g["asins"]))
                 groups_sorted_t14 = sorted(groups_t14.values(), key=lambda g: -_g_yday(g))
 
                 # جدول تحميل
@@ -5931,14 +7427,23 @@ if st.session_state["nav_page"] == "tab14":
                             rn, rb = chs.get("FBN"), chs.get("FBB")
                             base = rn or rb
                             _dl_rows.append({
-                                "تكويد | Code": g["code"], "SKU": base["sku"],
+                                "المتجر | Store": "Noon", "تكويد | Code": g["code"], "SKU / ASIN": base["sku"],
                                 **{"FBN " + sales_labels[i]: (rn["day_counts"].get(d, 0) if rn else 0) for i, d in enumerate(sales_dates)},
                                 **{"FBB " + sales_labels[i]: (rb["day_counts"].get(d, 0) if rb else 0) for i, d in enumerate(sales_dates)},
                                 "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
-                    df_t14 = pd.DataFrame(_dl_rows)
+                        for a in g["asins"]:
+                            chs = asin_rows_t14[a]
+                            rs, rf = chs.get("FSAB"), chs.get("FBA")
+                            base = rs or rf
+                            _dl_rows.append({
+                                "المتجر | Store": "Amazon", "تكويد | Code": g["code"], "SKU / ASIN": f"{a} ({base['sku']})",
+                                **{"FSAB " + sales_labels[i]: (rs["day_counts"].get(d, 0) if rs else 0) for i, d in enumerate(sales_dates)},
+                                **{"FBA " + sales_labels[i]: (rf["day_counts"].get(d, 0) if rf else 0) for i, d in enumerate(sales_dates)},
+                                "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
+                    df_t14 = pd.DataFrame(_dl_rows).fillna(0)
                     c1, c2 = st.columns(2)
                     with c1: dl_btn(df_t14, "sales_daily", key="dlbtn_t14")
-                    with c2: st.info(f"🏷️ أكواد: {len(groups_sorted_t14)} | 📦 SKUs: {len(df_t14)} | 📅 {sales_display_days} يوم")
+                    with c2: st.info(f"🏷️ أكواد: {len(groups_sorted_t14)} | 📦 صفوف: {len(df_t14)} | 📅 {sales_display_days} يوم")
 
                 # ══ قائمة SKUs المرحلة من المبيعات (محتاج جدولة فقط) ══
                 _new_transferred = []
@@ -5947,56 +7452,102 @@ if st.session_state["nav_page"] == "tab14":
                 recent_sched_map_t14 = get_recent_schedule_rows(days_back=4)
                 pending_approval_skus_t14 = get_pending_approval_skus()
                 ads_map_t14 = get_ads_map()
+                ads_map_amz_t14 = get_ads_map_amazon()
                 com_map_t14 = get_com_map()
                 live_map_t14 = get_live_map()
                 xdock_threshold_t14 = int(load_settings().get("xdock_low_stock_threshold","10") or 10)
 
-                render_china_sales_status([s for g in groups_sorted_t14 for s in g["skus"]])  # 🚢 حالة ربط بيانات الصين
+                render_china_sales_status([s for g in groups_sorted_t14 for s in (g["skus"] + g["asins"])])  # 🚢 حالة ربط بيانات الصين
                 st.divider()
                 y0 = sales_dates[0] if sales_dates else None
+                wh_lookup_t14 = _china_wh_lookup()
                 for g in groups_sorted_t14:
-                    code_rows = [sku_rows_t14[s] for s in g["skus"]]
-                    first_sku = g["skus"][0]
-                    first_row = code_rows[0].get("FBN") or code_rows[0].get("FBB")
-                    img_t14 = next(((c.get("FBN") or c.get("FBB")).get("img") for c in code_rows if (c.get("FBN") or c.get("FBB")).get("img")), "")
-                    y_n = sum(c["FBN"]["day_counts"].get(y0, 0) for c in code_rows if "FBN" in c) if y0 else 0
-                    y_b = sum(c["FBB"]["day_counts"].get(y0, 0) for c in code_rows if "FBB" in c) if y0 else 0
-                    t_n = sum(c["FBN"]["total_recent"] for c in code_rows if "FBN" in c)
-                    t_b = sum(c["FBB"]["total_recent"] for c in code_rows if "FBB" in c)
+                    noon_chs = [sku_rows_t14[s] for s in g["skus"]]
+                    amz_chs = [asin_rows_t14[a] for a in g["asins"]]
+                    first_key = g["skus"][0] if g["skus"] else g["asins"][0]
+                    first_row = (((noon_chs[0].get("FBN") or noon_chs[0].get("FBB")) if noon_chs else None)
+                                 or (amz_chs[0].get("FSAB") or amz_chs[0].get("FBA")))
+                    # الصور على أساس الـ SKU: صورة SKU نون الأول، وبعدين صورة أمازون (اللي بدورها SKU/MSKU ثم ASIN)
+                    img_t14 = (next((c.get(k).get("img") for c in noon_chs for k in ("FBN", "FBB") if c.get(k) and c.get(k).get("img")), "")
+                               or next((c.get(k).get("img") for c in amz_chs for k in ("FSAB", "FBA") if c.get(k) and c.get(k).get("img")), ""))
+                    y_n = sum(_yv(c, "FBN") for c in noon_chs); y_b = sum(_yv(c, "FBB") for c in noon_chs)
+                    y_a = sum(_yv(c, "FSAB") for c in amz_chs); y_f = sum(_yv(c, "FBA") for c in amz_chs)
+                    t_n = sum(c["FBN"]["total_recent"] for c in noon_chs if "FBN" in c)
+                    t_b = sum(c["FBB"]["total_recent"] for c in noon_chs if "FBB" in c)
+                    t_a = sum(c["FSAB"]["total_recent"] for c in amz_chs if "FSAB" in c)
+                    t_f = sum(c["FBA"]["total_recent"] for c in amz_chs if "FBA" in c)
                     c_img, c_info = st.columns([1, 7])
                     with c_img:
                         show_img(img_t14, 70)
                     with c_info:
-                        # ── مستوى الكود: شارات الكود/المستودع/التكلفة/النفاد + اتباع منه كام FBN وFBB + شحنات الصين ──
-                        tc_badge_t14 = warehouse_available_badge(first_sku)
+                        # ── مستوى الكود: شارات الكود/المستودع/التكلفة/النفاد (محسوبة من سحب نون + أمازون) ──
+                        if g["skus"]:
+                            tc_badge_t14 = warehouse_available_badge(first_key)
+                        else:
+                            tc_badge_t14 = warehouse_available_badge_amazon(first_key)
                         if tc_badge_t14:
                             st.markdown(tc_badge_t14, unsafe_allow_html=True)
                         else:
                             st.markdown('<span class="tacweed-badge" style="background:#374151;color:#e5e7eb;">🏷️ بدون تكويد</span>',
                                         unsafe_allow_html=True)
+                        wh_g = wh_lookup_t14.get(first_key)
+                        if wh_g and wh_g.get("daily_draw") is not None:
+                            st.caption(f"🧮 سحب المستودع اليومي (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} "
+                                       f"= {wh_g['daily_draw']:g} قطعة/يوم — شارة النفاد وموعد الطلب محسوبين على المجموع")
                         st.markdown(
                             f'<div style="margin:4px 0;font-size:14px;font-weight:700;color:#e2e8f0;">'
-                            f'🛒 اتباع منه: 🅽 FBN أمس <b>{y_n}</b> (إجمالي {sales_display_days} أيام {t_n}) &nbsp;|&nbsp; '
-                            f'🅱 FBB أمس <b>{y_b}</b> (إجمالي {sales_display_days} أيام {t_b})</div>',
+                            f'🛒 اتباع منه أمس: 🟢 نون — 🅽 FBN <b>{y_n}</b> (إجمالي {sales_display_days} أيام {t_n}) · 🅱 FBB <b>{y_b}</b> ({t_b}) '
+                            f'&nbsp;|&nbsp; 🟠 أمازون — FSAB <b>{y_a}</b> ({t_a}) · FBA <b>{y_f}</b> ({t_f})</div>',
                             unsafe_allow_html=True)
-                        render_china_for_sku(first_sku, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالتكويد)
-                        # ── مستوى الـ SKU: كل SKU تابع للكود ──
-                        for si, s in enumerate(g["skus"]):
-                            chs = sku_rows_t14[s]
-                            if si > 0:
-                                st.markdown("<hr style='margin:8px 0;border-color:#334155;'>", unsafe_allow_html=True)
-                            r_any = chs.get("FBN") or chs.get("FBB")
-                            # الأسعار المجمّعة من القناتين عشان بلوك السعر يلاقي آخر سعر بيع مهما كانت القناة
-                            r_sku = dict(r_any, day_prices={d: list(chs["FBN"]["day_prices"].get(d, [])) if "FBN" in chs else []
-                                                            for d in sales_dates})
-                            if "FBB" in chs:
-                                for d in sales_dates:
-                                    r_sku["day_prices"][d] = r_sku["day_prices"].get(d, []) + list(chs["FBB"]["day_prices"].get(d, []))
-                            _t14_sku_part(r_sku)
-                            if "FBN" in chs:
-                                _t14_channel_part(chs["FBN"], "FBN", True)
-                            if "FBB" in chs:
-                                _t14_channel_part(chs["FBB"], "FBB", "FBN" not in chs)
+                        render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالتكويد)
+
+                    # ══ كروت المتاجر جنب بعض: نون | أمازون | تريندول (مكان محجوز) ══
+                    col_noon, col_amz, col_tr = st.columns(3)
+                    with col_noon:
+                        with st.container(border=True):
+                            st.markdown('<span class="wh-badge" style="background:#064e3b;color:#6ee7b7;">🟢 نون | Noon</span>',
+                                        unsafe_allow_html=True)
+                            if not g["skus"]:
+                                st.caption("— مفيش منتج على نون مربوط بالكود ده | no Noon product linked to this code")
+                            for si, s in enumerate(g["skus"]):
+                                chs = sku_rows_t14[s]
+                                if si > 0:
+                                    st.markdown("<hr style='margin:8px 0;border-color:#334155;'>", unsafe_allow_html=True)
+                                r_any = chs.get("FBN") or chs.get("FBB")
+                                # الأسعار المجمّعة من القناتين عشان بلوك السعر يلاقي آخر سعر بيع مهما كانت القناة
+                                r_sku = dict(r_any, day_prices={d: list(chs["FBN"]["day_prices"].get(d, [])) if "FBN" in chs else []
+                                                                for d in sales_dates})
+                                if "FBB" in chs:
+                                    for d in sales_dates:
+                                        r_sku["day_prices"][d] = r_sku["day_prices"].get(d, []) + list(chs["FBB"]["day_prices"].get(d, []))
+                                _t14_sku_part(r_sku)
+                                if "FBN" in chs:
+                                    _t14_channel_part(chs["FBN"], "FBN", True)
+                                if "FBB" in chs:
+                                    _t14_channel_part(chs["FBB"], "FBB", "FBN" not in chs)
+                    with col_amz:
+                        with st.container(border=True):
+                            st.markdown('<span class="wh-badge" style="background:#7c2d12;color:#fed7aa;">🟠 أمازون | Amazon</span>',
+                                        unsafe_allow_html=True)
+                            if not g["asins"]:
+                                st.caption("— مفيش منتج على أمازون مربوط بالكود ده (تأكد من تاب TacweedAmazon) | no Amazon product linked to this code")
+                            for ai, a in enumerate(g["asins"]):
+                                chs = asin_rows_t14[a]
+                                if ai > 0:
+                                    st.markdown("<hr style='margin:8px 0;border-color:#334155;'>", unsafe_allow_html=True)
+                                r_any = chs.get("FSAB") or chs.get("FBA")
+                                r_asin = dict(r_any, day_prices={d: list(chs["FSAB"]["day_prices"].get(d, [])) if "FSAB" in chs else []
+                                                                 for d in sales_dates})
+                                if "FBA" in chs:
+                                    for d in sales_dates:
+                                        r_asin["day_prices"][d] = r_asin["day_prices"].get(d, []) + list(chs["FBA"]["day_prices"].get(d, []))
+                                _t14_sku_part_amz(r_asin)
+                                if "FSAB" in chs:
+                                    _t14_channel_part(chs["FSAB"], "FSAB", True)
+                                if "FBA" in chs:
+                                    _t14_channel_part(chs["FBA"], "FBA", "FSAB" not in chs)
+                    with col_tr:
+                        _t14_trendyol_placeholder()
                     st.divider()
                 # حفظ المرحلين في session_state بعد اكتمال العرض
                 st.session_state["transferred_skus_t14"] = _new_transferred
@@ -6008,34 +7559,76 @@ if st.session_state["nav_page"] == "tab_dash":
             st.header("📊 داشبورد المبيعات | Sales Dashboard")
             st.caption("تحليلات موسّعة على بيانات المبيعات مع صور المنتجات — منفصلة تمامًا عن تاب المبيعات الأصلي ولا تؤثر عليه | Extended sales analytics with product images — fully separate from, and does not affect, the original Sales tab")
 
-            if not inv_map:
-                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+            if not inv_map and not amz_inv_map_asin:
+                st.info("ارفع ملف المخزون (نون أو أمازون) أولاً من تاب المخزون | Upload Inventory (Noon or Amazon) first")
             else:
-                _dash_all_subtab_td, _dash_fbn_subtab_td, _dash_fbb_subtab_td = st.tabs(
+                (_dash_all_subtab_td, _dash_fbn_subtab_td, _dash_fbb_subtab_td,
+                 _dash_amz_all_subtab_td, _dash_amz_normal_subtab_td, _dash_amz_fba_subtab_td) = st.tabs(
                     ["🔷 الكل (FBN+FBB) | All Combined",
                      "🅽 مبيعات نون FBN | Noon FBN Sales",
-                     "🅱 مبيعات نون FBB | Noon FBB Sales"])
+                     "🅱 مبيعات نون FBB | Noon FBB Sales",
+                     "🟠 امازون الكل | Amazon All",
+                     "🅽 امازون عادي (FSAB) | Amazon Normal",
+                     "📦 امازون تخزين FBA | Amazon FBA Storage"])
                 with _dash_all_subtab_td:
                     # ── الكل مع بعض: كل الطلبات (FBN + FBB) من غير أي فلترة على نوع
                     #    التنفيذ — عشان في النهاية هو متجر نون واحد ومبيعات واحدة | All
                     #    orders combined (FBN + FBB) with no fulfillment-type filter —
                     #    it's one Noon store and one combined sales figure.
-                    _render_sales_dashboard_body(
-                        build_daily_orders_counts, build_daily_orders_prices,
-                        build_daily_orders_family_stats, "all")
+                    if not inv_map:
+                        st.info("ارفع ملف مخزون نون أولاً من تاب المخزون | Upload Noon Inventory first")
+                    else:
+                        _render_sales_dashboard_body(
+                            build_daily_orders_counts, build_daily_orders_prices,
+                            build_daily_orders_family_stats, "all")
                 with _dash_fbn_subtab_td:
                     # ── FBN بس: مستبعد منه أي طلب مصنّف FBB (Fulfillment=FBP)،
                     #    عشان FBN + FBB = تاب "الكل" بالظبط من غير أي تكرار |
                     #    FBN only: excludes anything classified as FBB
                     #    (Fulfillment=FBP), so FBN + FBB always adds up exactly to
                     #    "All Combined" with no double-counting.
-                    _render_sales_dashboard_body(
-                        build_daily_orders_counts_fbn, build_daily_orders_prices_fbn,
-                        build_daily_orders_family_stats_fbn, "fbn")
+                    if not inv_map:
+                        st.info("ارفع ملف مخزون نون أولاً من تاب المخزون | Upload Noon Inventory first")
+                    else:
+                        _render_sales_dashboard_body(
+                            build_daily_orders_counts_fbn, build_daily_orders_prices_fbn,
+                            build_daily_orders_family_stats_fbn, "fbn")
                 with _dash_fbb_subtab_td:
-                    _render_sales_dashboard_body(
-                        build_daily_orders_counts_fbb, build_daily_orders_prices_fbb,
-                        build_daily_orders_family_stats_fbb, "fbb")
+                    if not inv_map:
+                        st.info("ارفع ملف مخزون نون أولاً من تاب المخزون | Upload Noon Inventory first")
+                    else:
+                        _render_sales_dashboard_body(
+                            build_daily_orders_counts_fbb, build_daily_orders_prices_fbb,
+                            build_daily_orders_family_stats_fbb, "fbb")
+                # ══ تحليلات أمازون — منفصلة تمامًا عن تحليلات نون فوق، بتقرا من شيت
+                #    DailyOrdersAmazon ومخزون StockAmazon بس (مش inv_map بتاع نون خالص)،
+                #    ومقسّمة نفس فكرة الكل/عادي/FBA زي تاب مبيعات امازون بالظبط. الأرقام
+                #    مجمّعة على ASIN (مش MSKU) عشان تتربط صح بمخزون أمازون | Amazon
+                #    analytics — fully separate from the Noon analytics above, reads
+                #    DailyOrdersAmazon and StockAmazon stock only (never Noon's inv_map),
+                #    split the same way (All/Normal/FBA) as the Amazon Sales tab itself.
+                #    Grouped by ASIN (not MSKU) so it joins correctly against Amazon stock.
+                with _dash_amz_all_subtab_td:
+                    if not amz_inv_map_asin:
+                        st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
+                    else:
+                        _render_sales_dashboard_body(
+                            build_daily_orders_counts_amazon_all_asin, build_daily_orders_prices_amazon_all_asin,
+                            build_daily_orders_family_stats_amazon_all, "amz_all", channel="amazon")
+                with _dash_amz_normal_subtab_td:
+                    if not amz_inv_map_asin:
+                        st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
+                    else:
+                        _render_sales_dashboard_body(
+                            build_daily_orders_counts_amazon_normal_asin, build_daily_orders_prices_amazon_normal_asin,
+                            build_daily_orders_family_stats_amazon_normal, "amz_normal", channel="amazon")
+                with _dash_amz_fba_subtab_td:
+                    if not amz_inv_map_asin:
+                        st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
+                    else:
+                        _render_sales_dashboard_body(
+                            build_daily_orders_counts_amazon_fba_asin, build_daily_orders_prices_amazon_fba_asin,
+                            build_daily_orders_family_stats_amazon_fba, "amz_fba", channel="amazon")
 
         # ══ TAB 15 — تحليل الجدولة ══
         # ══ TAB 16 — مخزون بدون بيع ══
@@ -6043,84 +7636,156 @@ if st.session_state["nav_page"] == "tab16":
     with tab16:
         if _tab_gate("tab16", "📦 مخزون بدون بيع | No Sales"):
             st.subheader("📦 مخزون بدون بيع | Stock With No Sales")
-            st.caption("SKUs موجودة في المخزون لكن ما بيعت في الفترة المحددة | SKUs in inventory with no sales in the selected period")
+            st.caption("SKUs موجودة في المخزون لكن ما بيعت في الفترة المحددة — نون وأمازون كل واحد في تابه، مستقلين تمامًا عن بعض | SKUs in inventory with no sales in the selected period — Noon and Amazon each in their own sub-tab, fully independent")
 
-            if not inv_map:
-                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
-            else:
-                today_t16 = datetime.now().date()
-                sales_display_days_t16 = int(load_settings().get("sales_display_days","7") or 7)
-
-                # تواريخ الفترات الثلاث
-                dates_1d  = [today_t16 - timedelta(days=1)]
-                dates_3d  = [today_t16 - timedelta(days=i) for i in range(1, 4)]
-                dates_7d  = [today_t16 - timedelta(days=i) for i in range(1, 8)]
-
-                all_dates_t16 = list({d for d in dates_1d + dates_3d + dates_7d})
-                counts_t16 = build_daily_orders_counts(all_dates_t16)
-
-                def sku_sold_in(sku_up, dates_list):
-                    dc = counts_t16.get(sku_up, {})
-                    return sum(dc.get(d, 0) for d in dates_list) > 0
-
-                # بناء القوائم الثلاث
-                no_sale_1d, no_sale_3d, no_sale_7d = [], [], []
-                for sku_up, info in inv_map.items():
-                    stock       = info.get("total_stock", 0)
-                    sales_month = info.get("sales", 0)
-                    img         = info.get("img", "")
-                    sku_disp    = info.get("sku", sku_up)
-                    row_t16 = {"sku": sku_disp, "sku_up": sku_up, "stock": stock, "sales_month": sales_month, "img": img}
-                    if not sku_sold_in(sku_up, dates_1d):
-                        no_sale_1d.append(row_t16)
-                    if not sku_sold_in(sku_up, dates_3d):
-                        no_sale_3d.append(row_t16)
-                    if not sku_sold_in(sku_up, dates_7d):
-                        no_sale_7d.append(row_t16)
-                # ترتيب من الأعلى مخزوناً للأقل
-                no_sale_1d.sort(key=lambda x: -x["stock"])
-                no_sale_3d.sort(key=lambda x: -x["stock"])
-                no_sale_7d.sort(key=lambda x: -x["stock"])
-
-                def render_no_sale_list(rows, period_label, dl_key):
-                    if not rows:
-                        st.success(f"✅ لا يوجد SKUs بدون مبيعات في {period_label} | No SKUs without sales in {period_label}")
-                        return
-                    df_ns = pd.DataFrame([{
-                        "SKU": r["sku"], "مخزون | Stock": r["stock"],
-                        "مبيع شهري | Monthly Sales": r["sales_month"],
-                    } for r in rows])
-                    c1, c2 = st.columns(2)
-                    with c1: dl_btn(df_ns, dl_key, key=f"dlbtn_{dl_key}")
-                    with c2: st.warning(f"⚠️ {len(rows)} SKU بدون مبيعات | SKUs without sales")
-                    for r in rows:
-                        c_img, c_info = st.columns([1, 6])
-                        with c_img:
-                            show_img(r["img"], 60)
-                        with c_info:
+            def render_no_sale_list(rows, period_label, dl_key, channel="noon"):
+                if not rows:
+                    st.success(f"✅ لا يوجد {'SKUs' if channel=='noon' else 'ASINs'} بدون مبيعات في {period_label} | No {'SKUs' if channel=='noon' else 'ASINs'} without sales in {period_label}")
+                    return
+                df_ns = pd.DataFrame([{
+                    ("ASIN" if channel=="amazon" else "SKU"): (r["asin"] if channel=="amazon" else r["sku"]),
+                    **({"SKU": r["sku"]} if channel=="amazon" else {}),
+                    "مخزون | Stock": r["stock"],
+                    "مبيع شهري | Monthly Sales": r["sales_month"],
+                } for r in rows])
+                c1, c2 = st.columns(2)
+                with c1: dl_btn(df_ns, dl_key, key=f"dlbtn_{dl_key}")
+                with c2: st.warning(f"⚠️ {len(rows)} {'SKU' if channel=='noon' else 'ASIN'} بدون مبيعات | {'SKUs' if channel=='noon' else 'ASINs'} without sales")
+                for r in rows:
+                    c_img, c_info = st.columns([1, 6])
+                    with c_img:
+                        show_img(r["img"], 60)
+                    with c_info:
+                        if channel == "amazon":
+                            st.markdown(f"**ASIN:** `{r['asin']}` &nbsp;|&nbsp; **SKU:** `{r['sku']}`", unsafe_allow_html=True)
+                        else:
                             st.markdown(f"**SKU:** `{r['sku']}`", unsafe_allow_html=True)
-                            st.markdown(
-                                f"📦 **مخزون:** {r['stock']} &nbsp;|&nbsp; 📈 **شهري:** {r['sales_month']}",
-                            )
+                        st.markdown(
+                            f"📦 **مخزون:** {r['stock']} &nbsp;|&nbsp; 📈 **شهري:** {r['sales_month']}",
+                        )
+                        if channel == "noon":
                             sched_ns = get_latest_schedule_info(r["sku"])
                             if sched_ns:
                                 arrival_ns = (sched_ns["parsed"] + timedelta(days=int(load_settings().get("schedule_delay_days","3") or 3))).date() if sched_ns.get("parsed") else None
                                 st.caption(f"📅 ASN {sched_ns['asn']} بتاريخ {sched_ns['date']}" + (f" — وصول: {arrival_ns}" if arrival_ns else ""))
-                            for note in get_unavailable_ordered_note(r["sku"]):
-                                st.markdown(big_note_html(note), unsafe_allow_html=True)
-                        st.divider()
+                        else:
+                            render_recent_expired_note(r["sku"])
+                        for note in get_unavailable_ordered_note(r["sku"]):
+                            st.markdown(big_note_html(note), unsafe_allow_html=True)
+                    st.divider()
 
-                sub1, sub2, sub3 = st.tabs([
-                    f"📅 بدون مبيع أمس ({len(no_sale_1d)})",
-                    f"📅 بدون مبيع آخر 3 أيام ({len(no_sale_3d)})",
-                    f"📅 بدون مبيع آخر أسبوع ({len(no_sale_7d)})",
-                ])
-                with sub1:
-                    render_no_sale_list(no_sale_1d, "أمس", "no_sale_1d")
-                with sub2:
-                    render_no_sale_list(no_sale_3d, "آخر 3 أيام", "no_sale_3d")
-                with sub3:
-                    render_no_sale_list(no_sale_7d, "آخر أسبوع", "no_sale_7d")
+            channel_tab_noon, channel_tab_amz = st.tabs([
+                "🅽 نون | Noon",
+                "🅰️ أمازون | Amazon",
+            ])
+
+            # ══════════ نون ══════════
+            with channel_tab_noon:
+                if not inv_map:
+                    st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+                else:
+                    today_t16 = datetime.now().date()
+
+                    # تواريخ الفترات الثلاث
+                    dates_1d  = [today_t16 - timedelta(days=1)]
+                    dates_3d  = [today_t16 - timedelta(days=i) for i in range(1, 4)]
+                    dates_7d  = [today_t16 - timedelta(days=i) for i in range(1, 8)]
+
+                    all_dates_t16 = list({d for d in dates_1d + dates_3d + dates_7d})
+                    counts_t16 = build_daily_orders_counts(all_dates_t16)
+
+                    def sku_sold_in(sku_up, dates_list):
+                        dc = counts_t16.get(sku_up, {})
+                        return sum(dc.get(d, 0) for d in dates_list) > 0
+
+                    # بناء القوائم الثلاث
+                    no_sale_1d, no_sale_3d, no_sale_7d = [], [], []
+                    for sku_up, info in inv_map.items():
+                        stock       = info.get("total_stock", 0)
+                        sales_month = info.get("sales", 0)
+                        img         = info.get("img", "")
+                        sku_disp    = info.get("sku", sku_up)
+                        row_t16 = {"sku": sku_disp, "sku_up": sku_up, "stock": stock, "sales_month": sales_month, "img": img}
+                        if not sku_sold_in(sku_up, dates_1d):
+                            no_sale_1d.append(row_t16)
+                        if not sku_sold_in(sku_up, dates_3d):
+                            no_sale_3d.append(row_t16)
+                        if not sku_sold_in(sku_up, dates_7d):
+                            no_sale_7d.append(row_t16)
+                    # ترتيب من الأعلى مخزوناً للأقل
+                    no_sale_1d.sort(key=lambda x: -x["stock"])
+                    no_sale_3d.sort(key=lambda x: -x["stock"])
+                    no_sale_7d.sort(key=lambda x: -x["stock"])
+
+                    sub1, sub2, sub3 = st.tabs([
+                        f"📅 بدون مبيع أمس ({len(no_sale_1d)})",
+                        f"📅 بدون مبيع آخر 3 أيام ({len(no_sale_3d)})",
+                        f"📅 بدون مبيع آخر أسبوع ({len(no_sale_7d)})",
+                    ])
+                    with sub1:
+                        render_no_sale_list(no_sale_1d, "أمس", "no_sale_1d", channel="noon")
+                    with sub2:
+                        render_no_sale_list(no_sale_3d, "آخر 3 أيام", "no_sale_3d", channel="noon")
+                    with sub3:
+                        render_no_sale_list(no_sale_7d, "آخر أسبوع", "no_sale_7d", channel="noon")
+
+            # ══════════ أمازون (تخزين FBA بس — مستقل تمامًا عن نون) ══════════
+            with channel_tab_amz:
+                st.caption("بيقرا بس من تخزين FBA (تخزين عادي/FSAB مستبعد) — نفس فلتر مراجعة مخزون/مبيعات أمازون | Reads FBA storage only (Normal/FSAB excluded) — same filter as the Amazon review tabs")
+                if not amz_inv_map_asin:
+                    st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
+                else:
+                    today_t16_amz = datetime.now().date()
+
+                    dates_1d_amz  = [today_t16_amz - timedelta(days=1)]
+                    dates_3d_amz  = [today_t16_amz - timedelta(days=i) for i in range(1, 4)]
+                    dates_7d_amz  = [today_t16_amz - timedelta(days=i) for i in range(1, 8)]
+                    dates_30d_amz = [today_t16_amz - timedelta(days=i) for i in range(1, 31)]
+
+                    all_dates_t16_amz = list({d for d in dates_1d_amz + dates_3d_amz + dates_7d_amz})
+                    counts_t16_amz         = build_daily_orders_counts_amazon_fba_asin(all_dates_t16_amz)
+                    monthly_counts_t16_amz = build_daily_orders_counts_amazon_fba_asin(dates_30d_amz)
+
+                    links_map_asin_t16 = get_links_map_asin()
+                    links_map_sku_t16  = get_links_map()
+
+                    def asin_sold_in_amz(asin_up, dates_list):
+                        dc = counts_t16_amz.get(asin_up, {})
+                        return sum(dc.get(d, 0) for d in dates_list) > 0
+
+                    no_sale_1d_amz, no_sale_3d_amz, no_sale_7d_amz = [], [], []
+                    for asin_up, info in amz_inv_map_asin.items():
+                        stock    = info.get("stock", 0)
+                        mskus    = info.get("skus", [])
+                        sku_disp = ", ".join(mskus) if mskus else asin_up
+                        mc = monthly_counts_t16_amz.get(asin_up, {})
+                        sales_month = sum(mc.values()) if mc else 0
+                        img = links_map_asin_t16.get(asin_up, "") or (links_map_sku_t16.get(mskus[0].upper(), "") if mskus else "")
+                        row_t16_amz = {
+                            "sku": sku_disp, "sku_up": asin_up, "asin": info.get("asin", asin_up),
+                            "stock": stock, "sales_month": sales_month, "img": img,
+                        }
+                        if not asin_sold_in_amz(asin_up, dates_1d_amz):
+                            no_sale_1d_amz.append(row_t16_amz)
+                        if not asin_sold_in_amz(asin_up, dates_3d_amz):
+                            no_sale_3d_amz.append(row_t16_amz)
+                        if not asin_sold_in_amz(asin_up, dates_7d_amz):
+                            no_sale_7d_amz.append(row_t16_amz)
+                    no_sale_1d_amz.sort(key=lambda x: -x["stock"])
+                    no_sale_3d_amz.sort(key=lambda x: -x["stock"])
+                    no_sale_7d_amz.sort(key=lambda x: -x["stock"])
+
+                    sub1a, sub2a, sub3a = st.tabs([
+                        f"📅 بدون مبيع أمس ({len(no_sale_1d_amz)})",
+                        f"📅 بدون مبيع آخر 3 أيام ({len(no_sale_3d_amz)})",
+                        f"📅 بدون مبيع آخر أسبوع ({len(no_sale_7d_amz)})",
+                    ])
+                    with sub1a:
+                        render_no_sale_list(no_sale_1d_amz, "أمس", "no_sale_1d_amz", channel="amazon")
+                    with sub2a:
+                        render_no_sale_list(no_sale_3d_amz, "آخر 3 أيام", "no_sale_3d_amz", channel="amazon")
+                    with sub3a:
+                        render_no_sale_list(no_sale_7d_amz, "آخر أسبوع", "no_sale_7d_amz", channel="amazon")
 
 # ══ TAB CHINA — شحنات الصين (تاب جديدة منفصلة) ══
 if st.session_state["nav_page"] == "tab_china":
@@ -6133,7 +7798,12 @@ if st.session_state["nav_page"] == "tab_ads":
         if _tab_gate("tab_ads", "📢 الإعلانات | Ads"):
             st.header("📢 الإعلانات | Ads")
             st.caption("منقولة برة داشبورد المبيعات وبتتعرض مرة واحدة بس — بيانات الإعلانات (Views/Clicks/Orders/Spends/Revenue) جايه من شيت الإعلانات نفسه، واللي مفيهوش تصنيف FBN/FBB أصلاً | Moved out of the sales dashboard and shown once — ad data (Views/Clicks/Orders/Spends/Revenue) comes from the Advertisements sheet, which has no FBN/FBB split to begin with")
-            if not inv_map:
-                st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
-            else:
-                _render_ads_performance_tab()
+            _noon_ads_subtab, _amz_ads_subtab = st.tabs(["🅽 إعلانات نون | Noon Ads", "📦 إعلانات أمازون | Amazon Ads"])
+            with _noon_ads_subtab:
+                if not inv_map:
+                    st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+                else:
+                    _render_ads_performance_tab()
+            with _amz_ads_subtab:
+                st.caption("بيانات إعلانات أمازون جايه من شيت AdvertisementsAmz، ومفتاحها ASIN بدل SKU — نفس منطق وتصميم تاب إعلانات نون بالظبط | Amazon ad data comes from the AdvertisementsAmz sheet, keyed by ASIN instead of SKU — identical logic and layout to the Noon Ads tab")
+                _render_ads_performance_tab_amazon()
