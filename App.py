@@ -882,7 +882,7 @@ def get_latest_sku_price(r, ordered_dates):
             return vals[0][0]
     return None
 
-def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads_entries_t14, total_orders_t14, total_spends_t14):
+def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads_entries_t14, total_orders_t14, total_spends_t14, part="all"):
     """يعرض بلوك السعر الأساسي/التوصيل/العمولة/الصافي/الربح لصف SKU واحد في تاب المبيعات
     (بيتنادى من الـ FBN والـ FBB على حد سواء). بيعرض البلوك دايمًا حتى لو بيانات العمولة/
     التوصيل (من تاب COM) أو السعر (من LIVE/الطلبات) ناقصة لهذا الـ SKU — وبيحط صفر في
@@ -977,7 +977,8 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
     # الظاهر: سطور عمودية (سعر / توصيل / عمولة) + صافي الربح + حكم الإعلان. الباقي جوه سلايدرات.
     _row = ('<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;'
             'font-size:13px;color:#e2e8f0;padding:3px 0;"><span>{k}</span><b dir="ltr">{v}</b></div>')
-    st.markdown(
+    if part in ("all", "box"):
+      st.markdown(
         '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:8px 14px;margin:6px 0;">'
         + _row.format(k=f"💵 {price_label_t14}", v=f"{latest_price_t14:,.2f} ريال")
         + _row.format(k="🚚 توصيل", v=f'{com_info_t14["delivery"]:,.0f}')
@@ -987,13 +988,14 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
           f'<span>🧮 صافي الربح بعد التكلفة</span><span dir="ltr">{net_profit_t14:,.2f} ريال</span></div>'
         + missing_note_t14 + verdict_html_t14 + '</div>',
         unsafe_allow_html=True)
-    with st.expander("💳 تفاصيل الحساب | Calculation details"):
+    if part in ("all", "calc"):
+      with st.expander("💳 تفاصيل الحساب | Calculation details"):
         st.markdown(
             f"💳 **الصافي بعد خصم العمولة والتوصيل:** {net_fees_t14:,.2f} ريال  \n"
             f"🧾 **الصافي بعد خصم 15% ضريبة:** {net_tax_t14:,.2f} ريال  \n"
             f"📦 **التكلفة | Cost:** {cost_t14:,.2f} ريال"
             + (f"  \n🏷️ **سعر العرض (معلومة فقط):** {offer_price_t14:,.2f} ريال" if offer_price_t14 is not None else ""))
-    if ad_detail_t14:
+    if ad_detail_t14 and part in ("all", "verdict"):
         with st.expander("📊 تفاصيل الحكم على الإعلان | Ad verdict details"):
             st.markdown(ad_detail_t14)
 
@@ -7287,8 +7289,8 @@ def _t14_noon_part(r, part):
                 f'{"🔴" if xlow else "🟣"} مخزون Xdock: {xnet:,}'
                 f'{" — قارب على النفاد" if xlow else ""}</span>',
                 unsafe_allow_html=True)
-    elif part == "price":
-        render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s)
+    elif part in ("box", "calc", "verdict"):
+        render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s, part=part)
     elif part == "ads" and ent:
         with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ent)} حملة | campaign(s)"):
             st.markdown(
@@ -7321,8 +7323,8 @@ def _t14_amz_part(r, part):
                 '<span style="background:#78350f;color:#fde68a;padding:2px 8px;'
                 'border-radius:6px;font-size:12px;">⚠️ مش موجود في مخزون أمازون المرفوع | Not in uploaded Amazon stock</span>',
                 unsafe_allow_html=True)
-    elif part == "price":
-        render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s)
+    elif part in ("box", "calc", "verdict"):
+        render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s, part=part)
     elif part == "ads" and ent:
         with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ent)} عرض | offer(s)"):
             st.markdown(
@@ -7457,6 +7459,9 @@ if st.session_state["nav_page"] == "tab14":
                     else:
                         blocks_t14.append({"code": "", "sku": sku_up, "asin": None})
                 for asin_up in asin_rows_t14:
+                    # أمازون: ASIN بدون مبيعات أمس مبيتعرضش (إلا لو بتبحث عنه)
+                    if not q_t14 and _asin_sales(asin_up)[0] <= 0:
+                        continue
                     code = (tac_amz_map_t14.get(asin_up, "") or "").strip()
                     if code:
                         asin_by_code.setdefault(code, []).append(asin_up)
@@ -7587,7 +7592,7 @@ if st.session_state["nav_page"] == "tab14":
                         with ca:
                             st.markdown('<span class="wh-badge" style="background:#7c2d12;color:#fed7aa;">🟠 أمازون | Amazon</span>', unsafe_allow_html=True)
                             if not amz_chs:
-                                st.caption("— مفيش ASIN أمازون لهذا الكود (تأكد من تاب TacweedAmazon) | no Amazon ASIN for this code")
+                                st.caption("— مفيش مبيعات أمازون أمس لهذا الكود | no Amazon sales yesterday")
                         with ct:
                             _t14_trendyol_placeholder()
                         # صف 1: الهوية (SKU / ASIN)
@@ -7596,19 +7601,17 @@ if st.session_state["nav_page"] == "tab14":
                             if r_sku: _t14_noon_part(r_sku, "ident")
                         with ca:
                             if r_asin: _t14_amz_part(r_asin, "ident")
-                        # صف 2: السعر والربح وحكم الإعلان
-                        cn, ca, ct = st.columns([5, 5, 3])
-                        with cn:
-                            if r_sku: _t14_noon_part(r_sku, "price")
-                        with ca:
-                            if r_asin: _t14_amz_part(r_asin, "price")
-                        # صف 3: أداء الإعلانات
-                        if (r_sku and ads_map_t14.get(r_sku["sku_up"])) or (r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper())):
+                        # صف 2: صندوق السعر والربح — صف 3: تفاصيل الحساب — صف 4: تفاصيل حكم الإعلان — صف 5: أداء الإعلانات
+                        _has_ads_n = bool(r_sku and ads_map_t14.get(r_sku["sku_up"]))
+                        _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
+                        for _pt in ("box", "calc", "verdict", "ads"):
+                            if _pt in ("verdict", "ads") and not (_has_ads_n or _has_ads_a):
+                                continue
                             cn, ca, ct = st.columns([5, 5, 3])
                             with cn:
-                                if r_sku: _t14_noon_part(r_sku, "ads")
+                                if r_sku: _t14_noon_part(r_sku, _pt)
                             with ca:
-                                if r_asin: _t14_amz_part(r_asin, "ads")
+                                if r_asin: _t14_amz_part(r_asin, _pt)
                         # صف 4: القناة الأولى (FBN | FSAB) — صف 5: القناة التانية (FBB | FBA)
                         cn, ca, ct = st.columns([5, 5, 3])
                         with cn:
