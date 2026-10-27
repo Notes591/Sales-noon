@@ -7398,6 +7398,34 @@ def _t14_trendyol_placeholder():
     st.markdown('<span class="wh-badge" style="background:#4c1d95;color:#ddd6fe;">🟣 تريندول | Trendyol</span>',
                 unsafe_allow_html=True)
     st.caption("🔜 قريبًا — مكان محجوز | Reserved for Trendyol")
+
+def _t14_store_chip(store, parts):
+    """شريحة مبيعات متجر واحد (بولد وواضحة): اسم المتجر + كل قناة (أمس / إجمالي الأيام). parts = [(اسم القناة, أمس, إجمالي)]."""
+    _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "🟢 نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "🟠 أمازون")}[store]
+    segs = "".join(
+        f'<span style="display:inline-flex;align-items:baseline;gap:5px;margin-inline-start:12px;padding-inline-start:12px;'
+        f'border-inline-start:1px solid {_sty[1]}88;white-space:nowrap;">'
+        f'<b style="color:#ffffff;">{nm}</b>'
+        f'<span style="color:{_sty[2]};">أمس</span><bdi style="color:#ffffff;font-weight:800;font-size:16px;">{y}</bdi>'
+        f'<span style="color:{_sty[2]};">| {sales_display_days} أيام</span><bdi style="color:#ffffff;font-weight:800;">{t}</bdi></span>'
+        for nm, y, t in parts)
+    return (f'<span dir="rtl" style="display:inline-block;background:{_sty[0]};border:1px solid {_sty[1]};border-radius:8px;'
+            f'padding:6px 12px;margin:3px 0 3px 8px;font-size:14px;"><b style="color:{_sty[1]};font-size:15px;">{_sty[3]}</b>{segs}</span>')
+
+def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, amz, fsab, fba):
+    """تايل إجمالي يوم — كل سطر بخط بولد وبترتيب ثابت (المتجر ثم قنواته)."""
+    return (
+        f'<div dir="rtl" style="background:{bg};border-radius:8px;padding:8px 10px;text-align:center;margin:2px;{border}">'
+        f'<div style="font-size:12px;font-weight:700;color:#e2e8f0;">{head}</div>'
+        f'<div style="font-size:12px;font-weight:600;color:#94a3b8;">{date_s}</div>'
+        f'<div style="font-size:26px;font-weight:800;color:{num_color};line-height:1.2;">{total}</div>'
+        f'<div style="margin-top:4px;padding-top:4px;border-top:1px solid #33415588;">'
+        f'<div style="font-size:13px;font-weight:800;color:#34d399;">🟢 نون: {noon}</div>'
+        f'<div style="font-size:12px;font-weight:700;color:#d1fae5;">FBN {fbn} · FBB {fbb}</div></div>'
+        f'<div style="margin-top:4px;">'
+        f'<div style="font-size:13px;font-weight:800;color:#fb923c;">🟠 أمازون: {amz}</div>'
+        f'<div style="font-size:12px;font-weight:700;color:#ffedd5;">FSAB {fsab} · FBA {fba}</div></div>'
+        f'</div>')
 if st.session_state["nav_page"] == "tab14":
     with tab14:
         if _tab_gate("tab14", "🛒 المبيعات | Sales"):
@@ -7458,15 +7486,11 @@ if st.session_state["nav_page"] == "tab14":
                                 bg    = "#1e293b" if day_total == 0 else "#172554"
                                 num_color = "#93c5fd" if day_total > 0 else "#64748b"
                                 border = ""
-                            st.markdown(
-                                f'<div style="background:{bg};border-radius:8px;padding:8px 10px;text-align:center;margin:2px;{border}">' +
-                                f'<div style="font-size:11px;color:#94a3b8;">{"🔴 " if is_yesterday and day_total==0 else ("🟢 " if is_yesterday else "")}{lbl.split("(")[0].strip()}</div>' +
-                                f'<div style="font-size:13px;color:#6b7280;">{d.strftime("%m-%d")}</div>' +
-                                f'<div style="font-size:{"28" if is_yesterday else "22"}px;font-weight:bold;color:{num_color};">{day_total}</div>' +
-                                f'<div style="font-size:11px;color:#94a3b8;">🟢 نون {day_noon} (FBN {tot_fbn.get(d, 0)} · FBB {tot_fbb.get(d, 0)})</div>' +
-                                f'<div style="font-size:11px;color:#94a3b8;">🟠 أمازون {day_amz} (FSAB {tot_fsab.get(d, 0)} · FBA {tot_fba.get(d, 0)})</div>' +
-                                '</div>',
-                                unsafe_allow_html=True)
+                            st.markdown(_t14_day_tile(
+                                bg, border, num_color,
+                                f'{"🔴 " if is_yesterday and day_total==0 else ("🟢 " if is_yesterday else "")}{lbl.split("(")[0].strip()}',
+                                d.strftime("%m-%d"), day_total, day_noon, tot_fbn.get(d, 0), tot_fbb.get(d, 0),
+                                day_amz, tot_fsab.get(d, 0), tot_fba.get(d, 0)), unsafe_allow_html=True)
                 st.divider()
 
                 # ══ تجميع بالكود: code -> {SKUs نون} + {ASINs أمازون} ══
@@ -7618,15 +7642,13 @@ if st.session_state["nav_page"] == "tab14":
                         if wh_g and wh_g.get("daily_draw") is not None:
                             st.caption(f"🧮 سحب المستودع اليومي للكود (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} "
                                        f"= {wh_g['daily_draw']:g} قطعة/يوم — شارة النفاد وموعد الطلب محسوبين على المجموع")
-                        _parts = []
+                        _chips = ""
                         if b["sku"]:
-                            _parts.append(f'🟢 نون — 🅽 FBN <b>{y_n}</b> (إجمالي {sales_display_days} أيام {t_n}) · 🅱 FBB <b>{y_b}</b> ({t_b})')
+                            _chips += _t14_store_chip("noon", [("FBN", y_n, t_n), ("FBB", y_b, t_b)])
                         if b["asin"]:
-                            _parts.append(f'🟠 أمازون — FSAB <b>{y_a}</b> ({t_a}) · FBA <b>{y_f}</b> ({t_f})')
-                        st.markdown(
-                            f'<div style="margin:4px 0;font-size:14px;font-weight:700;color:#e2e8f0;">🛒 اتباع منه أمس: '
-                            + " &nbsp;|&nbsp; ".join(_parts) + '</div>',
-                            unsafe_allow_html=True)
+                            _chips += _t14_store_chip("amz", [("FSAB", y_a, t_a), ("FBA", y_f, t_f)])
+                        st.markdown('<div dir="rtl" style="margin:6px 0;"><b style="color:#e2e8f0;font-size:14px;margin-inline-end:8px;">🛒 اتباع منه:</b>'
+                                    + _chips + '</div>', unsafe_allow_html=True)
                         render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالكود)
 
                     # ══ نون | أمازون | تريندول جنب بعض — كل قسم في صف مستقل عشان الأقسام تتحاذى (السعر جنب السعر) ══
