@@ -8270,6 +8270,19 @@ if st.session_state["nav_page"] == "tab14":
                         _best_asin_code[_c] = (_k, _a)
                 for b in blocks_t14:
                     b["amz_hint"] = _best_asin_code.get(b["code"], (None, None))[1] if (b["code"] and not b["asin"]) else None
+                # أفضل Barcode تريندول لكل كود (حتى لو مباعش أمس) — لعرضه في خانة "مفيش مبيعات تريندول أمس"
+                _ty_s60 = {}
+                for _tr in get_trendyol_bundle()["rows"]:
+                    if _tr["ok"]:
+                        _ty_s60[_tr["bc"]] = _ty_s60.get(_tr["bc"], 0) + _tr["qty"]
+                _ty_known = set(_ty_s60) | {_bb for _v in get_ty_products()["by_cid"].values() for _bb in _v}
+                _best_ty_code = {}
+                for _bb in sorted(_ty_known):
+                    _c = (tac_map_t14.get(_bb, "") or "").strip()
+                    if _c and (_c not in _best_ty_code or _ty_s60.get(_bb, 0) > _ty_s60.get(_best_ty_code[_c], 0)):
+                        _best_ty_code[_c] = _bb
+                for b in blocks_t14:
+                    b["ty_hint"] = _best_ty_code.get(b["code"]) if (b["code"] and not b["tb"]) else None
                 for b in blocks_t14:
                     ns_ = _sku_sales(b["sku"]) if b["sku"] else (0, 0)
                     as_ = _asin_sales(b["asin"]) if b["asin"] else (0, 0)
@@ -8423,6 +8436,14 @@ if st.session_state["nav_page"] == "tab14":
                             if not r_ty:
                                 if get_trendyol_bundle()["rows"]:
                                     st.caption("— مفيش مبيعات تريندول أمس | no Trendyol sales yesterday")
+                                    if b.get("ty_hint"):
+                                        st.markdown(
+                                            f'**Barcode:** <span style="font-family:monospace;font-weight:700;color:#e2e8f0;background:#1e293b;'
+                                            f'border:1px solid #334155;border-radius:6px;padding:2px 10px;user-select:all;-webkit-user-select:all;">{b["ty_hint"]}</span>',
+                                            unsafe_allow_html=True)
+                                        _nm_h = get_ty_products()["name"].get(b["ty_hint"]) or get_trendyol_bundle()["name"].get(b["ty_hint"])
+                                        if _nm_h:
+                                            st.caption(_nm_h[:70])
                                 else:
                                     _t14_trendyol_placeholder()
                         # صف 1: الهوية (SKU / ASIN)
