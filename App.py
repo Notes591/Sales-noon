@@ -150,6 +150,9 @@ TABS_CONFIG = {
     # catalog.
     "StockAmazon": ["seller-sku", "fulfillment-channel-sku", "asin",
                     "condition-type", "Warehouse-Condition-code", "Quantity Available"],
+    # مبيعات تريندول — بتتعمل تلقائي أول مرة. Barcode = SKU (نفس تكويد نون). مفيش بيانات عملاء.
+    "DailyOrdersTrendyol": ["Row Key", "Barcode", "Order Date", "Order Number", "Order Status", "Quantity",
+                            "Net Unit Price", "Invoice Amount", "Commission Rate", "Image URL", "Product Name", "Date Uploaded"],
 }
 
 def get_or_create_worksheet(tab, headers, retries=5, delay=2):
@@ -344,6 +347,7 @@ inventory_sheet      = sheets["Inventory"]
 daily_orders_sheet   = sheets["DailyOrders"]
 daily_orders_amazon_sheet = sheets["DailyOrdersAmazon"]
 stock_amazon_sheet   = sheets["StockAmazon"]
+daily_orders_trendyol_sheet = sheets["DailyOrdersTrendyol"]
 settings_sheet       = sheets["Settings"]
 cancel_notif_sheet   = sheets["CancelNotifications"]
 tacweed_sheet        = sheets["Tacweed"]
@@ -2075,7 +2079,7 @@ def _china_decision_html(inc, sku_up, row, today):
         days_left = stock / rate
         _whr = _china_wh_lookup().get(sku_up) or {}
         if _whr.get("asins"):
-            who = (f" (نون {_whr.get('draw_noon', 0):g} + أمازون {_whr.get('draw_amz', 0):g} — سحب الكود كله من {n_sku} منتج)")
+            who = (f" (نون {_whr.get('draw_noon', 0):g} + أمازون {_whr.get('draw_amz', 0):g} + تريندول {_whr.get('draw_ty', 0):g} — سحب الكود كله من {n_sku} منتج)")
         else:
             who = f" (سحب الكود كله من {n_sku} SKU)" if n_sku > 1 else ""
         if days_left > 730:
@@ -4074,6 +4078,244 @@ def asin_link_html(asin: str, extra_style: str = ""):
 #    stock is combined even when it appears under more than one MSKU ══
 amz_inv_map_asin = build_amazon_stock_map_by_asin()
 
+# ══════════════════════════════════════════════════════════════════════════
+# ══ تريندول | Trendyol — مبيعات تريندول من شيت DailyOrdersTrendyol ══
+# الشيت بيتعمل تلقائي أول مرة. الـ SKU في تريندول = عمود Barcode، ونفس تكويد نون (تاب Tacweed)
+# بيشتغل عليه. بنخزّن بس الأعمدة المطلوبة للمبيعات — مفيش أسماء عملاء/عناوين/تليفونات/إيميلات.
+# Trendyol sales from the DailyOrdersTrendyol sheet (auto-created). SKU = Barcode, and the Noon Tacweed
+# mapping applies to it. Only the columns needed for sales are stored — no customer personal data.
+# ══════════════════════════════════════════════════════════════════════════
+# حالات الطلب اللي مش بتتحسب كمبيعات (مرتجع/ما اتسلمش/لسه مدفوعش/ملغي)
+TY_EXCLUDED_STATUSES = {"returned", "undelivered", "cancelled", "canceled", "waiting for payment"}
+
+def _build_trendyol_bundle(raw):
+    """يحوّل الصفوف الخام لقائمة طلبات جاهزة (تواريخ متحوّلة مرة واحدة) + خرائط العمولة والصور والأسماء."""
+    out = {"rows": [], "comm": {}, "img": {}, "name": {}}
+    if not raw or len(raw) < 2:
+        return out
+    idx = {str(h).strip().lower(): i for i, h in enumerate(raw[0])}
+    def g(row, name):
+        i = idx.get(name)
+        return str(row[i]).strip() if (i is not None and i < len(row)) else ""
+    latest = {}
+    for row in raw[1:]:
+        bc = g(row, "barcode").upper()
+        d = parse_excel_date(g(row, "order date"))
+        if not bc or not d:
+            continue
+        try:
+            qty = max(int(float(g(row, "quantity") or 1)), 1)
+        except Exception:
+            qty = 1
+        try:
+            unit = float(g(row, "net unit price").replace(",", ""))
+        except Exception:
+            unit = None
+        status = g(row, "order status")
+        out["rows"].append({"bc": bc, "d": d.date(), "qty": qty, "unit": unit, "status": status,
+                            "ok": status.lower() not in TY_EXCLUDED_STATUSES})
+        cm = g(row, "commission rate")
+        if cm and (bc not in latest or d.date() >= latest[bc]):
+            try:
+                out["comm"][bc] = float(cm.replace(",", ""))
+                latest[bc] = d.date()
+            except Exception:
+                pass
+        im = g(row, "image url")
+        if im and bc not in out["img"]:
+            out["img"][bc] = im
+        nm = g(row, "product name")
+        if nm and bc not in out["name"]:
+            out["name"][bc] = nm
+    return out
+
+def get_trendyol_bundle():
+    return _memo_from_sheet(daily_orders_trendyol_sheet, "trendyol_bundle", _build_trendyol_bundle)
+
+def get_trendyol_commission_map():
+    """Barcode (upper) -> نسبة العمولة من آخر طلب | Barcode -> latest commission %."""
+    return get_trendyol_bundle()["comm"]
+
+def build_daily_orders_counts_trendyol(dates):
+    """Barcode (upper) -> {تاريخ: كمية القطع} — بيستبعد المرتجع/ما اتسلمش/لسه مدفوعش/ملغي."""
+    dates_set = set(dates)
+    counts = {}
+    for r in get_trendyol_bundle()["rows"]:
+        if r["ok"] and r["d"] in dates_set:
+            if r["bc"] not in counts:
+                counts[r["bc"]] = {dd: 0 for dd in dates}
+            counts[r["bc"]][r["d"]] += r["qty"]
+    return counts
+
+def build_daily_orders_prices_trendyol(dates):
+    """Barcode (upper) -> {تاريخ: [(سعر الوحدة الصافي، كمية)]} — نفس شكل أسعار نون/أمازون."""
+    dates_set = set(dates)
+    prices = {}
+    for r in get_trendyol_bundle()["rows"]:
+        if r["ok"] and r["d"] in dates_set:
+            if r["bc"] not in prices:
+                prices[r["bc"]] = {dd: [] for dd in dates}
+            p = ("%.2f" % r["unit"]).rstrip("0").rstrip(".") if r["unit"] is not None else ""
+            prices[r["bc"]][r["d"]].append((p, r["qty"]))
+    return prices
+
+def build_trendyol_sales_rows(multi_counts, prices_map, monthly_counts, sales_dates, sales_display_days):
+    """صفوف مبيعات تريندول مجمّعة على Barcode (= SKU). أي Barcode باع خلال آخر 30 يوم بيظهر.
+    الصورة على أساس الـ SKU (links n) الأول، وبعدين صورة تريندول من الملف."""
+    b = get_trendyol_bundle()
+    links_sku = get_links_map()
+    rows = []
+    for bc in set(multi_counts) | set(monthly_counts):
+        dc = multi_counts.get(bc, {d: 0 for d in sales_dates})
+        total_recent = sum(dc.get(d, 0) for d in sales_dates)
+        monthly = sum(monthly_counts.get(bc, {}).values())
+        if total_recent <= 0 and monthly <= 0:
+            continue
+        rows.append({
+            "sku": bc, "sku_up": bc, "asin": None, "barcode": bc,
+            "name": b["name"].get(bc, ""),
+            "stock": 0, "sales_month": monthly,
+            "img": links_sku.get(bc, "") or b["img"].get(bc, ""),
+            "day_counts": dc, "day_prices": prices_map.get(bc, {d: [] for d in sales_dates}),
+            "total_recent": total_recent,
+            "effective_avg": (total_recent / sales_display_days) if sales_display_days > 0 else 0,
+            "days_to_stockout": 9999,
+        })
+    return rows
+
+def _ty_find_col(hdr, *names):
+    low = [str(h).strip().lower() for h in hdr]
+    for n in names:
+        if n in low:
+            return low.index(n)
+    return None
+
+def _ty_parse_orders_xlsx(fileobj):
+    """يقرأ ملف طلبات تريندول (Excel) ويطلّع الأعمدة المطلوبة بس بترتيب TABS_CONFIG['DailyOrdersTrendyol'].
+    مبيقراش أي عمود فيه بيانات عملاء. بيرجع (rows, عدد الصفوف المتخطّية)."""
+    import openpyxl, re as _re
+    wb = openpyxl.load_workbook(fileobj, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    it = ws.iter_rows(values_only=True)
+    hdr = None
+    for r in it:
+        if r and any(str(c).strip().lower() == "barcode" for c in r if c is not None) and \
+           any(str(c).strip().lower() == "order date" for c in r if c is not None):
+            hdr = list(r)
+            break
+    if hdr is None:
+        raise ValueError("مش لاقي صف العناوين (Barcode / Order Date) في الملف")
+    c_bc  = _ty_find_col(hdr, "barcode")
+    c_dt  = _ty_find_col(hdr, "order date")
+    c_ord = _ty_find_col(hdr, "order number")
+    c_pkg = _ty_find_col(hdr, "package no")
+    c_st  = _ty_find_col(hdr, "order status")
+    c_q   = _ty_find_col(hdr, "quantity")
+    c_inv = _ty_find_col(hdr, "invoice amount")
+    c_cm  = _ty_find_col(hdr, "commission rate")
+    c_nm  = _ty_find_col(hdr, "product name")
+    c_im  = next((i for i, h in enumerate(hdr) if h is not None and str(h).strip().lower().startswith("product image")), None)
+    if None in (c_bc, c_dt, c_ord, c_st, c_q, c_inv):
+        raise ValueError("الملف ناقص أعمدة مطلوبة (Barcode / Order Date / Order Number / Order Status / Quantity / Invoice Amount)")
+    now_s = now_str()
+    out, skipped, seen = [], 0, {}
+    def cell(r, i):
+        return r[i] if (i is not None and i < len(r)) else None
+    for r in it:
+        bc = str(cell(r, c_bc) or "").strip()
+        dv = cell(r, c_dt)
+        if not bc or dv is None:
+            skipped += 1
+            continue
+        if isinstance(dv, datetime):
+            dt = dv
+        else:
+            dt = None
+            for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y %H:%M:%S", "%d.%m.%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    dt = datetime.strptime(str(dv).strip(), fmt)
+                    break
+                except Exception:
+                    pass
+        if dt is None:
+            skipped += 1
+            continue
+        try:
+            qty = max(int(float(str(cell(r, c_q) or 1).replace(",", ""))), 1)
+        except Exception:
+            qty = 1
+        try:
+            inv = float(str(cell(r, c_inv) or 0).replace(",", ""))
+        except Exception:
+            inv = 0.0
+        order = str(cell(r, c_ord) or "").strip()
+        pkg = str(cell(r, c_pkg) or "").strip() if c_pkg is not None else ""
+        base_key = f"{order}|{pkg}|{bc}"
+        seen[base_key] = seen.get(base_key, 0) + 1
+        key = base_key if seen[base_key] == 1 else f"{base_key}#{seen[base_key]}"
+        img = ""
+        if c_im is not None:
+            m = _re.search(r'https?://[^"\')\s]+', str(cell(r, c_im) or ""))
+            img = m.group(0) if m else ""
+        out.append([key, bc, dt.strftime("%Y-%m-%d %H:%M:%S"), order, str(cell(r, c_st) or "").strip(),
+                    str(qty), f"{inv / qty:.2f}", f"{inv:.2f}", str(cell(r, c_cm) or "").strip(),
+                    img, str(cell(r, c_nm) or "").strip()[:120], now_s])
+    return out, skipped
+
+def render_trendyol_upload(key_prefix):
+    """رفع ملف طلبات تريندول (Excel) → بيتحدّث شيت DailyOrdersTrendyol: الطلبات اللي رقمها موجود في الملف
+    بتتبدّل بنسختها الجديدة (عشان الحالة تتحدّث)، والباقي بيفضل، وأي طلب أقدم من 60 يوم بيتشال."""
+    with st.expander("📤 رفع ملف طلبات تريندول | Upload Trendyol Orders File", expanded=False):
+        st.caption("بيتاخد من الملف بس: Barcode (= SKU) / تاريخ الطلب / رقم الطلب / الحالة / الكمية / المبلغ / العمولة / الصورة / اسم المنتج — "
+                   "مفيش أسماء عملاء أو عناوين أو تليفونات بتتخزّن.")
+        upl = st.file_uploader("ارفع ملف الطلبات (xlsx) | Upload orders (xlsx)", type=["xlsx", "xlsm"], key=f"{key_prefix}_ty_upload")
+        if upl:
+            try:
+                rows, skipped = _ty_parse_orders_xlsx(upl)
+            except Exception as e:
+                st.error(f"❌ تعذر قراءة الملف: {e}")
+                return
+            if not rows:
+                st.warning("الملف مفيهوش طلبات صالحة | no valid rows")
+                return
+            dts = [r[2][:10] for r in rows]
+            st.info(f"📊 {len(rows):,} سطر | من {min(dts)} إلى {max(dts)} | "
+                    f"{len({r[3] for r in rows}):,} طلب | {len({r[1] for r in rows}):,} Barcode"
+                    + (f" | تم تخطي {skipped} سطر ناقص" if skipped else ""))
+            if st.button("⬆️ رفع / تحديث مبيعات تريندول | Upload", key=f"{key_prefix}_ty_go", type="primary", use_container_width=True):
+                headers = TABS_CONFIG["DailyOrdersTrendyol"]
+                existing = get_cached(daily_orders_trendyol_sheet, force=True)
+                new_orders = {r[3] for r in rows}
+                cutoff = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+                keep = []
+                if len(existing) > 1:
+                    e_hdr = [str(h).strip().lower() for h in existing[0]]
+                    i_ord = e_hdr.index("order number") if "order number" in e_hdr else 3
+                    i_dt = e_hdr.index("order date") if "order date" in e_hdr else 2
+                    for er in existing[1:]:
+                        er = list(er) + [""] * (len(headers) - len(er))
+                        if er[i_ord] in new_orders or str(er[i_dt])[:10] < cutoff:
+                            continue
+                        keep.append(er[:len(headers)])
+                final = keep + [r for r in rows if r[2][:10] >= cutoff]
+                with st.spinner("جاري الرفع..."):
+                    safe_delete_all(daily_orders_trendyol_sheet)
+                    ok = True
+                    for i in range(0, len(final), 3000):
+                        try:
+                            daily_orders_trendyol_sheet.append_rows(final[i:i + 3000], value_input_option="RAW")
+                        except Exception as e:
+                            ok = False
+                            st.error(f"❌ فشل الرفع: {e}")
+                            break
+                clear_cache(daily_orders_trendyol_sheet)
+                for _k in ("warehouse_stockout_rows", "warehouse_stockout_sku_lookup", "warehouse_stockout_asin_lookup"):
+                    st.session_state.pop(_k, None)
+                if ok:
+                    st.success(f"✅ تم — الشيت دلوقتي فيه {len(final):,} سطر")
+                    st.rerun()
+
+
 # ══ الأقسام | Departments (عمود Family في DailyOrders — اختياري، لو مش موجود الكود بيكمل عادي) ══
 FAMILY_HOME_GROUP = {"kitchen_dining", "home_improvement", "gardening", "home_decor", "furniture", "bedding"}
 FAMILY_LABELS = {
@@ -4770,6 +5012,8 @@ def compute_warehouse_stockout_rows():
     #    just FSAB ──
     multi_counts_amz_wh = build_daily_orders_counts_amazon(dates, mode="all", group_by="asin")
     reverse_map_amz_wh  = get_tacweed_amazon_reverse_map()
+    # سحب تريندول من نفس المستودع — Barcode = SKU فبيتحسب على نفس SKUs الكود
+    multi_counts_ty_wh  = build_daily_orders_counts_trendyol(dates)
 
     rows = []
     for code, qty_str in stock_map_wh.items():
@@ -4782,7 +5026,8 @@ def compute_warehouse_stockout_rows():
         asins = reverse_map_amz_wh.get(code, [])
         total_sold_noon = sum(sum(multi_counts_wh.get(sku_up, {}).values()) for sku_up in skus)
         total_sold_amz  = sum(sum(multi_counts_amz_wh.get(asin_up, {}).values()) for asin_up in asins)
-        total_sold = total_sold_noon + total_sold_amz
+        total_sold_ty = sum(sum(multi_counts_ty_wh.get(sku_up, {}).values()) for sku_up in skus)
+        total_sold = total_sold_noon + total_sold_amz + total_sold_ty
         daily_draw = (total_sold / window_days) if window_days > 0 else 0
 
         if daily_draw <= 0:
@@ -4806,6 +5051,7 @@ def compute_warehouse_stockout_rows():
             "daily_draw": round(daily_draw, 2),
             "draw_noon": round(total_sold_noon / window_days, 2) if window_days > 0 else 0,
             "draw_amz": round(total_sold_amz / window_days, 2) if window_days > 0 else 0,
+            "draw_ty": round(total_sold_ty / window_days, 2) if window_days > 0 else 0,
             "days_to_stockout": round(days_to_stockout) if days_to_stockout is not None else None,
             "reorder_in": round(reorder_in) if reorder_in is not None else None,
             "status": status, "color": color, "suggested_qty": suggested_qty, "img": img,
@@ -7095,8 +7341,13 @@ def _t14_channel_part(r, ch, with_sku_level, part="all"):
     """مبيعات قناة واحدة (FBN أو FBB) للـ SKU: أمس، الأيام، المخزون، حالة التغطية، الجدولة.
     with_sku_level=True بيعرض كمان الجدولة الحديثة/الموافقة المعلقة/الملاحظات (اللي هي على مستوى الـ SKU)
     مرة واحدة بس."""
+    if ch == "TY" and part in ("stock", "cov"):
+        if part == "stock":
+            st.markdown(f"📈 **شهري:** {r['sales_month']} &nbsp;|&nbsp; 📊 **يومي أخير:** {r['effective_avg']:.1f}")
+        return
     _chip = {"FBN": ("#064e3b", "#6ee7b7", "🅽 مبيعات نون FBN"), "FBB": ("#1e3a8a", "#bfdbfe", "🅱 مبيعات نون FBB"),
-             "FSAB": ("#7c2d12", "#fed7aa", "🅰 مبيعات أمازون عادي FSAB"), "FBA": ("#78350f", "#fde68a", "📦 مبيعات أمازون FBA")}[ch]
+             "FSAB": ("#7c2d12", "#fed7aa", "🅰 مبيعات أمازون عادي FSAB"), "FBA": ("#78350f", "#fde68a", "📦 مبيعات أمازون FBA"),
+             "TY": ("#4c1d95", "#ddd6fe", "🟣 مبيعات تريندول")}[ch]
     if part in ("all", "sales"):
         st.markdown(f'<span class="wh-badge" style="background:{_chip[0]};color:{_chip[1]};">{_chip[2]}</span>', unsafe_allow_html=True)
         # ══ أمس بارز ══
@@ -7394,14 +7645,27 @@ def _t14_amz_part(r, part):
                 st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
 
 def _t14_trendyol_placeholder():
-    """مكان محجوز لتريندول — هيتملى لما نضيف التكامل بعدين | Reserved slot for Trendyol (filled in later)."""
-    st.markdown('<span class="wh-badge" style="background:#4c1d95;color:#ddd6fe;">🟣 تريندول | Trendyol</span>',
-                unsafe_allow_html=True)
-    st.caption("🔜 قريبًا — مكان محجوز | Reserved for Trendyol")
+    """مكان تريندول لما مفيش بيانات: بيوضح السبب | Shown when there's no Trendyol data."""
+    st.caption("🔜 مفيش بيانات تريندول — ارفع ملف الطلبات من 'رفع ملف طلبات تريندول' فوق | no Trendyol data yet")
+
+def _t14_ty_part(r, part):
+    """جزء من كارت تريندول: ident (Barcode + اسم المنتج) / box / calc / verdict (السعر والربح)."""
+    if part == "ident":
+        _bc = r["sku"]
+        st.markdown(
+            f'**Barcode:** <span style="font-family:monospace;font-weight:700;color:#e2e8f0;background:#1e293b;'
+            f'border:1px solid #334155;border-radius:6px;padding:2px 10px;user-select:all;-webkit-user-select:all;">{_bc}</span>',
+            unsafe_allow_html=True)
+        if r.get("name"):
+            st.caption(r["name"][:70])
+    elif part in ("box", "calc", "verdict"):
+        render_price_profit_block_t14(r, com_map_ty_t14, {}, sales_dates, None, 0, 0, part=part)
+        if part == "box" and not ty_fee_set_t14:
+            st.caption("ℹ️ توصيل تريندول محسوب 0 — ضيف trendyol_delivery_fee في Settings")
 
 def _t14_store_chip(store, parts):
     """شريحة مبيعات متجر واحد (بولد وواضحة): اسم المتجر + كل قناة (أمس / إجمالي الأيام). parts = [(اسم القناة, أمس, إجمالي)]."""
-    _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "🟢 نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "🟠 أمازون")}[store]
+    _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "🟢 نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "🟠 أمازون"), "ty": ("#4c1d95", "#a78bfa", "#ede9fe", "🟣 تريندول")}[store]
     segs = "".join(
         f'<span style="display:inline-flex;align-items:baseline;gap:5px;margin-inline-start:12px;padding-inline-start:12px;'
         f'border-inline-start:1px solid {_sty[1]}88;white-space:nowrap;">'
@@ -7412,7 +7676,7 @@ def _t14_store_chip(store, parts):
     return (f'<span dir="rtl" style="display:inline-block;background:{_sty[0]};border:1px solid {_sty[1]};border-radius:8px;'
             f'padding:6px 12px;margin:3px 0 3px 8px;font-size:14px;"><b style="color:{_sty[1]};font-size:15px;">{_sty[3]}</b>{segs}</span>')
 
-def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, amz, fsab, fba):
+def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, amz, fsab, fba, ty=0):
     """تايل إجمالي يوم — كل سطر بخط بولد وبترتيب ثابت (المتجر ثم قنواته)."""
     return (
         f'<div dir="rtl" style="background:{bg};border-radius:8px;padding:8px 10px;text-align:center;margin:2px;{border}">'
@@ -7425,16 +7689,19 @@ def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, am
         f'<div style="margin-top:4px;">'
         f'<div style="font-size:13px;font-weight:800;color:#fb923c;">🟠 أمازون: {amz}</div>'
         f'<div style="font-size:12px;font-weight:700;color:#ffedd5;">FSAB {fsab} · FBA {fba}</div></div>'
+        f'<div style="margin-top:4px;">'
+        f'<div style="font-size:13px;font-weight:800;color:#a78bfa;">🟣 تريندول: {ty}</div></div>'
         f'</div>')
 if st.session_state["nav_page"] == "tab14":
     with tab14:
         if _tab_gate("tab14", "🛒 المبيعات | Sales"):
             st.subheader("🛒 المبيعات اليومية | Daily Sales")
             st.caption("المفتاح الأساسي هو كود التكويد 🏷️ — كل بلوك = SKU نون (مرتب تنازليًا بمبيعات أمس) + ASIN أمازون لنفس الكود جنبه (والكود بيتكرر): "
-                       "نون 🟢 | أمازون 🟠 | تريندول 🟣 (قريبًا) | "
-                       "Keyed by Tacweed code: one block per code with a card per store side by side — Noon | Amazon | Trendyol (soon)")
+                       "نون 🟢 | أمازون 🟠 | تريندول 🟣 | "
+                       "One block per Noon SKU (sorted by yesterday's sales) with Noon | Amazon | Trendyol side by side")
             render_tacweed_upload("sales")
             render_tacweed_amazon_upload("sales")
+            render_trendyol_upload("sales")
             render_warehouse_stock_upload("sales")
 
             sales_display_days = int(load_settings().get("sales_display_days","7") or 7)
@@ -7452,7 +7719,7 @@ if st.session_state["nav_page"] == "tab14":
             delay_days_t14 = int(load_settings().get("schedule_delay_days","3") or 3)
             coverage_days_t14 = int(load_settings().get("schedule_coverage_days","15") or 15)
 
-            if not inv_map and not amz_inv_map_asin:
+            if not inv_map and not amz_inv_map_asin and not get_trendyol_bundle()["rows"]:
                 st.info("ارفع ملف المخزون أولاً (نون: تاب المخزون / أمازون: StockAmazon) | Upload Inventory first")
             else:
                 rows_fbn_t14, multi_fbn_t14 = _t14_build_rows("fbn", sales_dates, sales_display_days)
@@ -7463,12 +7730,18 @@ if st.session_state["nav_page"] == "tab14":
                 rows_fsab_t14, multi_fsab_t14 = _t14_build_rows_amz("FSAB", sales_dates, sales_display_days)
                 rows_fba_all_t14, multi_fba_t14 = _t14_build_rows_amz("FBA", sales_dates, sales_display_days)
                 rows_fba_t14 = [r for r in rows_fba_all_t14 if r["total_recent"] > 0 or r.get("not_in_inventory")]
+                # تريندول: Barcode = SKU (نفس تكويد نون)
+                _dates30_ty = [today_t14 - timedelta(days=i) for i in range(1, 31)]
+                multi_ty_t14 = build_daily_orders_counts_trendyol(sales_dates)
+                rows_ty_t14 = build_trendyol_sales_rows(multi_ty_t14, build_daily_orders_prices_trendyol(sales_dates),
+                                                        build_daily_orders_counts_trendyol(_dates30_ty), sales_dates, sales_display_days)
 
                 # ══ إجماليات اليومية في الأعلى (نون FBN+FBB + أمازون FSAB+FBA) من صفوف الأوردرز الخام ══
                 tot_fbn = {d: sum(dc.get(d, 0) for dc in multi_fbn_t14.values()) for d in sales_dates}
                 tot_fbb = {d: sum(dc.get(d, 0) for dc in multi_fbb_t14.values()) for d in sales_dates}
                 tot_fsab = {d: sum(dc.get(d, 0) for dc in multi_fsab_t14.values()) for d in sales_dates}
                 tot_fba = {d: sum(dc.get(d, 0) for dc in multi_fba_t14.values()) for d in sales_dates}
+                tot_ty = {d: sum(dc.get(d, 0) for dc in multi_ty_t14.values()) for d in sales_dates}
                 st.markdown("#### 📊 إجمالي المبيعات اليومية | Daily Sales Totals")
                 total_cols = st.columns(min(len(sales_dates), sales_display_days))
                 for ci, (d, lbl) in enumerate(zip(sales_dates, sales_labels)):
@@ -7476,7 +7749,7 @@ if st.session_state["nav_page"] == "tab14":
                         with total_cols[ci]:
                             day_noon = tot_fbn.get(d, 0) + tot_fbb.get(d, 0)
                             day_amz = tot_fsab.get(d, 0) + tot_fba.get(d, 0)
-                            day_total = day_noon + day_amz
+                            day_total = day_noon + day_amz + tot_ty.get(d, 0)
                             is_yesterday = (ci == 0)
                             if is_yesterday:
                                 bg    = "#14532d" if day_total > 0 else "#7f1d1d"
@@ -7490,7 +7763,7 @@ if st.session_state["nav_page"] == "tab14":
                                 bg, border, num_color,
                                 f'{"🔴 " if is_yesterday and day_total==0 else ("🟢 " if is_yesterday else "")}{lbl.split("(")[0].strip()}',
                                 d.strftime("%m-%d"), day_total, day_noon, tot_fbn.get(d, 0), tot_fbb.get(d, 0),
-                                day_amz, tot_fsab.get(d, 0), tot_fba.get(d, 0)), unsafe_allow_html=True)
+                                day_amz, tot_fsab.get(d, 0), tot_fba.get(d, 0), tot_ty.get(d, 0)), unsafe_allow_html=True)
                 st.divider()
 
                 # ══ تجميع بالكود: code -> {SKUs نون} + {ASINs أمازون} ══
@@ -7501,6 +7774,7 @@ if st.session_state["nav_page"] == "tab14":
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBN"] = r
                 for r in rows_fbb_t14:
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBB"] = r
+                ty_rows_t14 = {r["sku_up"]: {"TY": r} for r in rows_ty_t14}
                 asin_rows_t14 = {}
                 for r in rows_fsab_t14:
                     asin_rows_t14.setdefault((r.get("asin") or r["sku_up"]).upper(), {})["FSAB"] = r
@@ -7521,33 +7795,59 @@ if st.session_state["nav_page"] == "tab14":
                     c = sku_rows_t14[s]
                     return (_yv(c, "FBN") + _yv(c, "FBB"), _tv(c, "FBN") + _tv(c, "FBB"))
 
-                # ══ كل بلوك = SKU نون واحد + ASIN أمازون واحد لنفس الكود (بالترتيب حسب المبيعات)، والكود بيتكرر عادي ══
-                # الترتيب النهائي تنازلي بمبيعات أمس لـ SKU نون (الأكبر فوق). ASIN زيادة أو بدون كود = بلوك لوحده.
+                # ══ كل بلوك = SKU نون واحد + ASIN أمازون + Barcode تريندول لنفس الكود (بالترتيب حسب المبيعات)، والكود بيتكرر عادي ══
+                # الترتيب النهائي تنازلي بمبيعات أمس لـ SKU نون (الأكبر فوق). تريندول: Barcode = SKU فبيتحط جنب نفس الـ SKU مباشرة.
+                # ASIN/Barcode زيادة أو بدون كود = بلوك لوحده. أي ASIN/Barcode بدون مبيعات أمس مبيتعرضش (إلا لو بتبحث).
                 def _asin_sales(a):
                     c = asin_rows_t14[a]
                     return (_yv(c, "FSAB") + _yv(c, "FBA"), _tv(c, "FSAB") + _tv(c, "FBA"))
-                noon_by_code, asin_by_code, blocks_t14 = {}, {}, []
+                def _ty_sales(k):
+                    c = ty_rows_t14[k]
+                    return (_yv(c, "TY"), _tv(c, "TY"))
+                asin_sel = [a for a in asin_rows_t14 if q_t14 or _asin_sales(a)[0] > 0]
+                ty_sel = [k for k in ty_rows_t14 if q_t14 or _ty_sales(k)[0] > 0]
+                blocks_t14, blocks_by_sku = [], {}
                 for sku_up in sku_rows_t14:
-                    code = (tac_map_t14.get(sku_up, "") or "").strip()
-                    if code:
-                        noon_by_code.setdefault(code, []).append(sku_up)
+                    blk = {"code": (tac_map_t14.get(sku_up, "") or "").strip(), "sku": sku_up, "asin": None, "tb": None}
+                    blocks_by_sku[sku_up] = blk
+                    blocks_t14.append(blk)
+                ty_left = []
+                for k in ty_sel:
+                    if k in blocks_by_sku:
+                        blocks_by_sku[k]["tb"] = k
                     else:
-                        blocks_t14.append({"code": "", "sku": sku_up, "asin": None})
-                for asin_up in asin_rows_t14:
-                    # أمازون: ASIN بدون مبيعات أمس مبيتعرضش (إلا لو بتبحث عنه)
-                    if not q_t14 and _asin_sales(asin_up)[0] <= 0:
-                        continue
-                    code = (tac_amz_map_t14.get(asin_up, "") or "").strip()
-                    if code:
-                        asin_by_code.setdefault(code, []).append(asin_up)
+                        ty_left.append(k)
+                code_blocks = {}
+                for blk in blocks_t14:
+                    if blk["code"]:
+                        code_blocks.setdefault(blk["code"], []).append(blk)
+                for _c in code_blocks:
+                    code_blocks[_c].sort(key=lambda x: _sku_sales(x["sku"]), reverse=True)
+                asin_by_code, ty_by_code, _pool = {}, {}, []
+                for a in asin_sel:
+                    _c = (tac_amz_map_t14.get(a, "") or "").strip()
+                    if _c:
+                        asin_by_code.setdefault(_c, []).append(a)
                     else:
-                        blocks_t14.append({"code": "", "sku": None, "asin": asin_up})
-                for code in set(noon_by_code) | set(asin_by_code):
-                    ss_ = sorted(noon_by_code.get(code, []), key=lambda x: _sku_sales(x), reverse=True)
-                    aa_ = sorted(asin_by_code.get(code, []), key=lambda x: _asin_sales(x), reverse=True)
-                    for k in range(max(len(ss_), len(aa_))):
-                        blocks_t14.append({"code": code, "sku": ss_[k] if k < len(ss_) else None,
-                                           "asin": aa_[k] if k < len(aa_) else None})
+                        _pool.append({"code": "", "sku": None, "asin": a, "tb": None})
+                for k in ty_left:
+                    _c = (tac_map_t14.get(k, "") or "").strip()
+                    if _c:
+                        ty_by_code.setdefault(_c, []).append(k)
+                    else:
+                        _pool.append({"code": "", "sku": None, "asin": None, "tb": k})
+                for _c in set(asin_by_code) | set(ty_by_code):
+                    aa_ = sorted(asin_by_code.get(_c, []), key=_asin_sales, reverse=True)
+                    tt_ = sorted(ty_by_code.get(_c, []), key=_ty_sales, reverse=True)
+                    for blk in code_blocks.get(_c, []):
+                        if aa_:
+                            blk["asin"] = aa_.pop(0)
+                        if tt_ and not blk["tb"]:
+                            blk["tb"] = tt_.pop(0)
+                    for k in range(max(len(aa_), len(tt_))):
+                        blocks_t14.append({"code": _c, "sku": None, "asin": aa_[k] if k < len(aa_) else None,
+                                           "tb": tt_[k] if k < len(tt_) else None})
+                blocks_t14 += _pool
                 # أفضل ASIN أمازون لكل كود (حتى لو مباعش أمس) — لعرض رقمه في خانة "مفيش مبيعات أمس"
                 _best_asin_code = {}
                 for _a in asin_rows_t14:
@@ -7563,8 +7863,9 @@ if st.session_state["nav_page"] == "tab14":
                 for b in blocks_t14:
                     ns_ = _sku_sales(b["sku"]) if b["sku"] else (0, 0)
                     as_ = _asin_sales(b["asin"]) if b["asin"] else (0, 0)
-                    b["sort"] = (-ns_[0], -ns_[1], -as_[0], -as_[1])
-                    keys = [b["code"], b["sku"] or "", b["asin"] or ""]
+                    ts_ = _ty_sales(b["tb"]) if b["tb"] else (0, 0)
+                    b["sort"] = (-ns_[0], -ns_[1], -(as_[0] + ts_[0]), -(as_[1] + ts_[1]))
+                    keys = [b["code"], b["sku"] or "", b["asin"] or "", b["tb"] or ""]
                     if b["asin"]:
                         r0 = asin_rows_t14[b["asin"]].get("FSAB") or asin_rows_t14[b["asin"]].get("FBA")
                         keys += list(r0.get("mskus") or [r0["sku_up"]])
@@ -7594,6 +7895,13 @@ if st.session_state["nav_page"] == "tab14":
                                 **{"FSAB " + sales_labels[i]: (rs["day_counts"].get(d, 0) if rs else 0) for i, d in enumerate(sales_dates)},
                                 **{"FBA " + sales_labels[i]: (rf["day_counts"].get(d, 0) if rf else 0) for i, d in enumerate(sales_dates)},
                                 "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
+                        if b["tb"]:
+                            chs = ty_rows_t14[b["tb"]]
+                            rt = chs["TY"]
+                            _dl_rows.append({
+                                "المتجر | Store": "Trendyol", "تكويد | Code": b["code"], "SKU / ASIN": rt["sku"],
+                                **{"TY " + sales_labels[i]: rt["day_counts"].get(d, 0) for i, d in enumerate(sales_dates)},
+                                "مخزون | Stock": 0, "مبيع شهري | Monthly Sales": rt["sales_month"]})
                     df_t14 = pd.DataFrame(_dl_rows).fillna(0)
                     c1, c2 = st.columns(2)
                     with c1: dl_btn(df_t14, "sales_daily", key="dlbtn_t14")
@@ -7610,29 +7918,40 @@ if st.session_state["nav_page"] == "tab14":
                 com_map_t14 = get_com_map()
                 live_map_t14 = get_live_map()
                 xdock_threshold_t14 = int(load_settings().get("xdock_low_stock_threshold","10") or 10)
+                # تريندول: العمولة من الملف، والتوصيل من إعداد trendyol_delivery_fee في Settings (لو مش موجود = 0)
+                _ty_fee_raw = str(load_settings().get("trendyol_delivery_fee", "")).strip()
+                ty_fee_set_t14 = bool(_ty_fee_raw)
+                try:
+                    _ty_fee_v = -abs(float(_ty_fee_raw)) if _ty_fee_raw else 0.0
+                except Exception:
+                    _ty_fee_v, ty_fee_set_t14 = 0.0, False
+                com_map_ty_t14 = {bc: {"delivery": _ty_fee_v, "commission_pct": pct} for bc, pct in get_trendyol_commission_map().items()}
 
-                render_china_sales_status([k for b in blocks_t14 for k in (b["sku"], b["asin"]) if k])  # 🚢 حالة ربط بيانات الصين
+                render_china_sales_status([k for b in blocks_t14 for k in (b["sku"], b["asin"], b["tb"]) if k])  # 🚢 حالة ربط بيانات الصين
                 st.divider()
                 wh_lookup_t14 = _china_wh_lookup()
                 for b in blocks_t14:
                     noon_chs = sku_rows_t14.get(b["sku"]) if b["sku"] else None
                     amz_chs = asin_rows_t14.get(b["asin"]) if b["asin"] else None
-                    first_key = b["sku"] or b["asin"]
+                    ty_chs = ty_rows_t14.get(b["tb"]) if b["tb"] else None
+                    first_key = b["sku"] or b["asin"] or b["tb"]
                     first_row = ((noon_chs.get("FBN") or noon_chs.get("FBB")) if noon_chs
-                                 else (amz_chs.get("FSAB") or amz_chs.get("FBA")))
+                                 else ((amz_chs.get("FSAB") or amz_chs.get("FBA")) if amz_chs else ty_chs["TY"]))
                     # الصور على أساس الـ SKU: صورة SKU نون، وبعدين صورة أمازون (MSKU ثم ASIN)
                     img_t14 = ((first_row.get("img") if noon_chs else "")
-                               or (next((amz_chs.get(k).get("img") for k in ("FSAB", "FBA") if amz_chs.get(k) and amz_chs.get(k).get("img")), "") if amz_chs else ""))
+                               or (next((amz_chs.get(k).get("img") for k in ("FSAB", "FBA") if amz_chs.get(k) and amz_chs.get(k).get("img")), "") if amz_chs else "")
+                               or (ty_chs["TY"].get("img") if ty_chs else ""))
                     y_n = _yv(noon_chs, "FBN") if noon_chs else 0; y_b = _yv(noon_chs, "FBB") if noon_chs else 0
                     t_n = _tv(noon_chs, "FBN") if noon_chs else 0; t_b = _tv(noon_chs, "FBB") if noon_chs else 0
                     y_a = _yv(amz_chs, "FSAB") if amz_chs else 0; y_f = _yv(amz_chs, "FBA") if amz_chs else 0
                     t_a = _tv(amz_chs, "FSAB") if amz_chs else 0; t_f = _tv(amz_chs, "FBA") if amz_chs else 0
+                    y_t = _yv(ty_chs, "TY") if ty_chs else 0; t_t = _tv(ty_chs, "TY") if ty_chs else 0
                     c_img, c_info = st.columns([1, 7])
                     with c_img:
                         show_img(img_t14, 70)
                     with c_info:
                         # ── مستوى الكود: شارات الكود/المستودع/التكلفة/النفاد (محسوبة من سحب نون + أمازون) ──
-                        tc_badge_t14 = warehouse_available_badge(first_key) if b["sku"] else warehouse_available_badge_amazon(first_key)
+                        tc_badge_t14 = warehouse_available_badge_amazon(first_key) if (not b["sku"] and b["asin"]) else warehouse_available_badge(first_key)
                         if tc_badge_t14:
                             st.markdown(tc_badge_t14, unsafe_allow_html=True)
                         else:
@@ -7640,19 +7959,23 @@ if st.session_state["nav_page"] == "tab14":
                                         unsafe_allow_html=True)
                         wh_g = wh_lookup_t14.get(first_key)
                         if wh_g and wh_g.get("daily_draw") is not None:
-                            st.caption(f"🧮 سحب المستودع اليومي للكود (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} "
+                            st.caption(f"🧮 سحب المستودع اليومي للكود (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} + تريندول {wh_g.get('draw_ty', 0):g} "
                                        f"= {wh_g['daily_draw']:g} قطعة/يوم — شارة النفاد وموعد الطلب محسوبين على المجموع")
                         _chips = ""
                         if b["sku"]:
                             _chips += _t14_store_chip("noon", [("FBN", y_n, t_n), ("FBB", y_b, t_b)])
                         if b["asin"]:
                             _chips += _t14_store_chip("amz", [("FSAB", y_a, t_a), ("FBA", y_f, t_f)])
+                        if b["tb"]:
+                            _chips += _t14_store_chip("ty", [("TY", y_t, t_t)])
                         st.markdown('<div dir="rtl" style="margin:6px 0;"><b style="color:#e2e8f0;font-size:14px;margin-inline-end:8px;">🛒 اتباع منه:</b>'
                                     + _chips + '</div>', unsafe_allow_html=True)
                         render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالكود)
 
                     # ══ نون | أمازون | تريندول جنب بعض — كل قسم في صف مستقل عشان الأقسام تتحاذى (السعر جنب السعر) ══
-                    r_sku = r_asin = None
+                    r_sku = r_asin = r_ty = None
+                    if ty_chs:
+                        r_ty = ty_chs["TY"]
                     if noon_chs:
                         r_any = noon_chs.get("FBN") or noon_chs.get("FBB")
                         r_sku = dict(r_any, day_prices={d: list(noon_chs["FBN"]["day_prices"].get(d, [])) if "FBN" in noon_chs else []
@@ -7669,7 +7992,7 @@ if st.session_state["nav_page"] == "tab14":
                                 r_asin["day_prices"][d] = r_asin["day_prices"].get(d, []) + list(amz_chs["FBA"]["day_prices"].get(d, []))
                     with st.container(border=True):
                         # صف 0: عناوين المتاجر (تريندول مكانه محجوز هنا)
-                        cn, ca, ct = st.columns([5, 5, 3])
+                        cn, ca, ct = st.columns([5, 5, 4])
                         with cn:
                             st.markdown('<span class="wh-badge" style="background:#064e3b;color:#6ee7b7;">🟢 نون | Noon</span>', unsafe_allow_html=True)
                             if not noon_chs:
@@ -7686,24 +8009,33 @@ if st.session_state["nav_page"] == "tab14":
                                 else:
                                     st.caption("— مفيش ASIN أمازون مربوط بالكود ده | no Amazon ASIN linked to this code")
                         with ct:
-                            _t14_trendyol_placeholder()
+                            st.markdown('<span class="wh-badge" style="background:#4c1d95;color:#ddd6fe;">🟣 تريندول | Trendyol</span>', unsafe_allow_html=True)
+                            if not r_ty:
+                                if get_trendyol_bundle()["rows"]:
+                                    st.caption("— مفيش مبيعات تريندول أمس | no Trendyol sales yesterday")
+                                else:
+                                    _t14_trendyol_placeholder()
                         # صف 1: الهوية (SKU / ASIN)
-                        cn, ca, ct = st.columns([5, 5, 3])
+                        cn, ca, ct = st.columns([5, 5, 4])
                         with cn:
                             if r_sku: _t14_noon_part(r_sku, "ident")
                         with ca:
                             if r_asin: _t14_amz_part(r_asin, "ident")
+                        with ct:
+                            if r_ty: _t14_ty_part(r_ty, "ident")
                         # صف 2: صندوق السعر والربح — صف 3: تفاصيل الحساب — صف 4: تفاصيل حكم الإعلان — صف 5: أداء الإعلانات
                         _has_ads_n = bool(r_sku and ads_map_t14.get(r_sku["sku_up"]))
                         _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
                         for _pt in ("box", "calc", "verdict", "ads"):
                             if _pt in ("verdict", "ads") and not (_has_ads_n or _has_ads_a):
                                 continue
-                            cn, ca, ct = st.columns([5, 5, 3])
+                            cn, ca, ct = st.columns([5, 5, 4])
                             with cn:
                                 if r_sku: _t14_noon_part(r_sku, _pt)
                             with ca:
                                 if r_asin: _t14_amz_part(r_asin, _pt)
+                            with ct:
+                                if r_ty and _pt in ("box", "calc"): _t14_ty_part(r_ty, _pt)
                         # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
                         # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
                         _shown_a = {}
@@ -7719,15 +8051,17 @@ if st.session_state["nav_page"] == "tab14":
                             elif _sn["FBN"]:
                                 _sn["FBB"] = False
                         _sa = _shown_a
-                        if any(_sn.values()) or any(_sa.values()):
+                        if any(_sn.values()) or any(_sa.values()) or r_ty:
                             _lvl = {"FBN": True, "FBB": not _sn["FBN"], "FSAB": True, "FBA": not _sa["FSAB"]}
                             _src = {"FBN": noon_chs, "FBB": noon_chs, "FSAB": amz_chs, "FBA": amz_chs}
                             for _pt in ("sales", "stock", "cov"):
-                                _cols = st.columns([2.5, 2.5, 2.5, 2.5, 3])
+                                _cols = st.columns([2.5, 2.5, 2.5, 2.5, 4])
                                 for _col, _ch in zip(_cols[:4], ("FBN", "FBB", "FSAB", "FBA")):
                                     with _col:
                                         if (_sn.get(_ch) if _ch in _sn else _sa.get(_ch)):
                                             _t14_channel_part(_src[_ch][_ch], _ch, _lvl[_ch], part=_pt)
+                                with _cols[4]:
+                                    if r_ty: _t14_channel_part(r_ty, "TY", True, part=_pt)
                     st.divider()
                 # حفظ المرحلين في session_state بعد اكتمال العرض
                 st.session_state["transferred_skus_t14"] = _new_transferred
