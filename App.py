@@ -156,6 +156,8 @@ TABS_CONFIG = {
     # إعلانات تريندول (تقرير Product Ads) — بتتعمل تلقائي أول مرة
     "AdvertisementsTrendyol": ["Ad Name", "Ad Status", "Start Date", "Products", "Content IDs", "Daily Budget",
                                "Cost", "Clicks", "Views", "Orders", "Sales", "ROAS", "Date Uploaded"],
+    # ملف منتجات تريندول (لربط Content ID بالـ Barcode) — بيتعمل تلقائي أول مرة
+    "TrendyolProducts": ["Content ID", "Barcode", "Product Name", "Image URL", "Date Uploaded"],
 }
 
 def get_or_create_worksheet(tab, headers, retries=5, delay=2):
@@ -352,6 +354,7 @@ daily_orders_amazon_sheet = sheets["DailyOrdersAmazon"]
 stock_amazon_sheet   = sheets["StockAmazon"]
 daily_orders_trendyol_sheet = sheets["DailyOrdersTrendyol"]
 ads_ty_sheet = sheets["AdvertisementsTrendyol"]
+ty_products_sheet = sheets["TrendyolProducts"]
 settings_sheet       = sheets["Settings"]
 cancel_notif_sheet   = sheets["CancelNotifications"]
 tacweed_sheet        = sheets["Tacweed"]
@@ -4403,7 +4406,7 @@ def _build_ty_ads(raw):
         row = list(row) + [""] * (len(TY_ADS_HEADERS) - len(row))
         if not str(row[0]).strip():
             continue
-        camps.append({"name": row[0], "status": row[1], "start": row[2], "n_products": int(_ty_num(row[3])),
+        camps.append({"i": len(camps), "name": row[0], "status": row[1], "start": row[2], "n_products": int(_ty_num(row[3])),
                       "ids": [x.strip() for x in str(row[4]).split(",") if x.strip()],
                       "daily_budget": _ty_num(row[5]), "cost": _ty_num(row[6]), "clicks": int(_ty_num(row[7])),
                       "views": int(_ty_num(row[8])), "sold": int(_ty_num(row[9])),
@@ -4446,6 +4449,7 @@ def _render_ads_performance_tab_trendyol():
     """تاب إعلانات تريندول — على مستوى الحملة (التقرير مفيهوش Barcode، فيه ContentId بس)."""
     plat_header("trendyol", "إعلانات تريندول | Trendyol Ads")
     render_trendyol_ads_upload("ty_ads")
+    render_trendyol_products_upload("ty_ads")
     camps = get_ads_map_trendyol()
     if not camps:
         st.info("ارفع تقرير إعلانات تريندول من الأعلى | Upload the Trendyol ads report above")
@@ -4484,6 +4488,17 @@ def _render_ads_performance_tab_trendyol():
         "نقرات": c["clicks"], "مرات ظهور": c["views"], "ميزانية يومية": c["daily_budget"], "بدأت": c["start"],
     } for c in sorted(shown, key=lambda x: -x["cost"])])
     dl_btn(df, "trendyol_ads", key="dlbtn_trendyol_ads")
+    _by_bc = get_ads_by_barcode_trendyol()
+    if _by_bc:
+        _pn2 = get_ty_products()["name"]
+        _prow = sorted(({"Barcode": bc, "المنتج": _pn2.get(bc, "")[:50], "الصرف": sum(e["spends"] for e in es),
+                         "الإيراد": sum(e["revenue"] for e in es), "الطلبات": round(sum(e["orders"] for e in es), 1),
+                         "ROAS": (sum(e["revenue"] for e in es) / sum(e["spends"] for e in es)) if sum(e["spends"] for e in es) else 0,
+                         "دقة": "دقيق" if all(e["exact"] for e in es) else "تقريبي"} for bc, es in _by_bc.items()),
+                       key=lambda x: -x["الصرف"])
+        with st.expander(f"📦 الإعلانات لكل منتج (Barcode) — {len(_prow)} منتج"):
+            st.dataframe(pd.DataFrame(_prow), use_container_width=True, hide_index=True)
+            dl_btn(pd.DataFrame(_prow), "trendyol_ads_by_barcode", key="dlbtn_trendyol_ads_bc")
     for c in sorted(shown, key=lambda x: -x["cost"]):
         with st.container(border=True):
             h1, h2 = st.columns([4, 2])
@@ -4496,8 +4511,16 @@ def _render_ads_performance_tab_trendyol():
             m[3].markdown(f"🛒 **{c['sold']}**")
             m[4].markdown(f"🖱️ **{c['clicks']:,}**")
             m[5].markdown(f"👁️ **{c['views']:,}**")
-            if c["ids"]:
-                st.caption(f"{c['n_products']} منتج — ContentId: " + ", ".join(c["ids"][:12]) + (" …" if len(c["ids"]) > 12 else ""))
+            _det = _ty_alloc()[1].get(c["i"])
+            if _det and _det["items"]:
+                _pn = get_ty_products()["name"]
+                with st.expander(f"🧩 منتجات الحملة ({len(_det['items'])}) — " + ("توزيع دقيق (منتج واحد)" if _det["exact"] else "توزيع تقريبي بنسبة المبيعات")):
+                    for bc, share, wq in _det["items"]:
+                        st.markdown(f"`{bc}` — {_pn.get(bc, '')[:50]} &nbsp;|&nbsp; نصيب {share * 100:.0f}% = صرف **{c['cost'] * share:,.2f}** &nbsp;|&nbsp; مبيعات المنتج من بداية الحملة: {wq}")
+                    if _det["unmapped"]:
+                        st.caption(f"⚠️ {len(_det['unmapped'])} Content ID مش موجودين في ملف المنتجات: " + ", ".join(_det["unmapped"][:8]))
+            elif c["ids"]:
+                st.caption(f"{c['n_products']} منتج — ContentId: " + ", ".join(c["ids"][:12]) + (" …" if len(c["ids"]) > 12 else "") + " — ارفع ملف المنتجات لربطهم بالـ Barcode")
 
 # ── "مفيش مبيعات" لتريندول: Barcodes اتباعت في آخر 60 يوم ومفيهاش مبيع في الفترة ──
 def compute_no_sale_rows_trendyol(days=7):
@@ -4544,6 +4567,143 @@ def render_no_sale_list_trendyol(rows, period_label, dl_key):
             st.markdown(f"**Barcode:** `{r['sku']}`")
             st.markdown(f"📦 **مخزون المستودع:** {r['stock']} &nbsp;|&nbsp; 📈 **شهري:** {r['sales_month']} &nbsp;|&nbsp; 🕓 **آخر بيع:** {r['last']}")
         st.divider()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ══ ربط إعلانات تريندول بالـ Barcode — عن طريق ملف المنتجات (Content ID من رابط المنتج) ══
+# ملف Products من لوحة تريندول: عمود "Trendyol.com Link" فيه رقم المنتج بعد "-p-" (= Content ID في تقرير الإعلانات).
+# بنخزّن بس: Content ID / Barcode / اسم المنتج / صورة 1. الحملة اللي فيها منتج واحد دقيقة، والمتعددة بيتوزع صرفها
+# على منتجاتها بنسبة مبيعاتها (من ملف الطلبات) من تاريخ بداية الحملة — ومكتوب عليها "تقريبي".
+# ══════════════════════════════════════════════════════════════════════════
+_TY_CID_RE = re.compile(r"-p-(\d+)")
+
+def _ty_products_parse_xlsx(fileobj):
+    import openpyxl
+    wb = openpyxl.load_workbook(fileobj, data_only=True)
+    ws = wb["Products"] if "Products" in wb.sheetnames else wb.worksheets[0]
+    allrows = list(ws.iter_rows(values_only=True))
+    hi = None
+    for i, r in enumerate(allrows[:10]):
+        low = [str(c).strip().lower() for c in r if c is not None]
+        if "barcode" in low and "trendyol.com link" in low:
+            hi = i
+            break
+    if hi is None:
+        raise ValueError("مش لاقي عمودي Barcode و Trendyol.com Link")
+    idx = {}
+    for j, c in enumerate(allrows[hi]):
+        k = str(c).strip().lower() if c is not None else ""
+        if k and k not in idx:
+            idx[k] = j
+    def g(r, name):
+        j = idx.get(name)
+        v = r[j] if (j is not None and j < len(r)) else ""
+        return "" if v is None else str(v).strip()
+    out, seen, ts = [], set(), now_str()
+    for r in allrows[hi + 1:]:
+        bc = g(r, "barcode")
+        m = _TY_CID_RE.search(g(r, "trendyol.com link"))
+        if not bc or not m or (m.group(1), bc) in seen:
+            continue
+        seen.add((m.group(1), bc))
+        out.append([m.group(1), bc, g(r, "product name")[:120], g(r, "image 1"), ts])
+    return out
+
+def _build_ty_products(raw):
+    by_cid, img, name = {}, {}, {}
+    for row in (raw or [])[1:]:
+        if len(row) < 2 or not str(row[0]).strip() or not str(row[1]).strip():
+            continue
+        cid, bc = str(row[0]).strip(), str(row[1]).strip().upper()
+        by_cid.setdefault(cid, [])
+        if bc not in by_cid[cid]:
+            by_cid[cid].append(bc)
+        if len(row) > 2 and row[2] and bc not in name:
+            name[bc] = row[2]
+        if len(row) > 3 and row[3] and bc not in img:
+            img[bc] = row[3]
+    return {"by_cid": by_cid, "img": img, "name": name}
+
+def get_ty_products():
+    return _memo_from_sheet(ty_products_sheet, "ty_products", _build_ty_products)
+
+def render_trendyol_products_upload(key_prefix):
+    with st.expander("📤 رفع ملف منتجات تريندول (لربط الإعلانات بالـ Barcode) | Upload Trendyol Products File", expanded=False):
+        st.caption("من لوحة تريندول: ملف Products. بيتاخد منه بس: رقم المنتج (من عمود Trendyol.com Link) / Barcode / اسم المنتج / صورة 1. "
+                   "بيستبدل الموجود. الشيت TrendyolProducts بيتعمل تلقائي أول مرة.")
+        upl = st.file_uploader("ارفع ملف المنتجات (xlsx) | Upload Products (xlsx)", type=["xlsx", "xlsm"], key=f"{key_prefix}_typrod_upload")
+        if upl:
+            try:
+                rows = _ty_products_parse_xlsx(upl)
+            except Exception as e:
+                st.error(f"❌ تعذر قراءة الملف: {e}")
+                return
+            if not rows:
+                st.warning("مفيش منتجات صالحة في الملف | no valid rows")
+                return
+            st.info(f"📊 {len(rows):,} منتج | {len({r[0] for r in rows}):,} Content ID")
+            if st.button("⬆️ رفع / تحديث ملف المنتجات | Upload", key=f"{key_prefix}_typrod_go", type="primary", use_container_width=True):
+                with st.spinner("جاري الرفع..."):
+                    safe_delete_all(ty_products_sheet)
+                    ok = True
+                    for i in range(0, len(rows), 3000):
+                        try:
+                            ty_products_sheet.append_rows(rows[i:i + 3000], value_input_option="RAW")
+                        except Exception as e:
+                            ok = False
+                            st.error(f"❌ فشل الرفع: {e}")
+                            break
+                clear_cache(ty_products_sheet)
+                if ok:
+                    st.success(f"✅ تم — {len(rows):,} منتج")
+                    st.rerun()
+
+_TY_ALLOC_CACHE = {}
+
+def _ty_alloc():
+    """يوزّع أرقام كل حملة على Barcodes منتجاتها. بيرجع (by_bc, by_camp):
+    by_bc: BARCODE -> [إدخالات بنفس شكل إعلانات نون]، by_camp: ترتيب الحملة -> تفاصيل التوزيع."""
+    if "v" in _TY_ALLOC_CACHE:
+        return _TY_ALLOC_CACHE["v"]
+    camps = get_ads_map_trendyol()
+    by_cid = get_ty_products()["by_cid"]
+    qty_rows = {}
+    for r in get_trendyol_bundle()["rows"]:
+        if r["ok"]:
+            qty_rows.setdefault(r["bc"], []).append((r["d"], r["qty"]))
+    by_bc, by_camp = {}, {}
+    for c in camps:
+        bcs, unmapped = [], []
+        for cid in c["ids"]:
+            if cid in by_cid:
+                for bc in by_cid[cid]:
+                    if bc not in bcs:
+                        bcs.append(bc)
+            else:
+                unmapped.append(cid)
+        try:
+            start = datetime.strptime(str(c["start"])[:10], "%Y-%m-%d").date()
+        except Exception:
+            start = None
+        w = {bc: sum(q for d, q in qty_rows.get(bc, []) if (start is None or d >= start)) for bc in bcs}
+        tot_w = sum(w.values())
+        exact = len(bcs) == 1
+        items = []
+        for bc in bcs:
+            share = 1.0 if exact else ((w[bc] / tot_w) if tot_w > 0 else 1.0 / len(bcs))
+            items.append((bc, share, w[bc]))
+            sp, rv, od, ck, vw = c["cost"] * share, c["sales"] * share, c["sold"] * share, c["clicks"] * share, c["views"] * share
+            by_bc.setdefault(bc, []).append({
+                "campaign": c["name"] + ("" if exact else " (تقريبي)"), "views": vw, "clicks": ck, "orders": od, "atc": 0.0,
+                "spends": sp, "revenue": rv, "ctr": (ck / vw * 100) if vw else 0.0, "roas": (rv / sp) if sp else 0.0,
+                "cpc": (sp / ck) if ck else 0.0, "cps": (sp / od) if od else 0.0, "cvr": (od / ck * 100) if ck else 0.0,
+                "exact": exact})
+        by_camp[c["i"]] = {"items": items, "exact": exact, "unmapped": unmapped}
+    _TY_ALLOC_CACHE["v"] = (by_bc, by_camp)
+    return _TY_ALLOC_CACHE["v"]
+
+def get_ads_by_barcode_trendyol():
+    return _ty_alloc()[0]
 
 
 # ══ الأقسام | Departments (عمود Family في DailyOrders — اختياري، لو مش موجود الكود بيكمل عادي) ══
@@ -7895,10 +8055,23 @@ def _t14_ty_part(r, part):
             unsafe_allow_html=True)
         if r.get("name"):
             st.caption(r["name"][:70])
-    elif part in ("box", "calc", "verdict"):
-        render_price_profit_block_t14(r, com_map_ty_t14, {}, sales_dates, None, 0, 0, part=part)
-        if part == "box" and not ty_fee_set_t14:
-            st.caption("ℹ️ توصيل تريندول محسوب 0 — ضيف trendyol_delivery_fee في Settings")
+    elif part in ("box", "calc", "verdict", "ads"):
+        ent = get_ads_by_barcode_trendyol().get(r["sku_up"])
+        tot_s = sum(a["spends"] for a in ent) if ent else 0.0
+        tot_r = sum(a["revenue"] for a in ent) if ent else 0.0
+        tot_o = sum(a["orders"] for a in ent) if ent else 0.0
+        if part == "ads":
+            if ent:
+                with st.expander(f"📢 أداء الإعلانات | Ads — {len(ent)} حملة" + ("" if all(a["exact"] for a in ent) else " (فيها توزيع تقريبي)")):
+                    st.markdown(f"💸 **المصروف:** {tot_s:,.2f} &nbsp;|&nbsp; 💰 **الإيراد:** {tot_r:,.2f} &nbsp;|&nbsp; 🛒 **طلبات:** {tot_o:,.1f}")
+                    for ad in ent:
+                        st.markdown(f"**{ad['campaign']}**<br>👁️ {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ {ad['clicks']:,.0f} &nbsp;|&nbsp; 🛒 {ad['orders']:,.1f} "
+                                    f"&nbsp;|&nbsp; 💸 {ad['spends']:,.2f} &nbsp;|&nbsp; 💰 {ad['revenue']:,.2f} &nbsp;|&nbsp; 🎯 ROAS {ad['roas']:.2f}", unsafe_allow_html=True)
+                        st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+        else:
+            render_price_profit_block_t14(r, com_map_ty_t14, {}, sales_dates, ent, tot_o, tot_s, part=part)
+            if part == "box" and not ty_fee_set_t14:
+                st.caption("ℹ️ توصيل تريندول محسوب 0 — ضيف trendyol_delivery_fee في Settings")
 
 def _t14_store_chip(store, parts):
     """شريحة مبيعات متجر واحد (بولد وواضحة): اسم المتجر + كل قناة (أمس / إجمالي الأيام). parts = [(اسم القناة, أمس, إجمالي)]."""
@@ -8263,8 +8436,9 @@ if st.session_state["nav_page"] == "tab14":
                         # صف 2: صندوق السعر والربح — صف 3: تفاصيل الحساب — صف 4: تفاصيل حكم الإعلان — صف 5: أداء الإعلانات
                         _has_ads_n = bool(r_sku and ads_map_t14.get(r_sku["sku_up"]))
                         _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
+                        _has_ads_t = bool(r_ty and get_ads_by_barcode_trendyol().get(r_ty["sku_up"]))
                         for _pt in ("box", "calc", "verdict", "ads"):
-                            if _pt in ("verdict", "ads") and not (_has_ads_n or _has_ads_a):
+                            if _pt in ("verdict", "ads") and not (_has_ads_n or _has_ads_a or _has_ads_t):
                                 continue
                             cn, ca, ct = st.columns([5, 5, 4])
                             with cn:
@@ -8272,7 +8446,7 @@ if st.session_state["nav_page"] == "tab14":
                             with ca:
                                 if r_asin: _t14_amz_part(r_asin, _pt)
                             with ct:
-                                if r_ty and _pt in ("box", "calc"): _t14_ty_part(r_ty, _pt)
+                                if r_ty and (_pt in ("box", "calc") or _has_ads_t): _t14_ty_part(r_ty, _pt)
                         # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
                         # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
                         _shown_a = {}
