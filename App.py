@@ -34,8 +34,10 @@ html, body {
 
 # ══ اتصال ══
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-client = gspread.authorize(creds)
+if "_gs_client" not in st.session_state:
+    _creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+    st.session_state["_gs_client"] = gspread.authorize(_creds)
+client = st.session_state["_gs_client"]
 
 def open_spreadsheet(retries=5, delay=2):
     for attempt in range(retries):
@@ -47,7 +49,9 @@ def open_spreadsheet(retries=5, delay=2):
             else:
                 raise e
 
-ss = open_spreadsheet()
+if "_gs_ss" not in st.session_state:
+    st.session_state["_gs_ss"] = open_spreadsheet()
+ss = st.session_state["_gs_ss"]
 
 # ══ الأوراق ══
 TABS_CONFIG = {
@@ -187,17 +191,56 @@ def get_or_create_worksheet(tab, headers, retries=5, delay=2):
 # ══ تهيئة الشيتات مرة واحدة بس لكل جلسة — مش كل rerun ══
 # (قبل كده كان بيتعمل ss.worksheet() + row_values() لكل الـ 13 تاب في كل ضغطة زرار،
 #  وده اللي كان بيستهلك الـ quota بسرعة جداً ويسبب الخطأ المتكرر)
-if "sheets_initialized" not in st.session_state:
-    _sheets = {}
+def _init_all_sheets():
+    """أول جلسة بس: طلب واحد لأسماء كل التابات + طلب واحد (values_batch_get) لقراءة كل بياناتها وتعبئة الكاش،
+    بدل ما كان بيتعمل طلبين (ss.worksheet + row_values) لكل تاب + قراءة منفصلة لكل تاب. الهيدر بيتراجع من أول صف
+    في نفس القراءة. أي تاب مش موجود بيتعمل بالطريقة القديمة | One metadata call + one batch read for ALL tabs."""
+    try:
+        existing = {w.title: w for w in ss.worksheets()}
+    except Exception:
+        existing = {}
+    st.session_state["_ws_existing"] = existing
+    wanted = [t for t in list(TABS_CONFIG.keys()) + ["links n", "links a"] if t in existing]
+    vals = {}
+    try:
+        res = ss.values_batch_get(["'" + t.replace("'", "''") + "'" for t in wanted])
+        for t, vr in zip(wanted, res.get("valueRanges", [])):
+            rows = vr.get("values", []) or []
+            w = max((len(r) for r in rows), default=0)
+            vals[t] = [list(r) + [""] * (w - len(r)) for r in rows]
+    except Exception:
+        vals = {}
+    out = {}
     for tab, headers in TABS_CONFIG.items():
-        _sheets[tab] = get_or_create_worksheet(tab, headers)
-    st.session_state["sheets_initialized"] = _sheets
+        if tab in existing and tab in vals:
+            ws = existing[tab]
+            hdr = vals[tab][0] if vals[tab] else []
+            norm = {str(h).strip().lower() for h in hdr}
+            missing = [h for h in headers if h.strip().lower() not in norm]
+            if missing:
+                try:
+                    for h in missing:
+                        ws.append_cols([[h]], value_input_option="RAW")
+                except Exception:
+                    pass
+            else:
+                st.session_state[f"cache_{tab}"] = vals[tab]
+            out[tab] = ws
+        else:
+            out[tab] = get_or_create_worksheet(tab, headers)
+    for t in ("links n", "links a"):
+        if t in vals:
+            st.session_state[f"cache_{t}"] = vals[t]
+    return out
+
+if "sheets_initialized" not in st.session_state:
+    st.session_state["sheets_initialized"] = _init_all_sheets()
 sheets = st.session_state["sheets_initialized"]
 
 def get_or_create_links_ws(retries=5, delay=2):
     for attempt in range(retries):
         try:
-            return ss.worksheet("links n")
+            return st.session_state.get("_ws_existing", {}).get("links n") or ss.worksheet("links n")
         except gspread.exceptions.WorksheetNotFound:
             try:
                 ws = ss.add_worksheet(title="links n", rows="2000", cols="2")
@@ -214,7 +257,9 @@ def get_or_create_links_ws(retries=5, delay=2):
             else:
                 raise e
 
-links_ws = get_or_create_links_ws()
+if "_links_ws" not in st.session_state:
+    st.session_state["_links_ws"] = get_or_create_links_ws()
+links_ws = st.session_state["_links_ws"]
 
 def get_or_create_links_asin_ws(retries=5, delay=2):
     """شيت روابط صور أمازون — مفتاح بالـ ASIN (مش SKU زي 'links n' فوق)، عشان
@@ -224,7 +269,7 @@ def get_or_create_links_asin_ws(retries=5, delay=2):
     regardless of which MSKU sold it."""
     for attempt in range(retries):
         try:
-            return ss.worksheet("links a")
+            return st.session_state.get("_ws_existing", {}).get("links a") or ss.worksheet("links a")
         except gspread.exceptions.WorksheetNotFound:
             try:
                 ws = ss.add_worksheet(title="links a", rows="2000", cols="2")
@@ -241,7 +286,9 @@ def get_or_create_links_asin_ws(retries=5, delay=2):
             else:
                 raise e
 
-links_asin_ws = get_or_create_links_asin_ws()
+if "_links_asin_ws" not in st.session_state:
+    st.session_state["_links_asin_ws"] = get_or_create_links_asin_ws()
+links_asin_ws = st.session_state["_links_asin_ws"]
 
 requests_sheet    = sheets["Requests"]
 approved_sheet    = sheets["Approved"]
@@ -7477,6 +7524,18 @@ if st.session_state["nav_page"] == "tab14":
                     for k in range(max(len(ss_), len(aa_))):
                         blocks_t14.append({"code": code, "sku": ss_[k] if k < len(ss_) else None,
                                            "asin": aa_[k] if k < len(aa_) else None})
+                # أفضل ASIN أمازون لكل كود (حتى لو مباعش أمس) — لعرض رقمه في خانة "مفيش مبيعات أمس"
+                _best_asin_code = {}
+                for _a in asin_rows_t14:
+                    _c = (tac_amz_map_t14.get(_a, "") or "").strip()
+                    if not _c:
+                        continue
+                    _r0 = asin_rows_t14[_a].get("FSAB") or asin_rows_t14[_a].get("FBA")
+                    _k = (_tv(asin_rows_t14[_a], "FSAB") + _tv(asin_rows_t14[_a], "FBA"), _r0.get("sales_month", 0))
+                    if _c not in _best_asin_code or _k > _best_asin_code[_c][0]:
+                        _best_asin_code[_c] = (_k, _a)
+                for b in blocks_t14:
+                    b["amz_hint"] = _best_asin_code.get(b["code"], (None, None))[1] if (b["code"] and not b["asin"]) else None
                 for b in blocks_t14:
                     ns_ = _sku_sales(b["sku"]) if b["sku"] else (0, 0)
                     as_ = _asin_sales(b["asin"]) if b["asin"] else (0, 0)
@@ -7596,7 +7655,14 @@ if st.session_state["nav_page"] == "tab14":
                         with ca:
                             st.markdown('<span class="wh-badge" style="background:#7c2d12;color:#fed7aa;">🟠 أمازون | Amazon</span>', unsafe_allow_html=True)
                             if not amz_chs:
-                                st.caption("— مفيش مبيعات أمازون أمس لهذا الكود | no Amazon sales yesterday")
+                                if b.get("amz_hint"):
+                                    if _asin_sales(b["amz_hint"])[0] > 0:
+                                        st.caption("— ASIN هذا الكود ظاهر مع SKU آخر لنفس الكود | shown with another SKU of this code")
+                                    else:
+                                        st.caption("— مفيش مبيعات أمازون أمس | no Amazon sales yesterday")
+                                    st.markdown(f"**ASIN:** {asin_link_html(b['amz_hint'])}", unsafe_allow_html=True)
+                                else:
+                                    st.caption("— مفيش ASIN أمازون مربوط بالكود ده | no Amazon ASIN linked to this code")
                         with ct:
                             _t14_trendyol_placeholder()
                         # صف 1: الهوية (SKU / ASIN)
@@ -7621,19 +7687,18 @@ if st.session_state["nav_page"] == "tab14":
                         _shown_a = {}
                         for _ach in ("FSAB", "FBA"):
                             _shown_a[_ach] = bool(amz_chs and _ach in amz_chs and (q_t14 or _yv(amz_chs, _ach) > 0))
-                        for _nch, _ach in (("FBN", "FSAB"), ("FBB", "FBA")):
-                            _sn = bool(noon_chs and _nch in noon_chs)
-                            _sa = _shown_a[_ach]
-                            if not (_sn or _sa):
-                                continue
-                            _lvl_n = True if _nch == "FBN" else (not noon_chs or "FBN" not in noon_chs)
-                            _lvl_a = True if _ach == "FSAB" else (not _shown_a["FSAB"])
+                        # كل قنوات المتاجر جنب بعض في صف واحد: FBN | FBB (نون) | FSAB | FBA (أمازون) | تريندول (محجوز)
+                        _sn = {k: bool(noon_chs and k in noon_chs) for k in ("FBN", "FBB")}
+                        _sa = _shown_a
+                        if any(_sn.values()) or any(_sa.values()):
+                            _lvl = {"FBN": True, "FBB": not _sn["FBN"], "FSAB": True, "FBA": not _sa["FSAB"]}
+                            _src = {"FBN": noon_chs, "FBB": noon_chs, "FSAB": amz_chs, "FBA": amz_chs}
                             for _pt in ("sales", "stock", "cov"):
-                                cn, ca, ct = st.columns([5, 5, 3])
-                                with cn:
-                                    if _sn: _t14_channel_part(noon_chs[_nch], _nch, _lvl_n, part=_pt)
-                                with ca:
-                                    if _sa: _t14_channel_part(amz_chs[_ach], _ach, _lvl_a, part=_pt)
+                                _cols = st.columns([2.5, 2.5, 2.5, 2.5, 3])
+                                for _col, _ch in zip(_cols[:4], ("FBN", "FBB", "FSAB", "FBA")):
+                                    with _col:
+                                        if (_sn.get(_ch) if _ch in _sn else _sa.get(_ch)):
+                                            _t14_channel_part(_src[_ch][_ch], _ch, _lvl[_ch], part=_pt)
                     st.divider()
                 # حفظ المرحلين في session_state بعد اكتمال العرض
                 st.session_state["transferred_skus_t14"] = _new_transferred
