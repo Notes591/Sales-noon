@@ -153,6 +153,9 @@ TABS_CONFIG = {
     # مبيعات تريندول — بتتعمل تلقائي أول مرة. Barcode = SKU (نفس تكويد نون). مفيش بيانات عملاء.
     "DailyOrdersTrendyol": ["Row Key", "Barcode", "Order Date", "Order Number", "Order Status", "Quantity",
                             "Net Unit Price", "Invoice Amount", "Commission Rate", "Image URL", "Product Name", "Date Uploaded"],
+    # إعلانات تريندول (تقرير Product Ads) — بتتعمل تلقائي أول مرة
+    "AdvertisementsTrendyol": ["Ad Name", "Ad Status", "Start Date", "Products", "Content IDs", "Daily Budget",
+                               "Cost", "Clicks", "Views", "Orders", "Sales", "ROAS", "Date Uploaded"],
 }
 
 def get_or_create_worksheet(tab, headers, retries=5, delay=2):
@@ -348,6 +351,7 @@ daily_orders_sheet   = sheets["DailyOrders"]
 daily_orders_amazon_sheet = sheets["DailyOrdersAmazon"]
 stock_amazon_sheet   = sheets["StockAmazon"]
 daily_orders_trendyol_sheet = sheets["DailyOrdersTrendyol"]
+ads_ty_sheet = sheets["AdvertisementsTrendyol"]
 settings_sheet       = sheets["Settings"]
 cancel_notif_sheet   = sheets["CancelNotifications"]
 tacweed_sheet        = sheets["Tacweed"]
@@ -4316,6 +4320,232 @@ def render_trendyol_upload(key_prefix):
                     st.rerun()
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# ══ أيقونات المنصات + إعلانات تريندول + "مفيش مبيعات" تريندول ══
+# أيقونة المنصة: لو حطيت رابط صورة اللوجو بتاعك في Settings (logo_noon / logo_amazon / logo_trendyol)
+# بتظهر صورتك، وإلا بتظهر شارة مصغّرة بلون المنصة.
+# Platform icons: set your own logo image URL in Settings (logo_noon / logo_amazon / logo_trendyol);
+# otherwise a small colored badge is shown.
+# ══════════════════════════════════════════════════════════════════════════
+_PLAT_STYLE = {
+    "noon":     ("n", "#fde047", "#111827", "نون"),
+    "amazon":   ("a", "#232f3e", "#ff9900", "أمازون"),
+    "trendyol": ("t", "#f27a1a", "#ffffff", "تريندول"),
+}
+
+def plat_badge(key, size=22):
+    """أيقونة صغيرة للمنصة (HTML inline) | small inline platform icon."""
+    letter, bg, fg, _nm = _PLAT_STYLE[key]
+    try:
+        url = str(load_settings().get("logo_" + key, "") or "").strip()
+    except Exception:
+        url = ""
+    if url.startswith("http"):
+        return (f'<img src="{url}" alt="{key}" style="height:{size}px;width:{size}px;object-fit:contain;'
+                f'border-radius:50%;vertical-align:middle;margin-inline-end:6px;">')
+    return (f'<span style="display:inline-flex;align-items:center;justify-content:center;width:{size}px;height:{size}px;'
+            f'border-radius:50%;background:{bg};color:{fg};font-weight:900;font-size:{int(size*0.62)}px;'
+            f'font-family:Arial,sans-serif;vertical-align:middle;margin-inline-end:6px;">{letter}</span>')
+
+def plat_header(key, title=None):
+    nm = _PLAT_STYLE[key][3]
+    st.markdown(
+        f'<div dir="rtl" style="display:flex;align-items:center;margin:2px 0 10px;font-size:19px;font-weight:800;">'
+        f'{plat_badge(key, 28)}{title or nm}</div>', unsafe_allow_html=True)
+
+# ── إعلانات تريندول | Trendyol ads (تقرير الحملات: Ad name / Cost / Clicks / view(s) / Total sold / Total sales / ROAS) ──
+TY_ADS_HEADERS = TABS_CONFIG["AdvertisementsTrendyol"]
+
+def _ty_num(v):
+    try:
+        s = str(v).replace(",", "").strip()
+        return float(s) if s not in ("", "-", "None", "nan") else 0.0
+    except Exception:
+        return 0.0
+
+def _ty_ads_parse_xlsx(fileobj):
+    """تقرير Product Ads من تريندول → صفوف بأعمدة الشيت. بيتقرا بالاسم (أول ظهور لكل عمود)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(fileobj, read_only=True, data_only=True)
+    ws = wb.worksheets[0]
+    allrows = list(ws.iter_rows(values_only=True))
+    hi = None
+    for i, r in enumerate(allrows[:15]):
+        low = [str(c).strip().lower() for c in r if c is not None]
+        if "ad name" in low and "cost" in low:
+            hi = i
+            break
+    if hi is None:
+        raise ValueError("مش لاقي عناوين التقرير (Ad name / Cost)")
+    idx = {}
+    for j, c in enumerate(allrows[hi]):
+        k = str(c).strip().lower() if c is not None else ""
+        if k and k not in idx:
+            idx[k] = j
+    def g(r, name):
+        j = idx.get(name)
+        v = r[j] if (j is not None and j < len(r)) else ""
+        return "" if v is None else str(v).strip()
+    out = []
+    ts = now_str()
+    for r in allrows[hi + 1:]:
+        nm = g(r, "ad name")
+        if not nm:
+            continue
+        out.append([nm, g(r, "ad status"), g(r, "start date"), g(r, "number of products"),
+                    g(r, "product contentid list"), g(r, "daily budget"), g(r, "cost"), g(r, "clicks"),
+                    g(r, "view(s)"), g(r, "total sold"), g(r, "total sales"), g(r, "roas"), ts])
+    return out
+
+def _build_ty_ads(raw):
+    camps = []
+    for row in (raw or [])[1:]:
+        row = list(row) + [""] * (len(TY_ADS_HEADERS) - len(row))
+        if not str(row[0]).strip():
+            continue
+        camps.append({"name": row[0], "status": row[1], "start": row[2], "n_products": int(_ty_num(row[3])),
+                      "ids": [x.strip() for x in str(row[4]).split(",") if x.strip()],
+                      "daily_budget": _ty_num(row[5]), "cost": _ty_num(row[6]), "clicks": int(_ty_num(row[7])),
+                      "views": int(_ty_num(row[8])), "sold": int(_ty_num(row[9])),
+                      "sales": _ty_num(row[10]), "roas": _ty_num(row[11])})
+    return camps
+
+def get_ads_map_trendyol():
+    return _memo_from_sheet(ads_ty_sheet, "ty_ads", _build_ty_ads)
+
+def render_trendyol_ads_upload(key_prefix):
+    """رفع تقرير إعلانات تريندول — بيستبدل محتوى شيت AdvertisementsTrendyol (التقرير لقطة كاملة بإجماليات الحملات)."""
+    with st.expander("📤 رفع تقرير إعلانات تريندول | Upload Trendyol Ads Report", expanded=False):
+        st.caption("التقرير بيتخزّن كما هو (لقطة بإجماليات كل حملة من أول تشغيلها) وبيستبدل الموجود. الشيت بيتعمل تلقائي أول مرة.")
+        upl = st.file_uploader("ارفع ملف Product Ads Report (xlsx)", type=["xlsx", "xlsm"], key=f"{key_prefix}_tyads_upload")
+        if upl:
+            try:
+                rows = _ty_ads_parse_xlsx(upl)
+            except Exception as e:
+                st.error(f"❌ تعذر قراءة الملف: {e}")
+                return
+            if not rows:
+                st.warning("الملف مفيهوش حملات | no campaigns")
+                return
+            st.info(f"📊 {len(rows)} حملة | إجمالي الصرف {sum(_ty_num(r[6]) for r in rows):,.2f}")
+            if st.button("⬆️ رفع / تحديث إعلانات تريندول | Upload", key=f"{key_prefix}_tyads_go", type="primary", use_container_width=True):
+                with st.spinner("جاري الرفع..."):
+                    safe_delete_all(ads_ty_sheet)
+                    try:
+                        ads_ty_sheet.append_rows(rows, value_input_option="RAW")
+                        ok = True
+                    except Exception as e:
+                        ok = False
+                        st.error(f"❌ فشل الرفع: {e}")
+                clear_cache(ads_ty_sheet)
+                if ok:
+                    st.success(f"✅ تم — {len(rows)} حملة")
+                    st.rerun()
+
+def _render_ads_performance_tab_trendyol():
+    """تاب إعلانات تريندول — على مستوى الحملة (التقرير مفيهوش Barcode، فيه ContentId بس)."""
+    plat_header("trendyol", "إعلانات تريندول | Trendyol Ads")
+    render_trendyol_ads_upload("ty_ads")
+    camps = get_ads_map_trendyol()
+    if not camps:
+        st.info("ارفع تقرير إعلانات تريندول من الأعلى | Upload the Trendyol ads report above")
+        return
+    try:
+        min_roas = float(load_settings().get("trendyol_min_roas", "3") or 3)
+    except Exception:
+        min_roas = 3.0
+    st.caption(f"أرقام الحملات تراكمية من تاريخ بدايتها. التقييم: 🔴 صرف بدون مبيعات أو ROAS أقل من 1 | 🟠 ROAS أقل من {min_roas:g} "
+               f"(غيّره من Settings بالمفتاح trendyol_min_roas) | 🟢 ROAS {min_roas:g} أو أكتر.")
+    stat_opts = ["الكل | All"] + sorted({c["status"] for c in camps if c["status"]})
+    pick = st.selectbox("الحالة | Status", stat_opts, key="ty_ads_status")
+    shown = [c for c in camps if pick.startswith("الكل") or c["status"] == pick]
+    def verdict(c):
+        if c["cost"] > 0 and c["sold"] == 0:
+            return "🔴 صرف بدون مبيعات"
+        if c["cost"] > 0 and c["roas"] < 1:
+            return "🔴 خسارة"
+        if c["cost"] > 0 and c["roas"] < min_roas:
+            return "🟠 ضعيف"
+        return "🟢 رابح" if c["cost"] > 0 else "⚪ لسه"
+    cost = sum(c["cost"] for c in shown); sales = sum(c["sales"] for c in shown)
+    clicks = sum(c["clicks"] for c in shown); views = sum(c["views"] for c in shown); sold = sum(c["sold"] for c in shown)
+    k = st.columns(5)
+    k[0].metric("💸 الصرف | Spend", f"{cost:,.2f}")
+    k[1].metric("💰 المبيعات | Sales", f"{sales:,.2f}")
+    k[2].metric("📈 ROAS", f"{(sales / cost) if cost else 0:.2f}")
+    k[3].metric("🛒 الطلبات | Sold", f"{sold:,}")
+    k[4].metric("🖱️ تكلفة النقرة | CPC", f"{(cost / clicks) if clicks else 0:.2f}")
+    bad = [c for c in shown if verdict(c).startswith("🔴")]
+    weak = [c for c in shown if verdict(c).startswith("🟠")]
+    st.markdown(f"**🔴 {len(bad)} حملة خسارة** &nbsp;|&nbsp; **🟠 {len(weak)} ضعيفة** &nbsp;|&nbsp; **🟢 {sum(1 for c in shown if verdict(c).startswith('🟢'))} رابحة**")
+    df = pd.DataFrame([{
+        "الحملة | Campaign": c["name"], "الحالة": c["status"], "التقييم": verdict(c), "منتجات": c["n_products"],
+        "الصرف": c["cost"], "المبيعات": c["sales"], "ROAS": c["roas"], "طلبات": c["sold"],
+        "نقرات": c["clicks"], "مرات ظهور": c["views"], "ميزانية يومية": c["daily_budget"], "بدأت": c["start"],
+    } for c in sorted(shown, key=lambda x: -x["cost"])])
+    dl_btn(df, "trendyol_ads", key="dlbtn_trendyol_ads")
+    for c in sorted(shown, key=lambda x: -x["cost"]):
+        with st.container(border=True):
+            h1, h2 = st.columns([4, 2])
+            h1.markdown(f"**{c['name']}** &nbsp; {verdict(c)}")
+            h2.caption(f"{c['status']} · بدأت {c['start']} · ميزانية يومية {c['daily_budget']:g}")
+            m = st.columns(6)
+            m[0].markdown(f"💸 **{c['cost']:,.2f}**")
+            m[1].markdown(f"💰 **{c['sales']:,.2f}**")
+            m[2].markdown(f"📈 ROAS **{c['roas']:.2f}**")
+            m[3].markdown(f"🛒 **{c['sold']}**")
+            m[4].markdown(f"🖱️ **{c['clicks']:,}**")
+            m[5].markdown(f"👁️ **{c['views']:,}**")
+            if c["ids"]:
+                st.caption(f"{c['n_products']} منتج — ContentId: " + ", ".join(c["ids"][:12]) + (" …" if len(c["ids"]) > 12 else ""))
+
+# ── "مفيش مبيعات" لتريندول: Barcodes اتباعت في آخر 60 يوم ومفيهاش مبيع في الفترة ──
+def compute_no_sale_rows_trendyol(days=7):
+    today = datetime.now().date()
+    recent = [today - timedelta(days=i) for i in range(1, days + 1)]
+    hist = [today - timedelta(days=i) for i in range(1, 61)]
+    c_hist = build_daily_orders_counts_trendyol(hist)
+    imgs = get_trendyol_bundle()["img"]
+    links = get_links_map()
+    cmap = get_tacweed_map()
+    wh = get_warehouse_stock_map()
+    rows = []
+    for bc, dc in c_hist.items():
+        if sum(dc.values()) <= 0 or sum(dc.get(d, 0) for d in recent) > 0:
+            continue
+        try:
+            stock = int(float(wh.get(cmap.get(bc, ""), 0) or 0))
+        except Exception:
+            stock = 0
+        rows.append({"sku": bc, "sku_up": bc, "stock": stock,
+                     "sales_month": sum(dc.get(d, 0) for d in hist[:30]),
+                     "last": max(d for d, q in dc.items() if q > 0),
+                     "img": links.get(bc) or imgs.get(bc, "")})
+    rows.sort(key=lambda x: (-x["stock"], -x["sales_month"]))
+    return rows
+
+def build_daily_orders_family_stats_trendyol(dates, live_map=None):
+    return {}
+
+def render_no_sale_list_trendyol(rows, period_label, dl_key):
+    if not rows:
+        st.success(f"✅ كل منتجات تريندول اتباعت في {period_label} | all Trendyol products sold in {period_label}")
+        return
+    df = pd.DataFrame([{"Barcode": r["sku"], "مخزون المستودع | WH stock": r["stock"],
+                        "مبيع شهري | Monthly": r["sales_month"], "آخر بيع | Last sale": str(r["last"])} for r in rows])
+    c1, c2 = st.columns(2)
+    with c1: dl_btn(df, dl_key, key=f"dlbtn_{dl_key}")
+    with c2: st.warning(f"⚠️ {len(rows)} منتج بدون مبيعات | products without sales")
+    for r in rows:
+        ci, cx = st.columns([1, 6])
+        with ci:
+            show_img(r["img"], 60)
+        with cx:
+            st.markdown(f"**Barcode:** `{r['sku']}`")
+            st.markdown(f"📦 **مخزون المستودع:** {r['stock']} &nbsp;|&nbsp; 📈 **شهري:** {r['sales_month']} &nbsp;|&nbsp; 🕓 **آخر بيع:** {r['last']}")
+        st.divider()
+
+
 # ══ الأقسام | Departments (عمود Family في DailyOrders — اختياري، لو مش موجود الكود بيكمل عادي) ══
 FAMILY_HOME_GROUP = {"kitchen_dining", "home_improvement", "gardening", "home_decor", "furniture", "bedding"}
 FAMILY_LABELS = {
@@ -5630,6 +5860,13 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
             }
             for asin_up, info in amz_inv_map_asin.items()
         }
+    elif channel == "trendyol":
+        _links_map_chan = get_links_map()
+        _ty_b = get_trendyol_bundle()
+        chan_product_map = {
+            bc: {"sku": bc, "img": _links_map_chan.get(bc) or _ty_b["img"].get(bc, ""), "total_stock": 0}
+            for bc in {r["bc"] for r in _ty_b["rows"] if r["ok"]}
+        }
     else:
         _links_map_chan = get_links_map()
         chan_product_map = inv_map
@@ -5655,7 +5892,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     prev_counts_td = counts_fn(prev_dates_td)
     cur_prices_td  = prices_fn(cur_dates_td)
     prev_prices_td = prices_fn(prev_dates_td)
-    live_map_dash  = get_live_map()
+    live_map_dash  = {} if channel == "trendyol" else get_live_map()
 
     def _td_total(counts_map, sku_up, dates):
         return sum(counts_map.get(sku_up, {}).get(d, 0) for d in dates)
@@ -5831,7 +6068,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     # on the Amazon dashboard tabs.
     xdock_threshold_dash = int(load_settings().get("xdock_low_stock_threshold", "10") or 10)
     xdock_low_rows_td = []
-    if not is_amz_chan:
+    if channel == "noon":
         for sku_up_x, live_info_x in live_map_dash.items():
             xnet_x = live_info_x.get("stock_xdock_net")
             if xnet_x is None or xnet_x > xdock_threshold_dash:
@@ -5887,7 +6124,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     #    stock + Warehouse Stockout) — using the exact same computation as
     #    inside those tabs themselves, so the number here always matches what
     #    you'd see by opening the tab directly.
-    no_sale_rows_dash = compute_no_sale_rows_amazon(days=7) if is_amz_chan else compute_no_sale_rows(days=7)
+    no_sale_rows_dash = compute_no_sale_rows_amazon(days=7) if is_amz_chan else (compute_no_sale_rows_trendyol(days=7) if channel == "trendyol" else compute_no_sale_rows(days=7))
     wh_stockout_rows_dash = st.session_state.get("warehouse_stockout_rows", [])
     wh_urgent_rows_dash = [r for r in wh_stockout_rows_dash if "🚨" in r["status"] or "🟠" in r["status"]]
     wh_now_dash = sum(1 for r in wh_urgent_rows_dash if "🚨" in r["status"])
@@ -5902,7 +6139,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                     f"{len(wh_urgent_rows_dash):,}",
                     f"{wh_now_dash} اطلب الآن، {wh_soon_dash} قرب موعد الطلب"), unsafe_allow_html=True)
 
-    if not is_amz_chan:
+    if channel == "noon":
         ac7 = st.columns(1)[0]
         with ac7:
             st.markdown(_alert_chip_html("🟣", "#faf5ff", "#a855f7", "مخزون Xdock قارب على النفاد",
@@ -5917,7 +6154,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
         with ci_al:
             show_img(r["img"], 55)
         with cinfo_al:
-            _link_html = asin_link_html(r["sku_up"]) if is_amz_chan else sku_link_html(r["sku"])
+            _link_html = asin_link_html(r["sku_up"]) if is_amz_chan else (f'<code>{r["sku"]}</code>' if channel == "trendyol" else sku_link_html(r["sku"]))
             st.markdown(f"{_link_html}", unsafe_allow_html=True)
             for line in (lines or []):
                 st.caption(line)
@@ -6022,7 +6259,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
         else:
             st.caption("لا توجد أصناف ارتفعت مبيعاتها بنسبة 20%+ حالياً")
 
-    if not is_amz_chan:
+    if channel == "noon":
         with st.expander(f"🟣 عرض أصناف مخزون Xdock قارب على النفاد ({len(xdock_low_rows_td):,} — {xdock_low_with_other_td} عندهم مخزون FBN | {xdock_low_without_other_td} من غيره) | Show low Xdock-stock SKUs"):
             st.caption("ℹ️ ده مخزون Xdock من تاب LIVE، منفصل عن مخزون Inventory العادي — لو قرب يخلص محتاج تزويد (مش جدولة) لو متوفر عندنا. الأصناف اللي معاها مخزون FBN (Inventory) أقل إلحاحاً من اللي مفيش عندها غير مخزون Xdock بس. الترتيب هنا من الأعلى مبيعاً للأقل عشان تعرف الصنف مهم ولا لأ | This is Xdock stock from the LIVE sheet, separate from regular Inventory — running low means it needs restocking (not scheduling) if available with us. SKUs that also have FBN (Inventory) stock are less urgent than ones relying on Xdock stock alone. Sorted by monthly sales (highest → lowest) so you can tell if it actually matters")
             if xdock_low_rows_td:
@@ -7665,7 +7902,7 @@ def _t14_ty_part(r, part):
 
 def _t14_store_chip(store, parts):
     """شريحة مبيعات متجر واحد (بولد وواضحة): اسم المتجر + كل قناة (أمس / إجمالي الأيام). parts = [(اسم القناة, أمس, إجمالي)]."""
-    _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "🟢 نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "🟠 أمازون"), "ty": ("#4c1d95", "#a78bfa", "#ede9fe", "🟣 تريندول")}[store]
+    _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "أمازون"), "ty": ("#4c1d95", "#a78bfa", "#ede9fe", "تريندول")}[store]
     segs = "".join(
         f'<span style="display:inline-flex;align-items:baseline;gap:5px;margin-inline-start:12px;padding-inline-start:12px;'
         f'border-inline-start:1px solid {_sty[1]}88;white-space:nowrap;">'
@@ -7674,7 +7911,7 @@ def _t14_store_chip(store, parts):
         f'<span style="color:{_sty[2]};">| {sales_display_days} أيام</span><bdi style="color:#ffffff;font-weight:800;">{t}</bdi></span>'
         for nm, y, t in parts)
     return (f'<span dir="rtl" style="display:inline-block;background:{_sty[0]};border:1px solid {_sty[1]};border-radius:8px;'
-            f'padding:6px 12px;margin:3px 0 3px 8px;font-size:14px;"><b style="color:{_sty[1]};font-size:15px;">{_sty[3]}</b>{segs}</span>')
+            f'padding:6px 12px;margin:3px 0 3px 8px;font-size:14px;"><b style="color:{_sty[1]};font-size:15px;">{plat_badge({"noon": "noon", "amz": "amazon", "ty": "trendyol"}[store], 20)}{_sty[3]}</b>{segs}</span>')
 
 def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, amz, fsab, fba, ty=0):
     """تايل إجمالي يوم — كل سطر بخط بولد وبترتيب ثابت (المتجر ثم قنواته)."""
@@ -7684,13 +7921,13 @@ def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, am
         f'<div style="font-size:12px;font-weight:600;color:#94a3b8;">{date_s}</div>'
         f'<div style="font-size:26px;font-weight:800;color:{num_color};line-height:1.2;">{total}</div>'
         f'<div style="margin-top:4px;padding-top:4px;border-top:1px solid #33415588;">'
-        f'<div style="font-size:13px;font-weight:800;color:#34d399;">🟢 نون: {noon}</div>'
+        f'<div style="font-size:13px;font-weight:800;color:#34d399;">{plat_badge("noon", 16)}نون: {noon}</div>'
         f'<div style="font-size:12px;font-weight:700;color:#d1fae5;">FBN {fbn} · FBB {fbb}</div></div>'
         f'<div style="margin-top:4px;">'
-        f'<div style="font-size:13px;font-weight:800;color:#fb923c;">🟠 أمازون: {amz}</div>'
+        f'<div style="font-size:13px;font-weight:800;color:#fb923c;">{plat_badge("amazon", 16)}أمازون: {amz}</div>'
         f'<div style="font-size:12px;font-weight:700;color:#ffedd5;">FSAB {fsab} · FBA {fba}</div></div>'
         f'<div style="margin-top:4px;">'
-        f'<div style="font-size:13px;font-weight:800;color:#a78bfa;">🟣 تريندول: {ty}</div></div>'
+        f'<div style="font-size:13px;font-weight:800;color:#a78bfa;">{plat_badge("trendyol", 16)}تريندول: {ty}</div></div>'
         f'</div>')
 if st.session_state["nav_page"] == "tab14":
     with tab14:
@@ -7994,11 +8231,11 @@ if st.session_state["nav_page"] == "tab14":
                         # صف 0: عناوين المتاجر (تريندول مكانه محجوز هنا)
                         cn, ca, ct = st.columns([5, 5, 4])
                         with cn:
-                            st.markdown('<span class="wh-badge" style="background:#064e3b;color:#6ee7b7;">🟢 نون | Noon</span>', unsafe_allow_html=True)
+                            st.markdown('<span class="wh-badge" style="background:#064e3b;color:#6ee7b7;">' + plat_badge("noon", 16) + 'نون | Noon</span>', unsafe_allow_html=True)
                             if not noon_chs:
                                 st.caption("— مفيش SKU نون لهذا الكود | no Noon SKU for this code")
                         with ca:
-                            st.markdown('<span class="wh-badge" style="background:#7c2d12;color:#fed7aa;">🟠 أمازون | Amazon</span>', unsafe_allow_html=True)
+                            st.markdown('<span class="wh-badge" style="background:#7c2d12;color:#fed7aa;">' + plat_badge("amazon", 16) + 'أمازون | Amazon</span>', unsafe_allow_html=True)
                             if not amz_chs:
                                 if b.get("amz_hint"):
                                     if _asin_sales(b["amz_hint"])[0] > 0:
@@ -8009,7 +8246,7 @@ if st.session_state["nav_page"] == "tab14":
                                 else:
                                     st.caption("— مفيش ASIN أمازون مربوط بالكود ده | no Amazon ASIN linked to this code")
                         with ct:
-                            st.markdown('<span class="wh-badge" style="background:#4c1d95;color:#ddd6fe;">🟣 تريندول | Trendyol</span>', unsafe_allow_html=True)
+                            st.markdown('<span class="wh-badge" style="background:#4c1d95;color:#ddd6fe;">' + plat_badge("trendyol", 16) + 'تريندول | Trendyol</span>', unsafe_allow_html=True)
                             if not r_ty:
                                 if get_trendyol_bundle()["rows"]:
                                     st.caption("— مفيش مبيعات تريندول أمس | no Trendyol sales yesterday")
@@ -8073,17 +8310,18 @@ if st.session_state["nav_page"] == "tab_dash":
             st.header("📊 داشبورد المبيعات | Sales Dashboard")
             st.caption("تحليلات موسّعة على بيانات المبيعات مع صور المنتجات — منفصلة تمامًا عن تاب المبيعات الأصلي ولا تؤثر عليه | Extended sales analytics with product images — fully separate from, and does not affect, the original Sales tab")
 
-            if not inv_map and not amz_inv_map_asin:
-                st.info("ارفع ملف المخزون (نون أو أمازون) أولاً من تاب المخزون | Upload Inventory (Noon or Amazon) first")
+            if not inv_map and not amz_inv_map_asin and not get_trendyol_bundle()["rows"]:
+                st.info("ارفع ملف المخزون (نون أو أمازون) أو مبيعات تريندول أولاً | Upload Inventory (Noon/Amazon) or Trendyol sales first")
             else:
                 (_dash_all_subtab_td, _dash_fbn_subtab_td, _dash_fbb_subtab_td,
-                 _dash_amz_all_subtab_td, _dash_amz_normal_subtab_td, _dash_amz_fba_subtab_td) = st.tabs(
+                 _dash_amz_all_subtab_td, _dash_amz_normal_subtab_td, _dash_amz_fba_subtab_td, _dash_ty_subtab_td) = st.tabs(
                     ["🔷 الكل (FBN+FBB) | All Combined",
                      "🅽 مبيعات نون FBN | Noon FBN Sales",
                      "🅱 مبيعات نون FBB | Noon FBB Sales",
                      "🟠 امازون الكل | Amazon All",
                      "🅽 امازون عادي (FSAB) | Amazon Normal",
-                     "📦 امازون تخزين FBA | Amazon FBA Storage"])
+                     "📦 امازون تخزين FBA | Amazon FBA Storage",
+                     "🟣 تريندول | Trendyol"])
                 with _dash_all_subtab_td:
                     # ── الكل مع بعض: كل الطلبات (FBN + FBB) من غير أي فلترة على نوع
                     #    التنفيذ — عشان في النهاية هو متجر نون واحد ومبيعات واحدة | All
@@ -8143,6 +8381,14 @@ if st.session_state["nav_page"] == "tab_dash":
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_amazon_fba_asin, build_daily_orders_prices_amazon_fba_asin,
                             build_daily_orders_family_stats_amazon_fba, "amz_fba", channel="amazon")
+                with _dash_ty_subtab_td:
+                    plat_header("trendyol", "داشبورد تريندول | Trendyol Dashboard")
+                    if not get_trendyol_bundle()["rows"]:
+                        st.info("ارفع ملف طلبات تريندول من تاب المبيعات أولاً | Upload Trendyol orders from the Sales tab first")
+                    else:
+                        _render_sales_dashboard_body(
+                            build_daily_orders_counts_trendyol, build_daily_orders_prices_trendyol,
+                            build_daily_orders_family_stats_trendyol, "ty_all", channel="trendyol")
 
         # ══ TAB 15 — تحليل الجدولة ══
         # ══ TAB 16 — مخزون بدون بيع ══
@@ -8188,9 +8434,10 @@ if st.session_state["nav_page"] == "tab16":
                             st.markdown(big_note_html(note), unsafe_allow_html=True)
                     st.divider()
 
-            channel_tab_noon, channel_tab_amz = st.tabs([
+            channel_tab_noon, channel_tab_amz, channel_tab_ty = st.tabs([
                 "🅽 نون | Noon",
                 "🅰️ أمازون | Amazon",
+                "🟣 تريندول | Trendyol",
             ])
 
             # ══════════ نون ══════════
@@ -8301,6 +8548,22 @@ if st.session_state["nav_page"] == "tab16":
                     with sub3a:
                         render_no_sale_list(no_sale_7d_amz, "آخر أسبوع", "no_sale_7d_amz", channel="amazon")
 
+            # ══════════ تريندول ══════════
+            with channel_tab_ty:
+                plat_header("trendyol")
+                st.caption("منتجات (Barcode) اتباعت في آخر 60 يوم من تريندول ومفيهاش مبيعات في الفترة — مخزون المستودع من كود التكويد | Trendyol barcodes sold in the last 60 days but not in the period — warehouse stock via the Tacweed code")
+                if not get_trendyol_bundle()["rows"]:
+                    st.info("ارفع ملف طلبات تريندول من تاب المبيعات أولاً | Upload Trendyol orders first")
+                else:
+                    _ns1, _ns3, _ns7 = (compute_no_sale_rows_trendyol(1), compute_no_sale_rows_trendyol(3), compute_no_sale_rows_trendyol(7))
+                    _t1, _t3, _t7 = st.tabs([f"📅 بدون مبيع أمس ({len(_ns1)})", f"📅 بدون مبيع آخر 3 أيام ({len(_ns3)})", f"📅 بدون مبيع آخر أسبوع ({len(_ns7)})"])
+                    with _t1:
+                        render_no_sale_list_trendyol(_ns1, "أمس", "no_sale_1d_ty")
+                    with _t3:
+                        render_no_sale_list_trendyol(_ns3, "آخر 3 أيام", "no_sale_3d_ty")
+                    with _t7:
+                        render_no_sale_list_trendyol(_ns7, "آخر أسبوع", "no_sale_7d_ty")
+
 # ══ TAB CHINA — شحنات الصين (تاب جديدة منفصلة) ══
 if st.session_state["nav_page"] == "tab_china":
     with tab_china:
@@ -8312,7 +8575,7 @@ if st.session_state["nav_page"] == "tab_ads":
         if _tab_gate("tab_ads", "📢 الإعلانات | Ads"):
             st.header("📢 الإعلانات | Ads")
             st.caption("منقولة برة داشبورد المبيعات وبتتعرض مرة واحدة بس — بيانات الإعلانات (Views/Clicks/Orders/Spends/Revenue) جايه من شيت الإعلانات نفسه، واللي مفيهوش تصنيف FBN/FBB أصلاً | Moved out of the sales dashboard and shown once — ad data (Views/Clicks/Orders/Spends/Revenue) comes from the Advertisements sheet, which has no FBN/FBB split to begin with")
-            _noon_ads_subtab, _amz_ads_subtab = st.tabs(["🅽 إعلانات نون | Noon Ads", "📦 إعلانات أمازون | Amazon Ads"])
+            _noon_ads_subtab, _amz_ads_subtab, _ty_ads_subtab = st.tabs(["🅽 إعلانات نون | Noon Ads", "📦 إعلانات أمازون | Amazon Ads", "🟣 إعلانات تريندول | Trendyol Ads"])
             with _noon_ads_subtab:
                 if not inv_map:
                     st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
@@ -8321,3 +8584,5 @@ if st.session_state["nav_page"] == "tab_ads":
             with _amz_ads_subtab:
                 st.caption("بيانات إعلانات أمازون جايه من شيت AdvertisementsAmz، ومفتاحها ASIN بدل SKU — نفس منطق وتصميم تاب إعلانات نون بالظبط | Amazon ad data comes from the AdvertisementsAmz sheet, keyed by ASIN instead of SKU — identical logic and layout to the Noon Ads tab")
                 _render_ads_performance_tab_amazon()
+            with _ty_ads_subtab:
+                _render_ads_performance_tab_trendyol()
