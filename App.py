@@ -7711,6 +7711,13 @@ if st.session_state["nav_page"] == "tab14":
                             _shown_a[_ach] = bool(amz_chs and _ach in amz_chs and (q_t14 or _yv(amz_chs, _ach) > 0))
                         # كل قنوات المتاجر جنب بعض في صف واحد: FBN | FBB (نون) | FSAB | FBA (أمازون) | تريندول (محجوز)
                         _sn = {k: bool(noon_chs and k in noon_chs) for k in ("FBN", "FBB")}
+                        # نون: القناة اللي مفيهاش مبيع أمس مبتتعرضش لو القناة التانية باعت؛ ولو الاتنين صفر بنعرض FBN (أو FBB لو هي الوحيدة)
+                        if noon_chs and not q_t14:
+                            _yn = {k: (_yv(noon_chs, k) if _sn[k] else 0) for k in ("FBN", "FBB")}
+                            if _yn["FBN"] > 0 or _yn["FBB"] > 0:
+                                _sn = {k: _sn[k] and _yn[k] > 0 for k in ("FBN", "FBB")}
+                            elif _sn["FBN"]:
+                                _sn["FBB"] = False
                         _sa = _shown_a
                         if any(_sn.values()) or any(_sa.values()):
                             _lvl = {"FBN": True, "FBB": not _sn["FBN"], "FSAB": True, "FBA": not _sa["FSAB"]}
