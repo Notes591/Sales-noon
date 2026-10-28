@@ -1658,7 +1658,7 @@ CHINA_FLAT_LISTS = {
  "customs_status": ["Not Started","Documents Ready","Submitted","Under Clearance","Inspection","Cleared","On Hold"],
  "stock_stage": ["Factory Confirmed","In Production","Production Completed","Ready to Ship","Allocated to Container","Loaded",
                  "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Warehouse Received","Cancelled"],
- "shipping_line": ["MSC","CMA CGM","Maersk","COSCO","Hapag-Lloyd","OOCL","Evergreen","ONE","PIL","TSL","ECON","WHL","Other"],
+ "shipping_line": ["MSC","CMA CGM","Maersk","COSCO","Hapag-Lloyd","OOCL","Evergreen","ONE","PIL","TSL","ECON","WHL","ZG中古","Other"],
 }
 _CF_SHIP_ONLY = ["internal_order_no","po_no","supplier_name","buyer_company","shipment_mode","incoterm","origin_location","invoice_no",
                  "invoice_value","freight_value","currency","planned_etd","eta_destination","shipment_status","booking_no",
