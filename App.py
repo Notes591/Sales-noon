@@ -1663,6 +1663,23 @@ def _cs_to_cont(code):
 def _cs_to_stock(code):
     return {"Delivered to Warehouse": "Warehouse Received"}.get(code, code)
 
+def _cs_floor(r, code):
+    """الحالة ماتقلّش عن اللي التواريخ الفعلية بتقوله (مثلاً وصول فعلي للميناء = على الأقل «وصلت الميناء»)."""
+    if code and _cs_prog(code) < 0:
+        return code                                  # ملغي / موقوف بيفضلوا زي ما هم
+    implied = ""
+    if _cf_g(r, "warehouse_arrival_actual"):
+        implied = "Delivered to Warehouse"
+    elif _cf_g(r, "port_arrival_actual"):
+        implied = "Arrived at Port"
+    elif _cf_g(r, "actual_etd"):
+        implied = "Shipped / In Transit"
+    elif _cf_g(r, "actual_load_date"):
+        implied = "Loaded"
+    elif _cf_g(r, "container_no"):
+        implied = "Allocated to Container"
+    return implied if _cs_prog(implied) > _cs_prog(code) else code
+
 def china_flat_prepare(flat_rows):
     """نسخ من الصفوف فيها status (عنوان عربي | English) محسوب من الأعمدة القديمة لو لازم — للكتابة في الشيت/الإكسيل."""
     out = []
@@ -1955,7 +1972,7 @@ def china_flat_to_tables(flat_rows):
     rows = [{k: _cf_g(r, k) for k in CHINA_FLAT_INPUT_KEYS + CHINA_STATUS_LEGACY} for r in flat_rows]
     rows = [r for r in rows if any(r.values())]
     for r in rows:
-        r["_code"] = china_row_status(r)
+        r["_code"] = _cs_floor(r, china_row_status(r))
     conflicts = []
     ctr_status = {}
     for r in rows:
@@ -2076,7 +2093,7 @@ CHINA_STAFF_GUIDE = """📋 دليل تعبئة شيت الصين
  - عند الوصول فعلاً: الحالة «وصلت الميناء» ← «تحت التخليص» ← «تم التخليص» ← «وصلت المستودع»، وحالة التخليص الجمركي.
  - الوصول الفعلي يُكتب بعد الوصول الحقيقي فقط، مش ETA.
 
-التواريخ الأوتوماتيك (لو سكريبت Apps Script متركّب مرة واحدة): أول ما تغيّري «الحالة» بيتسجل «آخر تحديث» لوحده، وبيتملا تاريخ الحالة الفعلي لو فاضي (تم التحميل ← تاريخ التحميل، في البحر ← ETD الفعلي، وصلت الميناء ← وصول الميناء، وصلت المستودع ← وصول المستودع)، وبتتوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية. من غير السكريبت اكتبي التواريخ بإيدك.
+التواريخ والحالة الأوتوماتيك (لو سكريبت Apps Script متركّب مرة واحدة): أي تعديل في الصف بيسجّل «آخر تحديث» لوحده. وأول ما تكتبي تاريخ فعلي (التحميل / ETD الفعلي / وصول الميناء / وصول المستودع) أو رقم حاوية أو حالة تخليص، «الحالة» بتتحدّث لوحدها (للأمام بس). ولو غيّرتي «الحالة» بإيدك بيتملا تاريخ الحالة الفعلي لو فاضي (تم التحميل ← تاريخ التحميل، في البحر ← ETD الفعلي، وصلت الميناء ← وصول الميناء، وصلت المستودع ← وصول المستودع)، وبتتوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية. من غير السكريبت اكتبي التواريخ بإيدك.
 
 قواعد مهمة:
  - لا تغيّري الصفوف 1–3 (العناوين) ولا ترتّبي الأعمدة.
@@ -2085,13 +2102,24 @@ CHINA_STAFF_GUIDE = """📋 دليل تعبئة شيت الصين
  - عمود «اكتمال الصف»: MISSING = ناقص بيانات مطلوبة، OK = تمام.
  - الطلب أو المنتج الملغي: الحالة = ملغي."""
 
-CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصقي الكود ▸ Save ▸ (أول مرة هيطلب صلاحية). بيختم «آخر تحديث» لوحده،
-// وبيملا تاريخ الحالة الفعلي لو فاضي، وبيوحّد الحالة وبيانات الحاوية على كل صفوفها.
+CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصقي الكود ▸ Save ▸ (أول مرة هيطلب صلاحية).
+// 1) بيختم «آخر تحديث» لوحده. 2) أول ما تكتبي تاريخ فعلي أو رقم حاوية بتتحدّث «الحالة» لوحدها (للأمام بس، عمرها ما بترجّع).
+// 3) أول ما تغيّري «الحالة» بيتملا تاريخ الحالة لو فاضي. 4) بيوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية.
 var CONT_COLS = ["container_type","seal_no","shipping_line","vessel_name","voyage_no","bl_no","port_of_loading","destination_port",
   "actual_etd","eta_port","port_arrival_actual","warehouse_arrival_actual","customs_status","last_known_location",
   "delay_reason","tracking_url","ctr_gross_weight_kg","ctr_total_cbm","ctr_total_cartons","ctr_total_units"];
+var FULL = ["تأكيد المصنع | Factory confirmed","قيد الإنتاج | In production","اكتمل الإنتاج | Production completed","جاهز للشحن | Ready to ship",
+  "حاوية متجهزة | Container prepared","تم التحميل | Loaded","في البحر | In transit","وصلت الميناء | At port","تحت التخليص | In customs",
+  "تم التخليص | Customs cleared","وصلت المستودع | Delivered to warehouse"];
 var STATUS_DATES = [["تم التحميل","actual_load_date"],["في البحر","actual_etd"],["وصلت الميناء","port_arrival_actual"],
   ["وصلت المستودع","warehouse_arrival_actual"],["اكتمل الإنتاج","production_ready_date"],["جاهز للشحن","production_ready_date"]];
+var AUTO_BY_FIELD = {actual_load_date: 5, actual_etd: 6, port_arrival_actual: 7, warehouse_arrival_actual: 10, container_no: 4};
+var CUSTOMS = {"Under Clearance": 8, "Inspection": 8, "Submitted": 8, "Cleared": 9};
+function rankOf(s) {
+  s = String(s);
+  for (var i = FULL.length - 1; i >= 0; i--) if (s.indexOf(FULL[i].split(" | ")[0]) >= 0) return i;
+  return -1;
+}
 function onEdit(e) {
   var sh = e.range.getSheet();
   if (sh.getName() !== "China" || e.range.getRow() < 4) return;
@@ -2099,7 +2127,8 @@ function onEdit(e) {
   var keys = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0];
   var K = function (k) { return keys.indexOf(k) + 1; };
   var row = e.range.getRow(), col = e.range.getColumn(), key = keys[col - 1];
-  var stamp = K("last_updated_at"), by = K("updated_by"), now = new Date();
+  if (key === "last_updated_at" || key === "updated_by") return;
+  var stamp = K("last_updated_at"), by = K("updated_by"), sc = K("status"), now = new Date();
   var who = ""; try { who = Session.getActiveUser().getEmail(); } catch (x) {}
   var touch = function (r) {
     if (stamp > 0) sh.getRange(r, stamp).setValue(now);
@@ -2113,22 +2142,30 @@ function onEdit(e) {
       }
     }
   };
-  if (key === "last_updated_at" || key === "updated_by") return;
+  var advance = function (r, rank) {                      // الحالة تتحرك للأمام بس، وماتلمسش «ملغي/موقوف»
+    var cell = sh.getRange(r, sc), cur = String(cell.getValue());
+    if (cur.indexOf("ملغي") >= 0 || cur.indexOf("موقوف") >= 0 || rankOf(cur) >= rank) return false;
+    cell.setValue(FULL[rank]); fillDate(r, FULL[rank]); touch(r); return true;
+  };
   touch(row);
-  var isStatus = key === "status", isCont = CONT_COLS.indexOf(key) >= 0;
-  if (isStatus) fillDate(row, e.range.getValue());
+  var val = e.range.getValue(), isStatus = key === "status", isCont = CONT_COLS.indexOf(key) >= 0, rank = -1;
+  if (val !== "" && sc > 0) {
+    if (AUTO_BY_FIELD[key] !== undefined) rank = AUTO_BY_FIELD[key];
+    else if (key === "customs_status" && CUSTOMS[val] !== undefined) rank = CUSTOMS[val];
+    if (rank >= 0) advance(row, rank);
+  }
+  if (isStatus) fillDate(row, val);
   if (!isStatus && !isCont) return;
-  var cn = K("container_no"), sc = K("status");
+  var cn = K("container_no");
   var no = sh.getRange(row, cn).getValue(), last = sh.getLastRow();
   if (!no || last < 4) return;
   var nos = sh.getRange(4, cn, last - 3, 1).getValues();
   var sts = sh.getRange(4, sc, last - 3, 1).getValues();
-  var val = e.range.getValue();
   for (var i = 0; i < nos.length; i++) {
     var r = i + 4;
     if (nos[i][0] !== no || r === row || String(sts[i][0]).indexOf("ملغي") >= 0) continue;
     sh.getRange(r, col).setValue(val);
-    if (isStatus) fillDate(r, val);
+    if (isStatus) fillDate(r, val); else if (rank >= 0) advance(r, rank);
     touch(r);
   }
 }"""
