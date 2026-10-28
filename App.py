@@ -1970,8 +1970,9 @@ def _china_format_flat(ws):
             band[i] = _CHINA_GROUP_STYLE[g][0]
         labels.append(lab)
     auto = _china_auto_formulas()
-    row4 = [auto.get(k, "") for k in CHINA_FLAT_KEYS]
-    ws.update(values=[band, CHINA_FLAT_KEYS, labels, row4], range_name="A1", value_input_option="USER_ENTERED")
+    ws.update(values=[band, CHINA_FLAT_KEYS, labels], range_name="A1", value_input_option="USER_ENTERED")
+    for k, f in auto.items():
+        ws.update(values=[[f]], range_name=f"{_china_col_letter(CHINA_FLAT_KEYS.index(k) + 1)}4", value_input_option="USER_ENTERED")
     rg = lambda r0, r1, c0, c1: {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1, "startColumnIndex": c0, "endColumnIndex": c1}
     M = CHINA_FLAT_MAX_ROWS
     reqs = []
@@ -1982,12 +1983,10 @@ def _china_format_flat(ws):
         while j + 1 < N and CHINA_FLAT_COLS[j + 1][0] == g:
             j += 1
         st_ = _CHINA_GROUP_STYLE[g]
-        if j > i:
-            reqs.append({"mergeCells": {"range": rg(0, 1, i, j + 1), "mergeType": "MERGE_ALL"}})
         reqs.append({"repeatCell": {"range": rg(0, 1, i, j + 1), "cell": {"userEnteredFormat": {
-            "backgroundColor": _china_rgb(st_[1]), "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+            "backgroundColor": _china_rgb(st_[1]), "horizontalAlignment": "LEFT", "verticalAlignment": "MIDDLE", "wrapStrategy": "OVERFLOW_CELL",
             "textFormat": {"bold": True, "fontSize": 12, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}}},
-            "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat)"}})
+            "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)"}})
         reqs.append({"repeatCell": {"range": rg(2, 3, i, j + 1), "cell": {"userEnteredFormat": {
             "backgroundColor": _china_rgb(st_[2]), "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
             "textFormat": {"bold": True, "fontSize": 10}}},
@@ -2086,6 +2085,12 @@ def get_china_flat_ws():
             st.warning(f"⚠️ مقدرتش أنقل البيانات القديمة: {e}")
         st.session_state["china_flash"] = ("✅ تم إنشاء شيت China في Google Sheet" + (f" ونقل {moved} صف من البيانات القديمة له." if moved else ".")
                                            + " الموظفة تقدر تعدّل فيه مباشرة.")
+    elif not getattr(ws, "frozen_row_count", 0):
+        try:
+            _china_format_flat(ws)
+            st.session_state["china_flash"] = "✅ اتكمّل تنسيق شيت China."
+        except Exception as e:
+            st.warning(f"⚠️ تنسيق شيت China ما اكتملش: {e}")
     st.session_state["china_flat_ws"] = ws
     return ws
 
