@@ -1722,8 +1722,10 @@ CHINA_FLAT_LISTS = {
  "customs_status": ["Not Started","Documents Ready","Submitted","Under Clearance","Inspection","Cleared","On Hold"],
  "shipping_line": ["MSC","CMA CGM","Maersk","COSCO","Hapag-Lloyd","OOCL","Evergreen","ONE","PIL","TSL","ECON","WHL","ZG中古","Other"],
 }
-def china_next_action_formula(R):
-    """معادلة «المطلوب دلوقتي» (عربي | English) — بتقرا الحالة والتواريخ. R(key) = مرجع العمود (نطاق/خلية). من غير = ومن غير ARRAYFORMULA."""
+def china_next_action_formula(R, L, link_prefix, row):
+    """معادلة «المطلوب دلوقتي» كرابط بيودّي للخلية المطلوبة (عربي | English + [اسم العمود | key]).
+    R(key) = مرجع خلية العمود في الصف، L(key) = حرف العمود، link_prefix = بداية الرابط (جوجل: "#gid=..&range=" / إكسيل: "#CHINA!")، row = رقم الصف.
+    من غير = (صف واحد، مش ARRAYFORMULA)."""
     S = R("status")
     H = lambda w: f'ISNUMBER(SEARCH("{w}",{S}))'
     cn, ae, pa, wa = R("container_no"), R("actual_etd"), R("port_arrival_actual"), R("warehouse_arrival_actual")
@@ -1731,37 +1733,54 @@ def china_next_action_formula(R):
     blank = f'LEN({R("internal_order_no")}&{R("po_no")}&{R("supplier_name")}&{cn}&{R("barcode")}&{R("sku")})=0'
     cancel, deliv, cleared, customs, port = H("ملغي"), H("وصلت المستودع"), H("تم التخليص"), H("تحت التخليص"), H("وصلت الميناء")
     transit, loaded, prep, ready = H("في البحر"), H("تم التحميل"), H("حاوية متجهزة"), H("جاهز للشحن")
-    done, prod, hold = H("اكتمل الإنتاج"), H("قيد الإنتاج"), H("موقوف")
-    def chain(pairs, default):
-        s = default
-        for cond, val in reversed(pairs):
-            s = f'IF({cond},{val},{s})'
-        return s
+    done, prod, hold, factory = H("اكتمل الإنتاج"), H("قيد الإنتاج"), H("موقوف"), H("تأكيد المصنع")
     q = lambda t: '"' + t + '"'
-    W = "⚠ التواريخ أحدث من الحالة | Dates ahead of status — "
-    factory = H("تأكيد المصنع")
+    label = {x[1]: x[2] for x in CHINA_FLAT_COLS}
+    def leaf(text, key=None):
+        shown = text if key is None else (f"{text} [{label[key]}]" if "|" in label[key] else f"{text} [{label[key]} | {key}]")
+        return ("leaf", shown, L(key or "status"))
+    def iff(cond, a, b):
+        return ("if", cond, a, b)
+    def chain(pairs, default):
+        node = default
+        for cond, val in reversed(pairs):
+            node = iff(cond, val, node)
+        return node
+    def render(node, which):
+        if node[0] == "leaf":
+            return q(node[1]) if which == "t" else q(node[2])
+        return f'IF({node[1]},{render(node[2], which)},{render(node[3], which)})'
+    tree = chain([
+        (f'{S}=""', leaf("اختاري الحالة | Select status", "status")),
+        (cancel, leaf("—")),
+        (deliv, leaf("✔ مكتمل | Completed")),
+        (cleared, iff(f'{wa}=""', leaf("سجّلي وصول المستودع | Enter warehouse arrival", "warehouse_arrival_actual"),
+                      leaf("غيّري الحالة لـ «وصلت المستودع» | Set status to Delivered", "status"))),
+        (customs, iff(f'{pa}=""', leaf("سجّلي وصول الميناء الفعلي | Enter port arrival date", "port_arrival_actual"),
+                      leaf("تابعي التخليص وحدّثي الحالة | Follow customs, update status", "status"))),
+        (port, iff(f'{pa}=""', leaf("سجّلي وصول الميناء الفعلي | Enter port arrival date", "port_arrival_actual"),
+                   leaf("حدّثي حالة التخليص | Update customs status", "customs_status"))),
+        (transit, chain([(f'{ae}=""', leaf("سجّلي ETD الفعلي | Enter actual ETD", "actual_etd")),
+                         (f'{eta}=""', leaf("سجّلي ETA الميناء | Enter port ETA", "eta_port")),
+                         (f'{tr}=""', leaf("أضيفي رابط التتبع | Add tracking link", "tracking_url"))],
+                        leaf("لما توصل سجّلي وصول الميناء | On arrival enter port arrival", "port_arrival_actual"))),
+        (loaded, chain([(f'{cn}=""', leaf("سجّلي رقم الحاوية | Enter container no.", "container_no")),
+                        (f'{bl}=""', leaf("سجّلي B/L وشركة الشحن | Enter B/L and shipping line", "bl_no"))],
+                       leaf("غيّري الحالة لـ «في البحر» عند الإبحار | Set In transit when sailed", "status"))),
+        (prep, iff(f'{cn}=""', leaf("سجّلي رقم الحاوية والختم | Enter container no. and seal", "container_no"),
+                   leaf("غيّري الحالة لـ «تم التحميل» بعد التحميل | Set Loaded after loading", "status"))),
+        (ready, leaf("جهّزي الحاوية: سجّلي رقمها | Prepare container: enter its number", "container_no")),
+        (done, leaf("أكدي جاهزية الشحن وغيّري الحالة | Confirm ready to ship, update status", "status")),
+        (prod, iff(f'{prd}=""', leaf("سجّلي تاريخ جاهزية الإنتاج | Enter production ready date", "production_ready_date"),
+                   leaf("لما يخلص الإنتاج غيّري الحالة | Update status when production ends", "status"))),
+        (hold, leaf("راجعي سبب الإيقاف في الملاحظات | Review hold reason in notes", "order_notes")),
+    ], leaf("أكدي الطلب مع المصنع وحدّثي الحالة | Confirm with factory, update status", "status"))
     early_port = f'({transit})+({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
     early_sail = f'({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
-    warn = (f'IF({S}="","",IF(({wa}<>"")*(1-({deliv}))*(1-({cancel}))>0,{q(W)},'
-            f'IF(({pa}<>"")*({early_port})>0,{q(W)},IF(({ae}<>"")*({early_sail})>0,{q(W)},""))))')
-    act = chain([
-        (f'{S}=""', q("اختاري الحالة | Select status")),
-        (cancel, q("—")),
-        (deliv, q("✔ مكتمل | Completed")),
-        (cleared, f'IF({wa}="",{q("سجّلي وصول المستودع | Enter warehouse arrival")},{q("غيّري الحالة لـ «وصلت المستودع» | Set status to Delivered")})'),
-        (customs, f'IF({pa}="",{q("سجّلي وصول الميناء الفعلي | Enter port arrival date")},{q("تابعي التخليص وحدّثي الحالة | Follow customs, update status")})'),
-        (port, f'IF({pa}="",{q("سجّلي وصول الميناء الفعلي | Enter port arrival date")},{q("حدّثي حالة التخليص | Update customs status")})'),
-        (transit, chain([(f'{ae}=""', q("سجّلي ETD الفعلي | Enter actual ETD")), (f'{eta}=""', q("سجّلي ETA الميناء | Enter port ETA")),
-                         (f'{tr}=""', q("أضيفي رابط التتبع | Add tracking link"))], q("تابعي الشحنة وسجّلي وصولها | Track; enter arrival"))),
-        (loaded, chain([(f'{cn}=""', q("سجّلي رقم الحاوية | Enter container no.")), (f'{bl}=""', q("سجّلي B/L وشركة الشحن | Enter B/L and shipping line"))],
-                       q("غيّري الحالة لـ «في البحر» عند الإبحار | Set In transit when sailed"))),
-        (prep, f'IF({cn}="",{q("سجّلي رقم الحاوية والختم | Enter container no. and seal")},{q("غيّري الحالة لـ «تم التحميل» بعد التحميل | Set Loaded after loading")})'),
-        (ready, q("جهّزي الحاوية | Prepare container")),
-        (done, q("أكدي جاهزية الشحن | Confirm ready to ship")),
-        (prod, f'IF({prd}="",{q("سجّلي تاريخ جاهزية الإنتاج | Enter production ready date")},{q("تابعي الإنتاج | Follow production")})'),
-        (hold, q("راجعي سبب الإيقاف في الملاحظات | Review hold reason in notes")),
-    ], q("تابعي المصنع وحدّثي الحالة | Follow factory, update status"))
-    return f'IF({blank},"",{warn}&{act})'
+    W = q("⚠ التواريخ أحدث من الحالة | Dates ahead of status — ")
+    warn = (f'IF({S}="","",IF(({wa}<>"")*(1-({deliv}))*(1-({cancel}))>0,{W},'
+            f'IF(({pa}<>"")*({early_port})>0,{W},IF(({ae}<>"")*({early_sail})>0,{W},""))))')
+    return f'IF({blank},"",HYPERLINK({link_prefix}&{render(tree, "g")}&{row},{warn}&{render(tree, "t")}))'
 
 _CF_SHIP_ONLY = ["internal_order_no","po_no","supplier_name","buyer_company","shipment_mode","incoterm","origin_location","invoice_no",
                  "invoice_value","freight_value","currency","planned_etd","eta_destination","booking_no",
@@ -2128,7 +2147,6 @@ def _china_auto_formulas():
     delay_v = f'IF({pa}<>"",{pa}-{eta},IF({done},0,TODAY()-{eta}))'
     ident = f'{R("barcode")}&{R("sku")}&{R("product_name_en")}'
     return {
-        "next_action": f"=ARRAYFORMULA({china_next_action_formula(R)})",
         "line_amount": f'=ARRAYFORMULA(IF(({qty}<>"")*({cost}<>""),{qty}*{cost},""))',
         "days_to_eta": f'=ARRAYFORMULA(IF({eta}="","",IFERROR({eta}-TODAY(),"")))',
         "delay_days": f'=ARRAYFORMULA(IF({eta}="","",IFERROR(IF({delay_v}>0,{delay_v},0),"")))',
@@ -2150,10 +2168,17 @@ def _china_image_formula(r):
     return (f'=IF({bc}="","",IFERROR(IMAGE(IF({u}<>"",{u},IFERROR({via("Tacweed","links n")},'
             f'IFERROR({via("TacweedAmazon","links a")},{ty}))),1),"— لا صورة"))')
 
+def _china_next_action_row(r, gid):
+    c = {k: _china_col_letter(i + 1) for i, k in enumerate(CHINA_FLAT_KEYS)}
+    return "=" + china_next_action_formula(lambda k: f"{c[k]}{r}", lambda k: c[k], f'"#gid={gid}&range="', r)
+
 def _china_write_image_formulas(ws):
-    ic = _china_col_letter(CHINA_FLAT_KEYS.index("product_image") + 1)
-    ws.update(values=[[_china_image_formula(r)] for r in range(4, CHINA_FLAT_MAX_ROWS + 1)], range_name=f"{ic}4:{ic}{CHINA_FLAT_MAX_ROWS}",
-              value_input_option="USER_ENTERED")
+    """معادلات الصف الواحد (مش ARRAYFORMULA): صورة المنتج + «المطلوب دلوقتي» (رابط للخلية)."""
+    for key, mk in (("product_image", lambda r: _china_image_formula(r)), ("next_action", lambda r: _china_next_action_row(r, ws.id))):
+        ic = _china_col_letter(CHINA_FLAT_KEYS.index(key) + 1)
+        for r0 in range(4, CHINA_FLAT_MAX_ROWS + 1, 250):          # على دفعات عشان حجم الطلب يفضل صغير
+            r1 = min(r0 + 249, CHINA_FLAT_MAX_ROWS)
+            ws.update(values=[[mk(r)] for r in range(r0, r1 + 1)], range_name=f"{ic}{r0}:{ic}{r1}", value_input_option="USER_ENTERED")
 
 def _china_format_flat(ws):
     """بيكتب العناوين والمعادلات وينسّق الشيت (ألوان/تثبيت/قوايم/تلوين ذكي) — مرة واحدة عند الإنشاء الأول."""
@@ -2319,13 +2344,13 @@ def get_china_flat_ws():
             st.session_state["china_flash"] = "✅ اتكمّل تنسيق شيت China."
         except Exception as e:
             st.warning(f"⚠️ تنسيق شيت China ما اكتملش: {e}")
-    try:   # لو معادلة الصورة مش موجودة (أو اتمسحت) بنكتبها تاني
-        ic = CHINA_FLAT_KEYS.index("product_image") + 1
-        cur = ws.cell(4, ic, value_render_option="FORMULA").value or ""
-        if not str(cur).startswith("=IF("):
+    try:   # لو معادلة الصورة أو «المطلوب دلوقتي» مش موجودة (أو الرابط بتاعها لتاب قديم) بنكتبها تاني
+        ni = CHINA_FLAT_KEYS.index("next_action") + 1
+        cur = ws.cell(4, ni, value_render_option="FORMULA").value or ""
+        if f"gid={ws.id}&" not in str(cur):
             _china_write_image_formulas(ws)
     except Exception as e:
-        st.warning(f"⚠️ مقدرتش أتأكد من معادلة صورة المنتج: {e}")
+        st.warning(f"⚠️ مقدرتش أتأكد من معادلات الصورة/المطلوب دلوقتي: {e}")
     st.session_state["china_flat_ws"] = ws
     return ws
 
