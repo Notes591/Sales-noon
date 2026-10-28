@@ -472,6 +472,7 @@ TAB_LOCK_OPTIONS = [
     ("tab13",     "📈 مراجعة المبيعات | Sales Review"),
     ("tab15",     "🗓️ تحليل الجدولة | Schedule Analysis"),
     ("tab16",     "📦 مخزون بدون بيع | No Sales"),
+    ("tab_upload", "📤 رفع ملف | Upload Files"),
 ]
 TAB_LOCK_LABELS = dict(TAB_LOCK_OPTIONS)
 
@@ -1777,41 +1778,41 @@ def china_next_action_formula(R, L, link_prefix, row):
             return q(node[1]) if which == "t" else q(node[2])
         return f'IF({node[1]},{render(node[2], which)},{render(node[3], which)})'
     tree = chain([
-        (f'{S}=""', leaf("اختاري الحالة | Select status", "status")),
+        (f'{S}=""', leaf("اختر الحالة | Select status", "status")),
         (cancel, leaf("—")),
         (deliv, leaf("✔ مكتمل | Completed")),
-        *[(f'({isline})*({R(k)}="")', leaf(f"أدخلي {ar} | Enter {en}", k)) for k, ar, en in (
+        *[(f'({isline})*({R(k)}="")', leaf(f"أدخل {ar} | Enter {en}", k)) for k, ar, en in (
             ("internal_order_no", "رقم الطلب", "order no."), ("barcode", "الباركود", "barcode"),
             ("total_qty", "الكمية", "quantity"), ("unit_cost", "تكلفة الوحدة", "unit cost"))],
-        *[(f'({orderonly})*({R(k)}="")', leaf(f"أدخلي {ar} | Enter {en}", k)) for k, ar, en in (
+        *[(f'({orderonly})*({R(k)}="")', leaf(f"أدخل {ar} | Enter {en}", k)) for k, ar, en in (
             ("po_no", "رقم PO", "PO no."), ("supplier_name", "المورد", "supplier"))],
-        (cleared, iff(f'{wa}=""', leaf("سجّلي وصول المستودع | Enter warehouse arrival", "warehouse_arrival_actual"),
-                      leaf("غيّري الحالة لـ «وصلت المستودع» | Set status to Delivered", "status"))),
-        (customs, iff(f'{pa}=""', leaf("سجّلي وصول الميناء الفعلي | Enter port arrival date", "port_arrival_actual"),
-                      leaf("تابعي التخليص وحدّثي الحالة | Follow customs, update status", "status"))),
-        (port, iff(f'{pa}=""', leaf("سجّلي وصول الميناء الفعلي | Enter port arrival date", "port_arrival_actual"),
-                   leaf("حدّثي حالة التخليص | Update customs status", "customs_status"))),
-        (transit, chain([(f'{ae}=""', leaf("سجّلي ETD الفعلي | Enter actual ETD", "actual_etd")),
-                         (f'{eta}=""', leaf("سجّلي ETA الميناء | Enter port ETA", "eta_port")),
-                         (f'{sl}=""', leaf("سجّلي شركة الشحن | Enter shipping line", "shipping_line")),
-                         (f'{bl}=""', leaf("سجّلي B/L | Enter B/L no.", "bl_no")),
-                         (f'{tr}=""', leaf("أضيفي رابط التتبع | Add tracking link", "tracking_url"))],
-                        leaf("لما توصل سجّلي وصول الميناء | On arrival enter port arrival", "port_arrival_actual"))),
-        (loaded, chain([(f'{cn}=""', leaf("سجّلي رقم الحاوية | Enter container no.", "container_no")),
-                        (f'{seal}=""', leaf("سجّلي رقم الختم | Enter seal no.", "seal_no")),
-                        (f'{sl}=""', leaf("سجّلي شركة الشحن | Enter shipping line", "shipping_line")),
-                        (f'{bl}=""', leaf("سجّلي B/L | Enter B/L no.", "bl_no"))],
-                       leaf("غيّري الحالة لـ «في البحر» عند الإبحار | Set In transit when sailed", "status"))),
-        (prep, chain([(f'{cn}=""', leaf("سجّلي رقم الحاوية | Enter container no.", "container_no")),
-                      (f'{seal}=""', leaf("سجّلي رقم الختم | Enter seal no.", "seal_no"))],
-                     leaf("غيّري الحالة لـ «تم التحميل» بعد التحميل | Set Loaded after loading", "status"))),
-        (ready, leaf("جهّزي الحاوية: سجّلي رقمها | Prepare container: enter its number", "container_no")),
-        (done, leaf("أكدي جاهزية الشحن وغيّري الحالة | Confirm ready to ship, update status", "status")),
-        (prod, iff(f'{prd}=""', leaf("سجّلي تاريخ جاهزية الإنتاج | Enter production ready date", "production_ready_date"),
-                   leaf("لما يخلص الإنتاج غيّري الحالة | Update status when production ends", "status"))),
-        (hold, leaf("راجعي سبب الإيقاف في الملاحظات | Review hold reason in notes", "order_notes")),
-    ], iff(f'{prd}=""', leaf("سجّلي تاريخ جاهزية الإنتاج المتوقع | Enter expected production ready date", "production_ready_date"),
-           leaf("لما يبدأ الإنتاج غيّري الحالة | Update status when production starts", "status")))
+        (cleared, iff(f'{wa}=""', leaf("سجّل وصول المستودع | Enter warehouse arrival", "warehouse_arrival_actual"),
+                      leaf("غيّر الحالة لـ «وصلت المستودع» | Set status to Delivered", "status"))),
+        (customs, iff(f'{pa}=""', leaf("سجّل وصول الميناء الفعلي | Enter port arrival date", "port_arrival_actual"),
+                      leaf("تابع التخليص وحدّث الحالة | Follow customs, update status", "status"))),
+        (port, iff(f'{pa}=""', leaf("سجّل وصول الميناء الفعلي | Enter port arrival date", "port_arrival_actual"),
+                   leaf("حدّث حالة التخليص | Update customs status", "customs_status"))),
+        (transit, chain([(f'{ae}=""', leaf("سجّل ETD الفعلي | Enter actual ETD", "actual_etd")),
+                         (f'{eta}=""', leaf("سجّل ETA الميناء | Enter port ETA", "eta_port")),
+                         (f'{sl}=""', leaf("سجّل شركة الشحن | Enter shipping line", "shipping_line")),
+                         (f'{bl}=""', leaf("سجّل B/L | Enter B/L no.", "bl_no")),
+                         (f'{tr}=""', leaf("أضف رابط التتبع | Add tracking link", "tracking_url"))],
+                        leaf("لما توصل سجّل وصول الميناء | On arrival enter port arrival", "port_arrival_actual"))),
+        (loaded, chain([(f'{cn}=""', leaf("سجّل رقم الحاوية | Enter container no.", "container_no")),
+                        (f'{seal}=""', leaf("سجّل رقم الختم | Enter seal no.", "seal_no")),
+                        (f'{sl}=""', leaf("سجّل شركة الشحن | Enter shipping line", "shipping_line")),
+                        (f'{bl}=""', leaf("سجّل B/L | Enter B/L no.", "bl_no"))],
+                       leaf("غيّر الحالة لـ «في البحر» عند الإبحار | Set In transit when sailed", "status"))),
+        (prep, chain([(f'{cn}=""', leaf("سجّل رقم الحاوية | Enter container no.", "container_no")),
+                      (f'{seal}=""', leaf("سجّل رقم الختم | Enter seal no.", "seal_no"))],
+                     leaf("غيّر الحالة لـ «تم التحميل» بعد التحميل | Set Loaded after loading", "status"))),
+        (ready, leaf("جهّز الحاوية: سجّل رقمها | Prepare container: enter its number", "container_no")),
+        (done, leaf("أكّد جاهزية الشحن وغيّر الحالة | Confirm ready to ship, update status", "status")),
+        (prod, iff(f'{prd}=""', leaf("سجّل تاريخ جاهزية الإنتاج | Enter production ready date", "production_ready_date"),
+                   leaf("لما يخلص الإنتاج غيّر الحالة | Update status when production ends", "status"))),
+        (hold, leaf("راجع سبب الإيقاف في الملاحظات | Review hold reason in notes", "order_notes")),
+    ], iff(f'{prd}=""', leaf("سجّل تاريخ جاهزية الإنتاج المتوقع | Enter expected production ready date", "production_ready_date"),
+           leaf("لما يبدأ الإنتاج غيّر الحالة | Update status when production starts", "status")))
     early_port = f'({transit})+({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
     early_sail = f'({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
     W = q("⚠ التواريخ أحدث من الحالة | Dates ahead of status — ")
@@ -2070,19 +2071,19 @@ def china_flat_to_tables(flat_rows):
 CHINA_STAFF_GUIDE = """📋 دليل تعبئة شيت الصين
 
 القاعدة: الشيت واحد (China). كل صف = منتج واحد داخل طلب، وبيانات الطلب والحاوية بتتكرر على صف كل منتج.
-ألوان الأعمدة: 🔑 الباركود والصورة والحالة | 🔵 الطلب/الشحنة | 🟠 الحاوية والتتبع | 🟢 المنتج | ⚪ التحديث | ⚙️ رمادي = محسوب تلقائي، لا تكتبي فيه.
-الأعمدة المتثبتة (رقم الطلب، PO، الباركود، الصورة) بتفضل قدامك وإنتي بتمشي يمين.
+ألوان الأعمدة: 🔑 الباركود والصورة والحالة | 🔵 الطلب/الشحنة | 🟠 الحاوية والتتبع | 🟢 المنتج | ⚪ التحديث | ⚙️ رمادي = محسوب تلقائي، لا تكتب فيه.
+الأعمدة المتثبتة (رقم الطلب، PO، الباركود، الصورة) بتفضل قدامك وإنت بتمشي يمين.
 
-⭐ عمود «الحالة | Status» هو العمود الوحيد للحالة (اختاري من القايمة). كل صف حالته لوحده، والتطبيق بيحسب منها حالة الحاوية وحالة الشحنة (الطلب + PO) لوحده.
-عمود «المطلوب دلوقتي» بيقولك تدخلي إيه بعد كده، ولو ظهر ⚠ يبقى فيه تاريخ أحدث من الحالة المختارة.
+⭐ عمود «الحالة | Status» هو العمود الوحيد للحالة (اختر من القايمة). كل صف حالته لوحده، والتطبيق بيحسب منها حالة الحاوية وحالة الشحنة (الطلب + PO) لوحده.
+عمود «المطلوب دلوقتي» بيقولك تدخل إيه بعد كده، ولو ظهر ⚠ يبقى فيه تاريخ أحدث من الحالة المختارة.
 
 الخطوة 1 — طلب جديد من المصنع (صف لكل منتج):
  1) 🔵 رقم الطلب الداخلي (NO.xxx) + رقم PO + اسم المورد + شركة المشتري.
  2) 🔑 الباركود (الصورة بتظهر لوحدها) + الحالة: تأكيد المصنع ← قيد الإنتاج ← اكتمل الإنتاج ← جاهز للشحن.
  3) 🔵 طريقة الشحن + Incoterm + العملة + قيمة الفاتورة.
  4) 🟢 SKU + الموديل + اسم المنتج EN/AR + الكراتين + قطع/كرتون + إجمالي الكمية + تكلفة الوحدة + CBM + الأوزان + تاريخ جاهزية الإنتاج، وSKU نون/أمازون/تريندول لو معروفين.
- 5) لو الطلب فيه أكتر من منتج: صف لكل منتج، وانسخي بيانات 🔵 الطلب على كل صفوفه.
- معرّف السطر اتركيه فاضي — بيتولّد تلقائي.
+ 5) لو الطلب فيه أكتر من منتج: صف لكل منتج، وانسخ بيانات 🔵 الطلب على كل صفوفه.
+ معرّف السطر اتركه فاضي — بيتولّد تلقائي.
 
 الخطوة 2 — تجهيز الحاوية:
  - على صف كل منتج داخل الحاوية: 🟠 رقم الحاوية + رقم الختم + نوع الحاوية (40HQ ...).
@@ -2090,27 +2091,27 @@ CHINA_STAFF_GUIDE = """📋 دليل تعبئة شيت الصين
  - المنتج الموزع على أكتر من حاوية: صف لكل حاوية، وكل صف بكمية وCBM الحاوية دي بس.
 
 الخطوة 3 — تم الشحن:
- - 🔵 رقم الشحنة STxxxxx (بعد تخصيصها فقط — لا تكتبي NO.xxx هنا).
+ - 🔵 رقم الشحنة STxxxxx (بعد تخصيصها فقط — لا تكتب NO.xxx هنا).
  - 🟠 شركة الشحن + B/L + اسم السفينة + رقم الرحلة + ميناء التحميل + ميناء الوصول + ETD الفعلي + ETA الميناء + رابط التتبع.
  - الحالة: «في البحر».
 
 الخطوة 4 — تأخير أو وصول:
- - ETA اتغيّر: عدّلي ETA واكتبي سبب التأخير.
+ - ETA اتغيّر: عدّل ETA واكتب سبب التأخير.
  - عند الوصول فعلاً: الحالة «وصلت الميناء» ← «تحت التخليص» ← «تم التخليص» ← «وصلت المستودع»، وحالة التخليص الجمركي.
  - الوصول الفعلي يُكتب بعد الوصول الحقيقي فقط، مش ETA.
 
-التواريخ والحالة الأوتوماتيك (لو سكريبت Apps Script متركّب مرة واحدة): أي تعديل في الصف بيسجّل «آخر تحديث» لوحده. وأول ما تكتبي تاريخ فعلي (التحميل / ETD الفعلي / وصول الميناء / وصول المستودع) أو رقم حاوية أو حالة تخليص، «الحالة» بتتحدّث لوحدها (للأمام بس). ولو غيّرتي «الحالة» بإيدك بيتملا تاريخ الحالة الفعلي لو فاضي (تم التحميل ← تاريخ التحميل، في البحر ← ETD الفعلي، وصلت الميناء ← وصول الميناء، وصلت المستودع ← وصول المستودع)، وبتتوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية. من غير السكريبت اكتبي التواريخ بإيدك.
+التواريخ والحالة الأوتوماتيك (لو سكريبت Apps Script متركّب مرة واحدة): أي تعديل في الصف بيسجّل «آخر تحديث» لوحده. وأول ما تكتب تاريخ فعلي (التحميل / ETD الفعلي / وصول الميناء / وصول المستودع) أو رقم حاوية أو حالة تخليص، «الحالة» بتتحدّث لوحدها (للأمام بس). ولو غيّرت «الحالة» بإيدك بيتملا تاريخ الحالة الفعلي لو فاضي (تم التحميل ← تاريخ التحميل، في البحر ← ETD الفعلي، وصلت الميناء ← وصول الميناء، وصلت المستودع ← وصول المستودع)، وبتتوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية. من غير السكريبت اكتب التواريخ بإيدك.
 
 قواعد مهمة:
- - لا تغيّري الصفوف 1–3 (العناوين) ولا ترتّبي الأعمدة.
+ - لا تغيّر الصفوف 1–3 (العناوين) ولا ترتّب الأعمدة.
  - NO.xxx = رقم الطلب الداخلي فقط. STxxxxx = رقم الشحنة بعد تخصيصها.
  - RIYADH = الوجهة النهائية وليست ميناء. الميناء = JEDDAH أو DAMMAM.
  - عمود «اكتمال الصف»: MISSING = ناقص بيانات مطلوبة، OK = تمام.
  - الطلب أو المنتج الملغي: الحالة = ملغي."""
 
-CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصقي الكود ▸ Save ▸ (أول مرة هيطلب صلاحية).
-// 1) بيختم «آخر تحديث» لوحده. 2) أول ما تكتبي تاريخ فعلي أو رقم حاوية بتتحدّث «الحالة» لوحدها (للأمام بس، عمرها ما بترجّع).
-// 3) أول ما تغيّري «الحالة» بيتملا تاريخ الحالة لو فاضي. 4) بيوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية.
+CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصق الكود ▸ Save ▸ (أول مرة هيطلب صلاحية).
+// 1) بيختم «آخر تحديث» لوحده. 2) أول ما تكتب تاريخ فعلي أو رقم حاوية بتتحدّث «الحالة» لوحدها (للأمام بس، عمرها ما بترجّع).
+// 3) أول ما تغيّر «الحالة» بيتملا تاريخ الحالة لو فاضي. 4) بيوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية.
 var CONT_COLS = ["container_type","seal_no","shipping_line","vessel_name","voyage_no","bl_no","port_of_loading","destination_port",
   "actual_etd","eta_port","port_arrival_actual","warehouse_arrival_actual","customs_status","last_known_location",
   "delay_reason","tracking_url","ctr_gross_weight_kg","ctr_total_cbm","ctr_total_cartons","ctr_total_units"];
@@ -2192,7 +2193,7 @@ _CHINA_GROUP_STYLE = {   # (عنوان المجموعة, لون الشريط, ل
     "LINE": ("📦 المنتج / الدفعة — صف لكل منتج", "2E7D32", "E2EFDA"),
     "STAMP": ("🕓 التحديث", "595959", "EDEDED"),
     "KEY": ("🔑 الباركود · الصورة · الحالة", "6A1B9A", "E4D4F0"),
-    "AUTO": ("⚙️ محسوب تلقائي — لا تكتبي هنا", "7F7F7F", "D9D9D9"),
+    "AUTO": ("⚙️ محسوب تلقائي — لا تكتب هنا", "7F7F7F", "D9D9D9"),
 }
 CHINA_FLAT_MAX_ROWS = 3000
 
@@ -2380,7 +2381,7 @@ def get_china_flat_ws():
         except Exception as e:
             st.warning(f"⚠️ مقدرتش أنقل البيانات القديمة: {e}")
         st.session_state["china_flash"] = ("✅ تم إنشاء شيت China في Google Sheet" + (f" ونقل {moved} صف من البيانات القديمة له." if moved else ".")
-                                           + " الموظفة تقدر تعدّل فيه مباشرة.")
+                                           + " الموظف تقدر تعدّل فيه مباشرة.")
     elif _china_layout_outdated(ws):
         try:
             old_rows = _china_read_flat(ws.get_all_values())
@@ -2392,7 +2393,7 @@ def get_china_flat_ws():
             tmp.update_title(CHINA_FLAT_TAB)
             ws = tmp
             st.session_state["china_flash"] = (f"✅ اتحدّث ترتيب أعمدة شيت China (الباركود والصورة بعد PO) ونقل {len(old_rows)} صف. "
-                                               "النسخة القديمة اتحفظت كتاب باسم China_backup_… ومسموح تمسحيها بعد ما تتأكدي.")
+                                               "النسخة القديمة اتحفظت كتاب باسم China_backup_… ومسموح تمسحها بعد ما تتأكد.")
         except Exception as e:
             st.warning(f"⚠️ تحديث ترتيب أعمدة شيت China فشل: {e}")
     elif not getattr(ws, "frozen_row_count", 0):
@@ -2471,7 +2472,7 @@ def _china_read_flat(raw):
     return out
 
 def _china_flat_raw(force=False):
-    """الخام من الشيت — بيتجدّد تلقائي كل دقيقتين (عشان تعديلات الموظفة تبان) أو بالزرار."""
+    """الخام من الشيت — بيتجدّد تلقائي كل دقيقتين (عشان تعديلات الموظف تبان) أو بالزرار."""
     ws = get_china_flat_ws()
     ts = st.session_state.get("china_flat_ts", 0)
     if force or time.time() - ts > 120:
@@ -3160,7 +3161,7 @@ def render_china_sales_status(sku_ups):
     try:
         b = get_china_bundle()
         if not b["lines"]:
-            st.caption("🚢 بيانات شحنات الصين: لا توجد بيانات محمّلة — ارفع الملف من قسم «شحنات الصين» | no China data loaded yet")
+            st.caption("🚢 بيانات شحنات الصين: لا توجد بيانات محمّلة — ارفع الملف من تاب «رفع ملف» | no China data loaded yet")
             return
         n = sum(1 for s in sku_ups if china_lines_for_sku(s))
         no_code = sum(1 for s in sku_ups if not (get_tacweed_map().get(s, "") or get_tacweed_amazon_map().get(s, "")))
@@ -3661,7 +3662,7 @@ def _china_days(date_str, today):
 
 def render_china_tab():
     st.subheader("🚢 شحنات الصين | China Shipments")
-    st.caption("بضاعة جاية من الصين — بيانات شيت China (شيت واحد في Google Sheet بتعبّيه الموظفة مباشرة) مربوطة بالتكويد: "
+    st.caption("بضاعة جاية من الصين — بيانات شيت China (شيت واحد في Google Sheet بتعبّيه الموظف مباشرة) مربوطة بالتكويد: "
                "الكود01 في تاب التكويد = barcode في SKU_LINES. الكمية القادمة بتظهر كمان جوه تابات مبيعات FBN وFBB | "
                "Incoming goods from China, linked to Tacweed (Code01 = barcode). Also shown inside the FBN/FBB sales tabs.")
     flash = st.session_state.pop("china_flash", None)
@@ -3687,16 +3688,16 @@ def render_china_tab():
         st.markdown("**اختياري — سكريبت Google Apps Script** بيوحّد بيانات الحاوية على كل صفوفها وبيختم آخر تحديث تلقائي:")
         st.code(CHINA_APPS_SCRIPT, language="javascript")
     if bundle.get("conflicts"):
-        with st.expander(f"⚠️ {len(bundle['conflicts'])} تعارض في الشيت (نفس الحاوية/الطلب بقيم مختلفة) — راجعيها", expanded=False):
-            st.caption("التطبيق أخد القيمة الأحدث (حسب «آخر تحديث») مؤقتًا. صحّحي القيمة على كل صفوف نفس الحاوية/الطلب في الشيت.")
+        with st.expander(f"⚠️ {len(bundle['conflicts'])} تعارض في الشيت (نفس الحاوية/الطلب بقيم مختلفة) — راجعها", expanded=False):
+            st.caption("التطبيق أخد القيمة الأحدث (حسب «آخر تحديث») مؤقتًا. صحّح القيمة على كل صفوف نفس الحاوية/الطلب في الشيت.")
             st.dataframe(pd.DataFrame(bundle["conflicts"]), use_container_width=True, hide_index=True)
-    render_china_upload("china", bundle)
+    st.caption("📤 رفع ملف الصين (اختياري) من تاب «رفع ملف» | China file upload is in the «Upload Files» tab")
     _li = load_settings().get("china_last_import", "")
     if _li:
         st.caption(f"🕒 آخر رفع: {_li}")
     lines = bundle["lines"]
     if not (lines or bundle["ships"] or bundle["conts"]):
-        st.info("لا توجد بيانات صين بعد — ارفع ملف الإكسيل من فوق | No China data yet — upload the Excel file above")
+        st.info("لا توجد بيانات صين بعد — ارفع ملف الإكسيل من تاب «رفع ملف» | No China data yet — upload the Excel file in the «Upload Files» tab")
         return
 
     today = datetime.now().date()
@@ -3952,7 +3953,7 @@ def render_china_tab():
             m2.metric("مربوطة بالتكويد | Linked", f"{len(codes_linked):,}")
             m3.metric("غير مربوطة | Unlinked lines", f"{len(unlinked):,}")
             if not get_tacweed_map():
-                st.warning("⚠️ تاب التكويد فاضي — ارفع ملف التكويد من تاب المخزون أو المبيعات | Tacweed is empty — upload it first")
+                st.warning("⚠️ تاب التكويد فاضي — ارفع ملف التكويد من تاب «رفع ملف» | Tacweed is empty — upload it first")
             if unlinked:
                 st.markdown("**أسطر مفيهاش SKU في المتجر بنفس الكود | Lines with no store SKU for their code:**")
                 df_u = pd.DataFrame([{
@@ -5372,11 +5373,9 @@ def render_trendyol_ads_upload(key_prefix):
 def _render_ads_performance_tab_trendyol():
     """تاب إعلانات تريندول — على مستوى الحملة (التقرير مفيهوش Barcode، فيه ContentId بس)."""
     plat_header("trendyol", "إعلانات تريندول | Trendyol Ads")
-    render_trendyol_ads_upload("ty_ads")
-    render_trendyol_products_upload("ty_ads")
     camps = get_ads_map_trendyol()
     if not camps:
-        st.info("ارفع تقرير إعلانات تريندول من الأعلى | Upload the Trendyol ads report above")
+        st.info("ارفع تقرير إعلانات تريندول من تاب «رفع ملف» | Upload the Trendyol ads report in the «Upload Files» tab")
         return
     try:
         min_roas = float(load_settings().get("trendyol_min_roas", "3") or 3)
@@ -5444,7 +5443,7 @@ def _render_ads_performance_tab_trendyol():
                     if _det["unmapped"]:
                         st.caption(f"⚠️ {len(_det['unmapped'])} Content ID مش موجودين في ملف المنتجات: " + ", ".join(_det["unmapped"][:8]))
             elif c["ids"]:
-                st.caption(f"{c['n_products']} منتج — ContentId: " + ", ".join(c["ids"][:12]) + (" …" if len(c["ids"]) > 12 else "") + " — ارفع ملف المنتجات لربطهم بالـ Barcode")
+                st.caption(f"{c['n_products']} منتج — ContentId: " + ", ".join(c["ids"][:12]) + (" …" if len(c["ids"]) > 12 else "") + " — ارفع ملف المنتجات من تاب «رفع ملف» لربطهم بالـ Barcode")
 
 # ── "مفيش مبيعات" لتريندول: Barcodes اتباعت في آخر 60 يوم ومفيهاش مبيع في الفترة ──
 def compute_no_sale_rows_trendyol(days=7):
@@ -6510,6 +6509,7 @@ NAV_ITEMS = [
     ("tab_contracts", "📑", "العقود | Contracts"),
     ("tab16",    "🗂️", "مخزون بدون بيع | No Sales"),
     ("tab_ads",  "📢", "الإعلانات | Ads"),
+    ("tab_upload", "📤", "رفع ملف | Upload Files"),
 ]
 NAV_KEY_LABELS = {k: lbl for k, _i, lbl in NAV_ITEMS}
 
@@ -6668,10 +6668,96 @@ tab_china = st.container(key="navpanel_tab_china")
 tab_contracts = st.container(key="navpanel_tab_contracts")
 tab16    = st.container(key="navpanel_tab16")
 tab_ads  = st.container(key="navpanel_tab_ads")
+tab_upload = st.container(key="navpanel_tab_upload")
 
 for _key, _i, _l in NAV_ITEMS:
     _disp = "block" if st.session_state["nav_page"] == _key else "none"
     st.markdown(f'<style>.st-key-navpanel_{_key} {{ display: {_disp} !important; }}</style>', unsafe_allow_html=True)
+
+def render_inventory_upload():
+    """رفع ملف مخزون نون (كان جوه تاب المخزون) | Noon inventory file upload (moved out of the Inventory tab)."""
+    links_map = get_links_map()
+    col_t,_ = st.columns([1,3])
+    with col_t:
+        st.download_button("⬇️ Template المخزون | Inventory Template",
+            data=make_empty_template(["warehouse_code","sku","STOCCCCK.QTY","مبيع شهر جدول.QTY"]),
+            file_name=f"inventory_template_{file_timestamp()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True)
+    upl_inv = st.file_uploader("ارفع ملف المخزون | Upload Inventory File", type=["xlsx","xls","xlsm","csv"], key="inv_upload")
+    if upl_inv:
+        try:
+            df_inv = pd.read_csv(upl_inv,dtype=str).fillna("") if upl_inv.name.endswith(".csv") else pd.read_excel(upl_inv,dtype=str).fillna("")
+            wh_col=sku_col=stock_col=sales_col=None
+            for c in df_inv.columns:
+                cl = c.strip().lower()
+                if "warehouse" in cl: wh_col=c
+                if cl in ("sku","item nr","item_nr"): sku_col=c
+                if "stock" in cl: stock_col=c
+                if "مبيع" in cl or "sales" in cl: sales_col=c
+                if "qty" in cl and sales_col is None: sales_col=c
+            if not wh_col:    wh_col    = df_inv.columns[0]
+            if not sku_col:   sku_col   = df_inv.columns[1] if len(df_inv.columns)>1 else df_inv.columns[0]
+            if not stock_col: stock_col = df_inv.columns[2] if len(df_inv.columns)>2 else None
+            if not sales_col: sales_col = df_inv.columns[3] if len(df_inv.columns)>3 else None
+            st.info(f"📊 {len(df_inv)} صف | WH:`{wh_col}` SKU:`{sku_col}` Stock:`{stock_col}` Sales:`{sales_col}`")
+            st.dataframe(df_inv.head(10), use_container_width=True, height=180)
+            def do_upload(replace=False):
+                dn = now_str()
+                to_add = []
+                for _,row in df_inv.iterrows():
+                    wh  = str(row[wh_col]).strip()    if wh_col    else ""
+                    sku = str(row[sku_col]).strip()   if sku_col   else ""
+                    stk = str(row[stock_col]).strip() if stock_col else ""
+                    sal = str(row[sales_col]).strip() if sales_col else ""
+                    img = links_map.get(sku.upper(),"")
+                    if sku and sku.lower()!="nan":
+                        to_add.append([sku,wh,stk,sal,img,dn])
+                if replace: safe_delete_all(inventory_sheet)
+                safe_batch_append(inventory_sheet,to_add)
+                clear_cache(inventory_sheet)
+                return len(to_add)
+            ca,cb = st.columns(2)
+            with ca:
+                if st.button("📤 إضافة للموجود | Append", type="primary", use_container_width=True):
+                    n = do_upload(replace=False)
+                    st.success(f"✅ أُضيف {n} صف | rows added"); st.rerun()
+            with cb:
+                if st.button("🔄 استبدال الكل | Replace All", type="secondary", use_container_width=True):
+                    st.session_state["confirm_replace_inv"] = True
+            if st.session_state.get("confirm_replace_inv"):
+                st.warning("⚠️ هيمسح الكل ويرفع الجديد؟ | Replace all data?")
+                cy,cn = st.columns(2)
+                if cy.button("✅ نعم | Yes", key="yes_rep_inv"):
+                    n = do_upload(replace=True)
+                    st.session_state["confirm_replace_inv"] = False
+                    st.success(f"✅ تم الاستبدال — {n} صف"); st.rerun()
+                if cn.button("❌ لا | No", key="no_rep_inv"):
+                    st.session_state["confirm_replace_inv"] = False; st.rerun()
+        except Exception as e:
+            st.error(f"❌ {e}")
+
+def render_upload_tab():
+    """كل رفع الملفات في مكان واحد — نون مع بعض، أمازون مع بعض، تريندول مع بعض (+ عام: مخزون المستودع والصين)."""
+    st.header("📤 رفع ملف | Upload Files")
+    st.caption("كل رفع الملفات هنا: نون مع بعض، أمازون مع بعض، تريندول مع بعض | All file uploads live here, grouped by platform")
+    t_noon, t_amz, t_ty, t_gen = st.tabs(["🅽 نون | Noon", "📦 أمازون | Amazon", "🟣 تريندول | Trendyol", "🏭 عام (مستودع + صين) | General"])
+    with t_noon:
+        render_tacweed_upload("up")
+        render_inventory_upload()
+    with t_amz:
+        render_tacweed_amazon_upload("up")
+        st.caption("مخزون أمازون (StockAmazon) بيتحدّث يدويًا في الشيت نفسه | Amazon stock (StockAmazon) is updated manually in the sheet")
+    with t_ty:
+        render_trendyol_upload("up")
+        render_trendyol_ads_upload("up")
+        render_trendyol_products_upload("up")
+    with t_gen:
+        render_warehouse_stock_upload("up")
+        render_china_upload("up", get_china_bundle())
+        _li = load_settings().get("china_last_import", "")
+        if _li:
+            st.caption(f"🕒 آخر رفع للصين: {_li}")
 
 if st.session_state["nav_page"] == "tab9":
     with tab9:
@@ -6681,68 +6767,6 @@ if st.session_state["nav_page"] == "tab9":
             with noon_stock_subtab:
                 st.subheader("📊 المخزون والمبيع الشهري | Inventory & Monthly Sales")
                 links_map = get_links_map()
-                render_tacweed_upload("inv")
-                render_tacweed_amazon_upload("inv")
-                render_warehouse_stock_upload("inv")
-                col_t,_ = st.columns([1,3])
-                with col_t:
-                    st.download_button("⬇️ Template المخزون | Inventory Template",
-                        data=make_empty_template(["warehouse_code","sku","STOCCCCK.QTY","مبيع شهر جدول.QTY"]),
-                        file_name=f"inventory_template_{file_timestamp()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
-                upl_inv = st.file_uploader("ارفع ملف المخزون | Upload Inventory File", type=["xlsx","xls","xlsm","csv"], key="inv_upload")
-                if upl_inv:
-                    try:
-                        df_inv = pd.read_csv(upl_inv,dtype=str).fillna("") if upl_inv.name.endswith(".csv") else pd.read_excel(upl_inv,dtype=str).fillna("")
-                        wh_col=sku_col=stock_col=sales_col=None
-                        for c in df_inv.columns:
-                            cl = c.strip().lower()
-                            if "warehouse" in cl: wh_col=c
-                            if cl in ("sku","item nr","item_nr"): sku_col=c
-                            if "stock" in cl: stock_col=c
-                            if "مبيع" in cl or "sales" in cl: sales_col=c
-                            if "qty" in cl and sales_col is None: sales_col=c
-                        if not wh_col:    wh_col    = df_inv.columns[0]
-                        if not sku_col:   sku_col   = df_inv.columns[1] if len(df_inv.columns)>1 else df_inv.columns[0]
-                        if not stock_col: stock_col = df_inv.columns[2] if len(df_inv.columns)>2 else None
-                        if not sales_col: sales_col = df_inv.columns[3] if len(df_inv.columns)>3 else None
-                        st.info(f"📊 {len(df_inv)} صف | WH:`{wh_col}` SKU:`{sku_col}` Stock:`{stock_col}` Sales:`{sales_col}`")
-                        st.dataframe(df_inv.head(10), use_container_width=True, height=180)
-                        def do_upload(replace=False):
-                            dn = now_str()
-                            to_add = []
-                            for _,row in df_inv.iterrows():
-                                wh  = str(row[wh_col]).strip()    if wh_col    else ""
-                                sku = str(row[sku_col]).strip()   if sku_col   else ""
-                                stk = str(row[stock_col]).strip() if stock_col else ""
-                                sal = str(row[sales_col]).strip() if sales_col else ""
-                                img = links_map.get(sku.upper(),"")
-                                if sku and sku.lower()!="nan":
-                                    to_add.append([sku,wh,stk,sal,img,dn])
-                            if replace: safe_delete_all(inventory_sheet)
-                            safe_batch_append(inventory_sheet,to_add)
-                            clear_cache(inventory_sheet)
-                            return len(to_add)
-                        ca,cb = st.columns(2)
-                        with ca:
-                            if st.button("📤 إضافة للموجود | Append", type="primary", use_container_width=True):
-                                n = do_upload(replace=False)
-                                st.success(f"✅ أُضيف {n} صف | rows added"); st.rerun()
-                        with cb:
-                            if st.button("🔄 استبدال الكل | Replace All", type="secondary", use_container_width=True):
-                                st.session_state["confirm_replace_inv"] = True
-                        if st.session_state.get("confirm_replace_inv"):
-                            st.warning("⚠️ هيمسح الكل ويرفع الجديد؟ | Replace all data?")
-                            cy,cn = st.columns(2)
-                            if cy.button("✅ نعم | Yes", key="yes_rep_inv"):
-                                n = do_upload(replace=True)
-                                st.session_state["confirm_replace_inv"] = False
-                                st.success(f"✅ تم الاستبدال — {n} صف"); st.rerun()
-                            if cn.button("❌ لا | No", key="no_rep_inv"):
-                                st.session_state["confirm_replace_inv"] = False; st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ {e}")
                 st.divider()
                 st.subheader("📋 بيانات المخزون الحالية | Current Inventory")
                 if not inv_map:
@@ -6861,7 +6885,7 @@ if st.session_state["nav_page"] == "tab_wh":
             wh_rows = st.session_state.get("warehouse_stockout_rows", [])
             if not wh_rows:
                 st.info("لا توجد بيانات مخزون مستودع مرفوعة — ارفع ملف التكويد وملف جرد "
-                         "المستودع من تاب المخزون أولاً | No warehouse stock data uploaded yet "
+                         "المستودع من تاب «رفع ملف» أولاً | No warehouse stock data uploaded yet "
                          "— upload the Tacweed and Warehouse Stock files from the Inventory tab first")
             else:
                 urgent_n = sum(1 for r in wh_rows if r["status"].startswith("🚨"))
@@ -8969,7 +8993,7 @@ def _t14_amz_part(r, part):
 
 def _t14_trendyol_placeholder():
     """مكان تريندول لما مفيش بيانات: بيوضح السبب | Shown when there's no Trendyol data."""
-    st.caption("🔜 مفيش بيانات تريندول — ارفع ملف الطلبات من 'رفع ملف طلبات تريندول' فوق | no Trendyol data yet")
+    st.caption("🔜 مفيش بيانات تريندول — ارفع ملف الطلبات من تاب «رفع ملف» | no Trendyol data yet")
 
 def _t14_ty_part(r, part):
     """جزء من كارت تريندول: ident (Barcode + اسم المنتج) / box / calc / verdict (السعر والربح)."""
@@ -9032,7 +9056,7 @@ def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, am
 # ══ تنبيهات العقود | Contract milestone alerts ══
 # جدول العقود (تاب Contracts في جوجل شيت — بيتعمل تلقائي): اسم العقد + تاريخ البداية + تاريخ النهاية.
 # كل شهر من بداية العقد (ولحد النهاية) بيظهر في أعلى تاب المبيعات «انتهى الشهر N من العقد» لمدة يومين،
-# وخلال اليومين دول تصفّح المبيعات متوقف لحد ما تضغطي «تم الاطلاع». ممكن تضيفي/تحذفي العقود من هنا أو من الشيت مباشرة.
+# وخلال اليومين دول تصفّح المبيعات متوقف لحد ما تضغط «تم الاطلاع». ممكن تضيف/تحذف العقود من هنا أو من الشيت مباشرة.
 # Every month after the contract start (up to the end date) a "month N ended" notice shows at the top of the Sales
 # tab for 2 days; while it's unacknowledged the Sales tab is blocked until «Acknowledged» is pressed.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -9126,8 +9150,8 @@ def render_contracts_tab():
     """تاب «العقود» المنفصل: إدخال وتعديل وحذف العقود (نفس بيانات تاب Contracts في جوجل شيت)."""
     if True:
         st.header("📑 العقود | Contracts")
-        st.caption("كل عقد: اسم + تاريخ بداية + تاريخ نهاية (سنوي أو شهري أو أي مدة). كل شهر من البداية بيظهر إشعار «انتهى الشهر N» يومين في أعلى المبيعات، ولحد ما تضغطي «تم الاطلاع» التصفّح متوقف. "
-                   "الإشعارات بتظهر في تاب المبيعات. ممكن تعدّلي العقود هنا أو مباشرة في تاب Contracts في جوجل شيت (التاريخ بصيغة yyyy-mm-dd) | Notices appear in the Sales tab. Edit here or directly in the Contracts Google Sheet tab")
+        st.caption("كل عقد: اسم + تاريخ بداية + تاريخ نهاية (سنوي أو شهري أو أي مدة). كل شهر من البداية بيظهر إشعار «انتهى الشهر N» يومين في أعلى المبيعات، ولحد ما تضغط «تم الاطلاع» التصفّح متوقف. "
+                   "الإشعارات بتظهر في تاب المبيعات. ممكن تعدّل العقود هنا أو مباشرة في تاب Contracts في جوجل شيت (التاريخ بصيغة yyyy-mm-dd) | Notices appear in the Sales tab. Edit here or directly in the Contracts Google Sheet tab")
         rows = _ct_read()
         today = datetime.now().date()
         if rows:
@@ -9154,7 +9178,7 @@ def render_contracts_tab():
             nt = st.text_input("ملاحظات (اختياري) | Notes (optional)")
             if st.form_submit_button("➕ إضافة عقد | Add contract"):
                 if not nm.strip():
-                    st.error("اكتبي اسم العقد | Enter a contract name")
+                    st.error("اكتب اسم العقد | Enter a contract name")
                 elif ed <= sd:
                     st.error("تاريخ النهاية لازم يكون بعد البداية | End must be after start")
                 else:
@@ -9171,7 +9195,7 @@ def render_contracts_tab():
                 st.rerun()
 
 def _contracts_gate():
-    """بتتعرض في أعلى تاب المبيعات. بترجّع False (يعني امنعي باقي التاب) لو فيه إشعار عقد شغال ولسه ماتضغطش عليه «تم الاطلاع»."""
+    """بتتعرض في أعلى تاب المبيعات. بترجّع False (يعني امنع باقي التاب) لو فيه إشعار عقد شغال ولسه ماتضغطش عليه «تم الاطلاع»."""
     import html as _html
     try:
         events = contract_active_events()
@@ -9199,7 +9223,7 @@ def _contracts_gate():
         '<div style="font-size:54px;font-weight:900;letter-spacing:6px;line-height:1.1;">STOP | قِف</div>'
         '<div style="font-size:22px;font-weight:800;margin:6px 0 10px 0;">إشعار عقد — تصفّح المبيعات متوقف | Contract notice — Sales browsing is blocked</div>'
         + cards +
-        '<div style="font-size:16px;margin-top:8px;">اضغطي «تم الاطلاع» عشان تكملي | Press «Acknowledged» to continue</div></div>',
+        '<div style="font-size:16px;margin-top:8px;">اضغط «تم الاطلاع» عشان تكمل | Press «Acknowledged» to continue</div></div>',
         unsafe_allow_html=True)
     if st.button("✅ تم الاطلاع | Acknowledged", key="ct_ack_btn", type="primary", use_container_width=True):
         try:
@@ -9217,10 +9241,6 @@ if st.session_state["nav_page"] == "tab14":
             st.caption("المفتاح الأساسي هو كود التكويد 🏷️ — كل بلوك = SKU نون (مرتب تنازليًا بمبيعات أمس) + ASIN أمازون لنفس الكود جنبه (والكود بيتكرر): "
                        "نون 🟢 | أمازون 🟠 | تريندول 🟣 | "
                        "One block per Noon SKU (sorted by yesterday's sales) with Noon | Amazon | Trendyol side by side")
-            render_tacweed_upload("sales")
-            render_tacweed_amazon_upload("sales")
-            render_trendyol_upload("sales")
-            render_warehouse_stock_upload("sales")
 
             sales_display_days = int(load_settings().get("sales_display_days","7") or 7)
             today_t14 = datetime.now().date()
@@ -9238,7 +9258,7 @@ if st.session_state["nav_page"] == "tab14":
             coverage_days_t14 = int(load_settings().get("schedule_coverage_days","15") or 15)
 
             if not inv_map and not amz_inv_map_asin and not get_trendyol_bundle()["rows"]:
-                st.info("ارفع ملف المخزون أولاً (نون: تاب المخزون / أمازون: StockAmazon) | Upload Inventory first")
+                st.info("ارفع ملف المخزون أولاً (نون: تاب «رفع ملف» / أمازون: StockAmazon) | Upload Inventory first")
             else:
                 rows_fbn_t14, multi_fbn_t14 = _t14_build_rows("fbn", sales_dates, sales_display_days)
                 rows_fbb_all_t14, multi_fbb_t14 = _t14_build_rows("fbb", sales_dates, sales_display_days)
@@ -9631,7 +9651,7 @@ if st.session_state["nav_page"] == "tab_dash":
                     #    orders combined (FBN + FBB) with no fulfillment-type filter —
                     #    it's one Noon store and one combined sales figure.
                     if not inv_map:
-                        st.info("ارفع ملف مخزون نون أولاً من تاب المخزون | Upload Noon Inventory first")
+                        st.info("ارفع ملف مخزون نون أولاً من تاب «رفع ملف» | Upload Noon Inventory first")
                     else:
                         _render_sales_dashboard_body(
                             build_daily_orders_counts, build_daily_orders_prices,
@@ -9643,14 +9663,14 @@ if st.session_state["nav_page"] == "tab_dash":
                     #    (Fulfillment=FBP), so FBN + FBB always adds up exactly to
                     #    "All Combined" with no double-counting.
                     if not inv_map:
-                        st.info("ارفع ملف مخزون نون أولاً من تاب المخزون | Upload Noon Inventory first")
+                        st.info("ارفع ملف مخزون نون أولاً من تاب «رفع ملف» | Upload Noon Inventory first")
                     else:
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_fbn, build_daily_orders_prices_fbn,
                             build_daily_orders_family_stats_fbn, "fbn")
                 with _dash_fbb_subtab_td:
                     if not inv_map:
-                        st.info("ارفع ملف مخزون نون أولاً من تاب المخزون | Upload Noon Inventory first")
+                        st.info("ارفع ملف مخزون نون أولاً من تاب «رفع ملف» | Upload Noon Inventory first")
                     else:
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_fbb, build_daily_orders_prices_fbb,
@@ -9687,7 +9707,7 @@ if st.session_state["nav_page"] == "tab_dash":
                 with _dash_ty_subtab_td:
                     plat_header("trendyol", "داشبورد تريندول | Trendyol Dashboard")
                     if not get_trendyol_bundle()["rows"]:
-                        st.info("ارفع ملف طلبات تريندول من تاب المبيعات أولاً | Upload Trendyol orders from the Sales tab first")
+                        st.info("ارفع ملف طلبات تريندول من تاب «رفع ملف» أولاً | Upload Trendyol orders from the Sales tab first")
                     else:
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_trendyol, build_daily_orders_prices_trendyol,
@@ -9746,7 +9766,7 @@ if st.session_state["nav_page"] == "tab16":
             # ══════════ نون ══════════
             with channel_tab_noon:
                 if not inv_map:
-                    st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+                    st.info("ارفع ملف المخزون أولاً من تاب «رفع ملف» | Upload Inventory first")
                 else:
                     today_t16 = datetime.now().date()
 
@@ -9856,7 +9876,7 @@ if st.session_state["nav_page"] == "tab16":
                 plat_header("trendyol")
                 st.caption("منتجات (Barcode) اتباعت في آخر 60 يوم من تريندول ومفيهاش مبيعات في الفترة — مخزون المستودع من كود التكويد | Trendyol barcodes sold in the last 60 days but not in the period — warehouse stock via the Tacweed code")
                 if not get_trendyol_bundle()["rows"]:
-                    st.info("ارفع ملف طلبات تريندول من تاب المبيعات أولاً | Upload Trendyol orders first")
+                    st.info("ارفع ملف طلبات تريندول من تاب «رفع ملف» أولاً | Upload Trendyol orders first")
                 else:
                     _ns1, _ns3, _ns7 = (compute_no_sale_rows_trendyol(1), compute_no_sale_rows_trendyol(3), compute_no_sale_rows_trendyol(7))
                     _t1, _t3, _t7 = st.tabs([f"📅 بدون مبيع أمس ({len(_ns1)})", f"📅 بدون مبيع آخر 3 أيام ({len(_ns3)})", f"📅 بدون مبيع آخر أسبوع ({len(_ns7)})"])
@@ -9878,6 +9898,11 @@ if st.session_state["nav_page"] == "tab_contracts":
         if _tab_gate("tab_contracts", "📑 العقود | Contracts"):
             render_contracts_tab()
 
+if st.session_state["nav_page"] == "tab_upload":
+    with tab_upload:
+        if _tab_gate("tab_upload", "📤 رفع ملف | Upload Files"):
+            render_upload_tab()
+
 if st.session_state["nav_page"] == "tab_ads":
     with tab_ads:
         if _tab_gate("tab_ads", "📢 الإعلانات | Ads"):
@@ -9886,7 +9911,7 @@ if st.session_state["nav_page"] == "tab_ads":
             _noon_ads_subtab, _amz_ads_subtab, _ty_ads_subtab = st.tabs(["🅽 إعلانات نون | Noon Ads", "📦 إعلانات أمازون | Amazon Ads", "🟣 إعلانات تريندول | Trendyol Ads"])
             with _noon_ads_subtab:
                 if not inv_map:
-                    st.info("ارفع ملف المخزون أولاً من تاب المخزون | Upload Inventory first")
+                    st.info("ارفع ملف المخزون أولاً من تاب «رفع ملف» | Upload Inventory first")
                 else:
                     _render_ads_performance_tab()
             with _amz_ads_subtab:
