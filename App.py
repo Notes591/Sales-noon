@@ -1612,6 +1612,7 @@ CHINA_FLAT_HDR_ROWS = 3          # صف 1 مجموعات | صف 2 مفاتيح |
 CHINA_FLAT_COLS = [
  ("ORDER","internal_order_no","رقم الطلب الداخلي NO.xxx",14,"t"),("ORDER","po_no","رقم طلب المصنع PO",16,"t"),
  ("KEY","barcode","الباركود",16,"t"),("KEY","product_image","صورة المنتج (تلقائي من الباركود)",13,"g"),
+ ("AUTO","current_stage","المرحلة الحالية | Current stage (تلقائي)",26,"g"),("AUTO","next_action","المطلوب دلوقتي | Next action (تلقائي)",42,"g"),
  ("ORDER","supplier_name","اسم المورد",26,"g"),("ORDER","buyer_company","شركة المشتري",22,"g"),
  ("ORDER","shipment_id","رقم الشحنة STxxxxx",13,"t"),("ORDER","shipment_mode","طريقة الشحن",11,"g"),
  ("ORDER","incoterm","Incoterm",9,"g"),("ORDER","origin_location","منشأ البضاعة",14,"g"),
@@ -1662,6 +1663,35 @@ CHINA_FLAT_LISTS = {
                  "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Warehouse Received","Cancelled"],
  "shipping_line": ["MSC","CMA CGM","Maersk","COSCO","Hapag-Lloyd","OOCL","Evergreen","ONE","PIL","TSL","ECON","WHL","ZG中古","Other"],
 }
+def china_stage_formulas(R):
+    """معادلتا «المرحلة الحالية» و«المطلوب دلوقتي» (عربي | English) — R(key) بترجع مرجع العمود (نطاق في جوجل شيت / خلية في إكسيل).
+    بترجع (stage, action) كنص معادلة من غير = ومن غير ARRAYFORMULA."""
+    cs, ss, sh, st_ = R("container_status"), R("shipment_status"), R("stock_stage"), R("stock_stage")
+    cn, ae, pa, wa = R("container_no"), R("actual_etd"), R("port_arrival_actual"), R("warehouse_arrival_actual")
+    eta, cu, tr = R("eta_port"), R("customs_status"), R("tracking_url")
+    blank = f'LEN({R("internal_order_no")}&{R("po_no")}&{R("supplier_name")}&{cn}&{R("barcode")}&{R("sku")})=0'
+    cancel = f'(({cs}="Cancelled")+({ss}="Cancelled")+({st_}="Cancelled")>0)'
+    deliv = f'(({wa}<>"")+({cs}="Delivered to Warehouse")+({st_}="Warehouse Received")>0)'
+    atport = f'({pa}<>"")'
+    transit = f'(({ae}<>"")+({cs}="Shipped / In Transit")>0)'
+    prep = f'({cn}<>"")'
+    ready = f'(({st_}="Ready to Ship")+({st_}="Production Completed")+({ss}="Ready to Ship")+({ss}="Production Completed")>0)'
+    prod = f'(({st_}="In Production")+({ss}="In Production")>0)'
+    stage = (f'IF({blank},"",IF({cancel},"ملغي | Cancelled",IF({deliv},"وصلت المستودع | Delivered to warehouse",'
+             f'IF({atport},IF({cu}="Cleared","تم التخليص | Customs cleared","وصلت الميناء | At port"),'
+             f'IF({transit},"في البحر | In transit",IF({prep},"حاوية متجهزة | Container prepared",'
+             f'IF({ready},"جاهز للشحن في المصنع | Ready at factory",IF({prod},"قيد الإنتاج | In production","طلب مؤكد | Order confirmed"))))))))')
+    warn = (f'IF({cs}="","",IF({deliv},IF({cs}<>"Delivered to Warehouse","⚠ الحالة المختارة مختلفة عن التواريخ | Status differs from dates — ",""),'
+            f'IF({atport},IF(({cs}="Arrived at Port")+({cs}="Customs Clearance")+({cs}="Cleared")=0,"⚠ الحالة المختارة مختلفة عن التواريخ | Status differs from dates — ",""),'
+            f'IF({transit},IF({cs}<>"Shipped / In Transit","⚠ الحالة المختارة مختلفة عن التواريخ | Status differs from dates — ",""),""))))')
+    act = (f'IF({blank},"",IF({cancel},"—",IF({deliv},"✔ مكتمل | Completed",{warn}&'
+           f'IF({atport},IF({cu}="Cleared","سجّلي وصول المستودع | Enter warehouse arrival","حدّثي حالة التخليص ثم وصول المستودع | Update customs, then warehouse arrival"),'
+           f'IF({transit},IF({eta}="","سجّلي ETA الميناء | Enter port ETA",IF({tr}="","أضيفي رابط التتبع | Add tracking link","سجّلي وصول الميناء عند وصولها | Enter port arrival when it arrives")),'
+           f'IF({prep},"سجّلي ETD الفعلي وB/L وشركة الشحن وغيّري الحالة | Enter actual ETD, B/L, line; set status",'
+           f'IF({ready},"جهّزي الحاوية: رقم الحاوية والختم | Prepare container: number and seal",'
+           f'IF({prod},"سجّلي تاريخ جاهزية الإنتاج | Enter production ready date","أكدي الإنتاج وحالة الطلب | Confirm production and order status"))))))))')
+    return stage, act
+
 _CF_SHIP_ONLY = ["internal_order_no","po_no","supplier_name","buyer_company","shipment_mode","incoterm","origin_location","invoice_no",
                  "invoice_value","freight_value","currency","planned_etd","eta_destination","shipment_status","booking_no",
                  "container_count","final_destination"]
@@ -1899,6 +1929,7 @@ CHINA_STAFF_GUIDE = """📋 دليل تعبئة شيت الصين
  - NO.xxx = رقم الطلب الداخلي فقط. STxxxxx = رقم الشحنة بعد تخصيصها.
  - RIYADH = الوجهة النهائية وليست ميناء. الميناء = JEDDAH أو DAMMAM.
  - عمود «اكتمال الصف»: MISSING = ناقص بيانات مطلوبة، OK = تمام.
+ - عمود «المرحلة الحالية» بيتحسب تلقائي من التواريخ والحالة (مصنع / حاوية متجهزة / في البحر / الميناء / المستودع)، وعمود «المطلوب دلوقتي» بيقولك تدخلي إيه بعد كده. لو ظهر ⚠ يبقى الحالة المختارة مختلفة عن التواريخ.
  - الطلب الملغي: حالة الطلب والحاوية والمرحلة = Cancelled."""
 
 CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصقي الكود ▸ Save. بيوحّد بيانات الحاوية على كل صفوفها وبيختم «آخر تحديث» تلقائي.
@@ -1954,7 +1985,10 @@ def _china_auto_formulas():
     qty, cost, eta, pa, cs = R("total_qty"), R("unit_cost"), R("eta_port"), R("port_arrival_actual"), R("container_status")
     delay_v = f'IF({pa}<>"",{pa}-{eta},IF(({cs}="Delivered to Warehouse")+({cs}="Cancelled")>0,0,TODAY()-{eta}))'
     ident = f'{R("barcode")}&{R("sku")}&{R("product_name_en")}'
+    stg, act = china_stage_formulas(R)
     return {
+        "current_stage": f"=ARRAYFORMULA({stg})",
+        "next_action": f"=ARRAYFORMULA({act})",
         "line_amount": f'=ARRAYFORMULA(IF(({qty}<>"")*({cost}<>""),{qty}*{cost},""))',
         "days_to_eta": f'=ARRAYFORMULA(IF({eta}="","",IFERROR({eta}-TODAY(),"")))',
         "delay_days": f'=ARRAYFORMULA(IF({eta}="","",IFERROR(IF({delay_v}>0,{delay_v},0),"")))',
@@ -1974,7 +2008,12 @@ def _china_image_formula(r):
                 f"FILTER({code_tab}!$A$2:$A,{code_tab}!$B$2:$B&\"\"={bc}&\"\"),0))*('{links_tab}'!$B$2:$B<>\"\"))),1)")
     ty = f"INDEX(FILTER(TrendyolProducts!$D$2:$D,TrendyolProducts!$B$2:$B&\"\"={bc}&\"\",TrendyolProducts!$D$2:$D<>\"\"),1)"
     return (f'=IF({bc}="","",IFERROR(IMAGE(IF({u}<>"",{u},IFERROR({via("Tacweed","links n")},'
-            f'IFERROR({via("TacweedAmazon","links a")},{ty}))),1),""))')
+            f'IFERROR({via("TacweedAmazon","links a")},{ty}))),1),"— لا صورة"))')
+
+def _china_write_image_formulas(ws):
+    ic = _china_col_letter(CHINA_FLAT_KEYS.index("product_image") + 1)
+    ws.update(values=[[_china_image_formula(r)] for r in range(4, CHINA_FLAT_MAX_ROWS + 1)], range_name=f"{ic}4:{ic}{CHINA_FLAT_MAX_ROWS}",
+              value_input_option="USER_ENTERED")
 
 def _china_format_flat(ws):
     """بيكتب العناوين والمعادلات وينسّق الشيت (ألوان/تثبيت/قوايم/تلوين ذكي) — مرة واحدة عند الإنشاء الأول."""
@@ -1986,9 +2025,7 @@ def _china_format_flat(ws):
         labels.append(lab)
     auto = _china_auto_formulas()
     ws.update(values=[band, CHINA_FLAT_KEYS, labels], range_name="A1", value_input_option="USER_ENTERED")
-    ic = _china_col_letter(CHINA_FLAT_KEYS.index("product_image") + 1)
-    ws.update(values=[[_china_image_formula(r)] for r in range(4, CHINA_FLAT_MAX_ROWS + 1)], range_name=f"{ic}4:{ic}{CHINA_FLAT_MAX_ROWS}",
-              value_input_option="USER_ENTERED")
+    _china_write_image_formulas(ws)
     for k, f in auto.items():
         ws.update(values=[[f]], range_name=f"{_china_col_letter(CHINA_FLAT_KEYS.index(k) + 1)}4", value_input_option="USER_ENTERED")
     rg = lambda r0, r1, c0, c1: {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1, "startColumnIndex": c0, "endColumnIndex": c1}
@@ -2011,8 +2048,8 @@ def _china_format_flat(ws):
             "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)"}})
         if g == "AUTO":
             reqs.append({"repeatCell": {"range": rg(3, M, i, j + 1), "cell": {"userEnteredFormat": {
-                "backgroundColor": _china_rgb("F2F2F2"), "horizontalAlignment": "CENTER"}},
-                "fields": "userEnteredFormat(backgroundColor,horizontalAlignment)"}})
+                "backgroundColor": _china_rgb("F2F2F2"), "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"}},
+                "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy)"}})
         i = j + 1
     reqs.append({"repeatCell": {"range": rg(1, 2, 0, N), "cell": {"userEnteredFormat": {
         "backgroundColor": _china_rgb("F7F7F7"), "horizontalAlignment": "CENTER",
@@ -2055,6 +2092,15 @@ def _china_format_flat(ws):
     E, A, S_ = c["eta_port"], c["port_arrival_actual"], c["container_status"]
     cf("eta_port", f'=AND(${E}4<>"",${E}4<TODAY(),${A}4="",${S_}4<>"Cancelled")', "F8CBAD", "9C0006", True)
     cf("eta_port", f'=AND(${E}4<>"",${E}4>=TODAY(),${E}4-TODAY()<=7,${A}4="")', "FFF2CC")
+    CSG, DD = c["current_stage"], c["delay_days"]
+    cf("current_stage", f'=REGEXMATCH(${CSG}4,"المصنع|الإنتاج|طلب مؤكد")', "FFF2CC")
+    cf("current_stage", f'=REGEXMATCH(${CSG}4,"متجهزة")', "FCE4D6")
+    cf("current_stage", f'=REGEXMATCH(${CSG}4,"البحر")', "DDEBF7")
+    cf("current_stage", f'=REGEXMATCH(${CSG}4,"الميناء|التخليص")', "F8CBAD")
+    cf("current_stage", f'=REGEXMATCH(${CSG}4,"المستودع")', "C6EFCE")
+    cf("current_stage", f'=REGEXMATCH(${CSG}4,"ملغي")', "D9D9D9", "7F7F7F")
+    cf("current_stage", f'=AND(N(${DD}4)>0,NOT(REGEXMATCH(${CSG}4,"المستودع|ملغي")))', "F8CBAD", "9C0006", True)
+    cf("next_action", f'=LEFT(${c["next_action"]}4,1)="⚠"', "FFEB9C", "9C5700", True)
     cf("row_state", f'=${c["row_state"]}4="MISSING"', "F8CBAD", "9C0006", True)
     cf("row_state", f'=${c["row_state"]}4="OK"', "C6EFCE")
     for k in ("container_status", "shipment_status", "stock_stage"):
@@ -2138,6 +2184,13 @@ def get_china_flat_ws():
             st.session_state["china_flash"] = "✅ اتكمّل تنسيق شيت China."
         except Exception as e:
             st.warning(f"⚠️ تنسيق شيت China ما اكتملش: {e}")
+    try:   # لو معادلة الصورة مش موجودة (أو اتمسحت) بنكتبها تاني
+        ic = CHINA_FLAT_KEYS.index("product_image") + 1
+        cur = ws.cell(4, ic, value_render_option="FORMULA").value or ""
+        if not str(cur).startswith("=IF("):
+            _china_write_image_formulas(ws)
+    except Exception as e:
+        st.warning(f"⚠️ مقدرتش أتأكد من معادلة صورة المنتج: {e}")
     st.session_state["china_flat_ws"] = ws
     return ws
 
