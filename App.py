@@ -465,6 +465,7 @@ TAB_LOCK_OPTIONS = [
     ("tab9",      "📊 المخزون | Inventory"),
     ("tab_wh",    "🏭 مخزون المستودع | Warehouse Stockout"),
     ("tab_china", "🚢 شحنات الصين | China Shipments"),
+    ("tab_contracts", "📑 العقود | Contracts"),
     ("tab10",     "🔴 مراجعة المخزون | Stock Review"),
     ("tab11",     "🗂️ منتهية | Expired"),
     ("tab12",     "⚙️ الإعدادات | Settings"),
@@ -6506,6 +6507,7 @@ NAV_ITEMS = [
     ("tab9",     "📦", "المخزون | Inventory"),
     ("tab_wh",   "🏭", "مخزون المستودع | Warehouse Stockout"),
     ("tab_china", "🚢", "شحنات الصين | China Shipments"),
+    ("tab_contracts", "📑", "العقود | Contracts"),
     ("tab16",    "🗂️", "مخزون بدون بيع | No Sales"),
     ("tab_ads",  "📢", "الإعلانات | Ads"),
 ]
@@ -6663,6 +6665,7 @@ tab_dash = st.container(key="navpanel_tab_dash")
 tab9     = st.container(key="navpanel_tab9")
 tab_wh   = st.container(key="navpanel_tab_wh")
 tab_china = st.container(key="navpanel_tab_china")
+tab_contracts = st.container(key="navpanel_tab_contracts")
 tab16    = st.container(key="navpanel_tab16")
 tab_ads  = st.container(key="navpanel_tab_ads")
 
@@ -9119,10 +9122,12 @@ def _ct_ack(events):
             contracts_sheet.update_cell(c["row"], col_ts + 1, ts)
     clear_cache(contracts_sheet)
 
-def _contracts_manager():
-    with st.expander("📝 بيانات العقود | Contracts data", expanded=False):
+def render_contracts_tab():
+    """تاب «العقود» المنفصل: إدخال وتعديل وحذف العقود (نفس بيانات تاب Contracts في جوجل شيت)."""
+    if True:
+        st.header("📑 العقود | Contracts")
         st.caption("كل عقد: اسم + تاريخ بداية + تاريخ نهاية (سنوي أو شهري أو أي مدة). كل شهر من البداية بيظهر إشعار «انتهى الشهر N» يومين في أعلى المبيعات، ولحد ما تضغطي «تم الاطلاع» التصفّح متوقف. "
-                   "ممكن تعدّليهم هنا أو مباشرة في تاب Contracts في جوجل شيت (التاريخ بصيغة yyyy-mm-dd) | Add contracts here or directly in the Contracts tab")
+                   "الإشعارات بتظهر في تاب المبيعات. ممكن تعدّلي العقود هنا أو مباشرة في تاب Contracts في جوجل شيت (التاريخ بصيغة yyyy-mm-dd) | Notices appear in the Sales tab. Edit here or directly in the Contracts Google Sheet tab")
         rows = _ct_read()
         today = datetime.now().date()
         if rows:
@@ -9167,6 +9172,7 @@ def _contracts_manager():
 
 def _contracts_gate():
     """بتتعرض في أعلى تاب المبيعات. بترجّع False (يعني امنعي باقي التاب) لو فيه إشعار عقد شغال ولسه ماتضغطش عليه «تم الاطلاع»."""
+    import html as _html
     try:
         events = contract_active_events()
     except Exception as e:
@@ -9176,20 +9182,33 @@ def _contracts_gate():
     for e in events:
         if e["acked"]:
             st.success(f"✅ عقد «{e['c']['name']}» — {e['label']} (تم الاطلاع) | Acknowledged")
-    if pending:
-        for e in pending:
-            st.error(f"🔔 عقد «{e['c']['name']}» — {e['label']}\n\n"
-                     f"📅 {e['date']} · البداية {e['c']['start']} · النهاية {e['c']['end']} · المتبقي {max(e['days_left'], 0)} يوم | days left")
-        st.warning("🚫 تصفّح المبيعات متوقف لحد ما تضغطي «تم الاطلاع» | Sales browsing is blocked until you press «Acknowledged»")
-        if st.button("✅ تم الاطلاع | Acknowledged", key="ct_ack_btn", type="primary"):
-            try:
-                _ct_ack(pending)
-            except Exception as e:
-                st.error(f"❌ مقدرتش أسجّل الاطلاع: {e}")
-                return False
-            st.rerun()
-    _contracts_manager()
-    return not pending
+    if not pending:
+        return True
+    cards = "".join(
+        f'<div style="background:#fff;color:#7f1d1d;border-radius:12px;padding:14px 18px;margin:10px auto;max-width:760px;'
+        f'text-align:center;border:3px solid #fecaca;">'
+        f'<div style="font-size:26px;font-weight:900;">{_html.escape(e["c"]["name"])}</div>'
+        f'<div style="font-size:19px;font-weight:700;margin:4px 0;">{_html.escape(e["label"])}</div>'
+        f'<div style="font-size:16px;">📅 تاريخ الإشعار <b>{e["date"]}</b> &nbsp;|&nbsp; بداية العقد <b>{e["c"]["start"]}</b> '
+        f'&nbsp;|&nbsp; نهاية العقد <b>{e["c"]["end"]}</b> &nbsp;|&nbsp; المتبقي <b>{max(e["days_left"], 0)}</b> يوم</div></div>'
+        for e in pending)
+    st.markdown(
+        '<div style="background:#b91c1c;border:6px solid #7f1d1d;border-radius:18px;padding:22px 16px;margin:6px 0 14px 0;'
+        'text-align:center;color:#fff;box-shadow:0 6px 24px rgba(127,29,29,.45);">'
+        '<div style="font-size:96px;line-height:1;">🛑</div>'
+        '<div style="font-size:54px;font-weight:900;letter-spacing:6px;line-height:1.1;">STOP | قِف</div>'
+        '<div style="font-size:22px;font-weight:800;margin:6px 0 10px 0;">إشعار عقد — تصفّح المبيعات متوقف | Contract notice — Sales browsing is blocked</div>'
+        + cards +
+        '<div style="font-size:16px;margin-top:8px;">اضغطي «تم الاطلاع» عشان تكملي | Press «Acknowledged» to continue</div></div>',
+        unsafe_allow_html=True)
+    if st.button("✅ تم الاطلاع | Acknowledged", key="ct_ack_btn", type="primary", use_container_width=True):
+        try:
+            _ct_ack(pending)
+        except Exception as e:
+            st.error(f"❌ مقدرتش أسجّل الاطلاع: {e}")
+            return False
+        st.rerun()
+    return False
 
 if st.session_state["nav_page"] == "tab14":
     with tab14:
@@ -9853,6 +9872,11 @@ if st.session_state["nav_page"] == "tab_china":
     with tab_china:
         if _tab_gate("tab_china", "🚢 شحنات الصين | China Shipments"):
             render_china_tab()
+
+if st.session_state["nav_page"] == "tab_contracts":
+    with tab_contracts:
+        if _tab_gate("tab_contracts", "📑 العقود | Contracts"):
+            render_contracts_tab()
 
 if st.session_state["nav_page"] == "tab_ads":
     with tab_ads:
