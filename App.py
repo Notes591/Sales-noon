@@ -55,7 +55,7 @@ ss = st.session_state["_gs_ss"]
 
 # ══ الأوراق ══
 CONTRACT_COLS = ["اسم العقد | Contract Name", "تاريخ البداية | Start Date", "تاريخ النهاية | End Date", "ملاحظات | Notes",
-                 "تم الاطلاع على | Acknowledged", "وقت الاطلاع | Acknowledged At"]
+                 "تم الاطلاع على | Acknowledged", "وقت الاطلاع | Acknowledged At", "تاريخ الإضافة | Added At"]
 
 TABS_CONFIG = {
     "Requests":          ["SKU","Quantity","Image URL","Date Added","File Name"],
@@ -2338,12 +2338,23 @@ def _china_layout_outdated(ws):
     keys = [k for k in keys if k]
     return "container_no" in keys and keys != CHINA_FLAT_KEYS
 
+@st.cache_resource
+def _china_checked_flags():
+    """علم على مستوى السيرفر كله: فحص ترتيب الأعمدة والمعادلات بيتعمل مرة واحدة بس، مش مع كل جلسة."""
+    return {}
+
 def get_china_flat_ws():
     """شيت China الواحد — بيتنشأ تلقائي أول مرة (بالتنسيق والمعادلات)، ولو كان فيه بيانات قديمة في التابات
     الـ3 (ChinaShipments/ChinaLines/ChinaContainers) بتتنقل له مرة واحدة."""
     if "china_flat_ws" in st.session_state:
         return st.session_state["china_flat_ws"]
     ws, created, last = None, False, None
+    _done = _china_checked_flags()
+    ws = st.session_state.get("_ws_existing", {}).get(CHINA_FLAT_TAB)
+    if ws is not None and _done.get("ok"):
+        st.session_state["china_flat_ws"] = ws
+        return ws
+    ws = None
     for attempt in range(5):
         try:
             ws = ss.worksheet(CHINA_FLAT_TAB)
@@ -2409,6 +2420,8 @@ def get_china_flat_ws():
             _china_write_image_formulas(ws)
     except Exception as e:
         st.warning(f"⚠️ مقدرتش أتأكد من معادلات الصورة/المطلوب دلوقتي: {e}")
+    else:
+        _done["ok"] = True
     st.session_state["china_flat_ws"] = ws
     return ws
 
@@ -2475,7 +2488,7 @@ def _china_flat_raw(force=False):
     """الخام من الشيت — بيتجدّد تلقائي كل دقيقتين (عشان تعديلات الموظف تبان) أو بالزرار."""
     ws = get_china_flat_ws()
     ts = st.session_state.get("china_flat_ts", 0)
-    if force or time.time() - ts > 120:
+    if force or time.time() - ts > 300:
         raw = get_cached(ws, force=True)
         st.session_state["china_flat_ts"] = time.time()
         return raw
@@ -6741,18 +6754,19 @@ def render_upload_tab():
     """كل رفع الملفات في مكان واحد — نون مع بعض، أمازون مع بعض، تريندول مع بعض (+ عام: مخزون المستودع والصين)."""
     st.header("📤 رفع ملف | Upload Files")
     st.caption("كل رفع الملفات هنا: نون مع بعض، أمازون مع بعض، تريندول مع بعض | All file uploads live here, grouped by platform")
-    t_noon, t_amz, t_ty, t_gen = st.tabs(["🅽 نون | Noon", "📦 أمازون | Amazon", "🟣 تريندول | Trendyol", "🏭 عام (مستودع + صين) | General"])
-    with t_noon:
+    _grp = st.radio("القسم | Section", ["🅽 نون | Noon", "📦 أمازون | Amazon", "🟣 تريندول | Trendyol", "🏭 عام (مستودع + صين) | General"],
+                    horizontal=True, key="up_group", label_visibility="collapsed")
+    if _grp.startswith("🅽"):
         render_tacweed_upload("up")
         render_inventory_upload()
-    with t_amz:
+    elif _grp.startswith("📦"):
         render_tacweed_amazon_upload("up")
         st.caption("مخزون أمازون (StockAmazon) بيتحدّث يدويًا في الشيت نفسه | Amazon stock (StockAmazon) is updated manually in the sheet")
-    with t_ty:
+    elif _grp.startswith("🟣"):
         render_trendyol_upload("up")
         render_trendyol_ads_upload("up")
         render_trendyol_products_upload("up")
-    with t_gen:
+    else:
         render_warehouse_stock_upload("up")
         render_china_upload("up", get_china_bundle())
         _li = load_settings().get("china_last_import", "")
@@ -9118,7 +9132,8 @@ def _ct_read():
             continue
         out.append({"row": i, "name": name, "start": _ct_parse_date(g(row, CONTRACT_COLS[1])), "end": _ct_parse_date(g(row, CONTRACT_COLS[2])),
                     "start_raw": g(row, CONTRACT_COLS[1]), "end_raw": g(row, CONTRACT_COLS[2]), "notes": g(row, CONTRACT_COLS[3]),
-                    "acked": {t.strip() for t in g(row, CONTRACT_COLS[4]).split(",") if t.strip()}, "pos": pos})
+                    "acked": {t.strip() for t in g(row, CONTRACT_COLS[4]).split(",") if t.strip()},
+                    "added": _ct_parse_date(g(row, CONTRACT_COLS[6])), "pos": pos})
     return out
 
 def contract_active_events(today=None):
@@ -9131,6 +9146,35 @@ def contract_active_events(today=None):
         for tok, d, label in contract_events(c["start"], c["end"]):
             if d <= today <= d + timedelta(days=CT_WINDOW_DAYS - 1):
                 res.append({"c": c, "token": tok, "date": d, "label": label, "acked": tok in c["acked"],
+                            "days_left": (c["end"] - today).days})
+    return res
+
+def _ct_stamp_added(rows):
+    """العقود اللي اتكتبت في الشيت مباشرة من غير «تاريخ الإضافة» بنختمها بتاريخ أول مرة التطبيق يشوفها —
+    عشان الإشعارات الفايتة قبل الإضافة ما تتحسبش «فايتة»."""
+    col = rows[0]["pos"].get(CONTRACT_COLS[6]) if rows else None
+    if col is None:
+        return
+    today = str(datetime.now().date())
+    changed = False
+    for c in rows:
+        if c["start"] and not c["added"]:
+            contracts_sheet.update_cell(c["row"], col + 1, today)
+            c["added"] = datetime.now().date()
+            changed = True
+    if changed:
+        clear_cache(contracts_sheet)
+
+def contract_missed_events(today=None):
+    """إشعارات انتهت مدة ظهورها (يومين) ولسه ماتضغطش عليها «تم الاطلاع» — بتفضل ظاهرة كشريط أحمر بدون منع."""
+    today = today or datetime.now().date()
+    res = []
+    for c in _ct_read():
+        if not c["start"] or not c["end"] or c["end"] <= c["start"] or not c["added"]:
+            continue
+        for tok, d, label in contract_events(c["start"], c["end"]):
+            if d + timedelta(days=CT_WINDOW_DAYS) <= today and d >= c["added"] and tok not in c["acked"]:
+                res.append({"c": c, "token": tok, "date": d, "label": label, "acked": False,
                             "days_left": (c["end"] - today).days})
     return res
 
@@ -9182,7 +9226,7 @@ def render_contracts_tab():
                 elif ed <= sd:
                     st.error("تاريخ النهاية لازم يكون بعد البداية | End must be after start")
                 else:
-                    contracts_sheet.append_row([nm.strip(), str(sd), str(ed), nt.strip(), "", ""], value_input_option="USER_ENTERED")
+                    contracts_sheet.append_row([nm.strip(), str(sd), str(ed), nt.strip(), "", "", str(today)], value_input_option="USER_ENTERED")
                     clear_cache(contracts_sheet)
                     st.success("✅ تمت الإضافة | Added")
                     st.rerun()
@@ -9202,11 +9246,29 @@ def _contracts_gate():
     except Exception as e:
         st.warning(f"⚠️ مقدرتش أقرأ تاب العقود: {e}")
         events = []
+    try:
+        _ct_stamp_added(_ct_read())
+        missed = contract_missed_events()
+    except Exception:
+        missed = []
     pending = [e for e in events if not e["acked"]]
     for e in events:
         if e["acked"]:
             st.success(f"✅ عقد «{e['c']['name']}» — {e['label']} (تم الاطلاع) | Acknowledged")
     if not pending:
+        if missed:
+            items = "".join(
+                f'<div style="margin:4px 0;">⚠️ فات إشعار عقد «<b>{_html.escape(e["c"]["name"])}</b>»: {_html.escape(e["label"])} '
+                f'(بتاريخ <b>{e["date"]}</b>) ولم يتم الاطلاع عليه</div>' for e in missed)
+            st.markdown('<div style="background:#b91c1c;color:#fff;border-radius:10px;padding:12px 16px;margin:6px 0;font-size:16px;font-weight:600;">'
+                        + items + '</div>', unsafe_allow_html=True)
+            if st.button("✅ تم الاطلاع | Acknowledged", key="ct_ack_missed_btn"):
+                try:
+                    _ct_ack(missed)
+                except Exception as e:
+                    st.error(f"❌ مقدرتش أسجّل الاطلاع: {e}")
+                else:
+                    st.rerun()
         return True
     cards = "".join(
         f'<div style="background:#fff;color:#7f1d1d;border-radius:12px;padding:14px 18px;margin:10px auto;max-width:760px;'
