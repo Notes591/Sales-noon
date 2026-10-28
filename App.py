@@ -1609,17 +1609,81 @@ def _china_rows_from_raw(raw):
 CHINA_FLAT_TAB = "China"
 CHINA_FLAT_HDR_ROWS = 3          # صف 1 مجموعات | صف 2 مفاتيح | صف 3 عناوين عربي | البيانات من صف 4
 # (المجموعة, المفتاح, العنوان العربي, العرض, النوع: t نص / d تاريخ / n رقم / g عام)
+# ── الحالة الواحدة (بتحل محل حالة الطلب + حالة الحاوية + مرحلة المخزون) ──
+# (الكود الإنجليزي الداخلي, العنوان عربي | English) — الترتيب = درجة التقدم
+CHINA_STATUS = [
+ ("Factory Confirmed", "تأكيد المصنع | Factory confirmed"), ("In Production", "قيد الإنتاج | In production"),
+ ("Production Completed", "اكتمل الإنتاج | Production completed"), ("Ready to Ship", "جاهز للشحن | Ready to ship"),
+ ("Allocated to Container", "حاوية متجهزة | Container prepared"), ("Loaded", "تم التحميل | Loaded"),
+ ("Shipped / In Transit", "في البحر | In transit"), ("Arrived at Port", "وصلت الميناء | At port"),
+ ("Customs Clearance", "تحت التخليص | In customs"), ("Cleared", "تم التخليص | Customs cleared"),
+ ("Delivered to Warehouse", "وصلت المستودع | Delivered to warehouse"), ("On Hold", "موقوف | On hold"), ("Cancelled", "ملغي | Cancelled"),
+]
+CHINA_STATUS_LEGACY = ["shipment_status", "container_status", "stock_stage"]    # أعمدة قديمة بتتقري من الملفات/الشيت القديم بس
+_CS_ALIAS = {"order confirmed": "Factory Confirmed", "warehouse received": "Delivered to Warehouse", "booked": "Allocated to Container"}
+_CS_RANK = {code: i for i, (code, _) in enumerate(CHINA_STATUS)}
+_CS_LABEL = dict(CHINA_STATUS)
+_CS_LOOKUP = {}
+for _code, _lab in CHINA_STATUS:
+    for _k in {_code, _lab, _lab.split("|")[0], _lab.split("|")[-1]}:
+        _CS_LOOKUP[_k.strip().lower()] = _code
+_CS_LOOKUP.update(_CS_ALIAS)
+
+def china_status_code(v):
+    """نص الحالة (عربي | English أو الكود القديم) -> الكود الداخلي، أو '' لو مش معروف."""
+    return _CS_LOOKUP.get(str(v or "").strip().lower(), "")
+
+def china_status_label(code):
+    return _CS_LABEL.get(code, "")
+
+def _cs_prog(code):
+    r = _CS_RANK.get(code, -1)
+    return r if 0 <= r <= _CS_RANK["Delivered to Warehouse"] else -1      # درجة التقدم الفعلية (من غير موقوف/ملغي)
+
+def china_row_status(r):
+    """الحالة (كود) للصف: من عمود الحالة، وإلا من الأعمدة القديمة (حاوية ثم مرحلة المخزون ثم الطلب)."""
+    code = china_status_code(r.get("status", ""))
+    if code:
+        return code
+    cands = [china_status_code(r.get(k, "")) for k in ("container_status", "stock_stage", "shipment_status")]
+    cands = [x for x in cands if x]
+    if not cands:
+        return ""
+    prog = [x for x in cands if _cs_prog(x) >= 0]
+    if prog:
+        return max(prog, key=_cs_prog)
+    return cands[0]
+
+def _cs_to_ship(code):
+    return {"Allocated to Container": "Booked"}.get(code, code)
+
+def _cs_to_cont(code):
+    return {"Allocated to Container": "Booked"}.get(code, code)
+
+def _cs_to_stock(code):
+    return {"Delivered to Warehouse": "Warehouse Received"}.get(code, code)
+
+def china_flat_prepare(flat_rows):
+    """نسخ من الصفوف فيها status (عنوان عربي | English) محسوب من الأعمدة القديمة لو لازم — للكتابة في الشيت/الإكسيل."""
+    out = []
+    for r in flat_rows:
+        d = dict(r)
+        d["status"] = china_status_label(china_row_status(r))
+        out.append(d)
+    return out
+
 CHINA_FLAT_COLS = [
  ("ORDER","internal_order_no","رقم الطلب الداخلي NO.xxx",14,"t"),("ORDER","po_no","رقم طلب المصنع PO",16,"t"),
  ("KEY","barcode","الباركود",16,"t"),("KEY","product_image","صورة المنتج (تلقائي من الباركود)",13,"g"),
- ("AUTO","current_stage","المرحلة الحالية | Current stage (تلقائي)",26,"g"),("AUTO","next_action","المطلوب دلوقتي | Next action (تلقائي)",42,"g"),
+ ("KEY","status","الحالة | Status",24,"g"),
+ ("AUTO","next_action","المطلوب دلوقتي | Next action (تلقائي)",42,"g"),
  ("ORDER","supplier_name","اسم المورد",26,"g"),("ORDER","buyer_company","شركة المشتري",22,"g"),
  ("ORDER","shipment_id","رقم الشحنة STxxxxx",13,"t"),("ORDER","shipment_mode","طريقة الشحن",11,"g"),
  ("ORDER","incoterm","Incoterm",9,"g"),("ORDER","origin_location","منشأ البضاعة",14,"g"),
  ("ORDER","invoice_no","رقم الفاتورة",14,"t"),("ORDER","invoice_value","قيمة الفاتورة",13,"n"),
  ("ORDER","freight_value","قيمة الشحن",12,"n"),("ORDER","currency","العملة",8,"g"),
  ("ORDER","planned_etd","ETD المخطط",12,"d"),("ORDER","eta_destination","ETA الوجهة النهائية",14,"d"),
- ("ORDER","shipment_status","حالة الطلب/الشحنة",21,"g"),("ORDER","booking_no","رقم الحجز",14,"t"),
+ ("ORDER","booking_no","رقم الحجز",14,"t"),
  ("ORDER","container_count","عدد الحاويات",9,"n"),("ORDER","final_destination","الوجهة النهائية",11,"g"),
  ("ORDER","order_notes","ملاحظات الطلب",24,"g"),
  ("CONTAINER","container_no","رقم الحاوية",15,"t"),("CONTAINER","seal_no","رقم الختم",13,"t"),
@@ -1628,7 +1692,7 @@ CHINA_FLAT_COLS = [
  ("CONTAINER","bl_no","رقم B/L",18,"t"),("CONTAINER","port_of_loading","ميناء التحميل",13,"g"),
  ("CONTAINER","destination_port","ميناء الوصول",13,"g"),("CONTAINER","actual_etd","ETD الفعلي",12,"d"),
  ("CONTAINER","eta_port","ETA الميناء",12,"d"),("CONTAINER","port_arrival_actual","وصول فعلي للميناء",13,"d"),
- ("CONTAINER","warehouse_arrival_actual","وصول فعلي للمستودع",13,"d"),("CONTAINER","container_status","حالة الحاوية",21,"g"),
+ ("CONTAINER","warehouse_arrival_actual","وصول فعلي للمستودع",13,"d"),
  ("CONTAINER","customs_status","حالة التخليص",15,"g"),("CONTAINER","last_known_location","آخر موقع معروف",16,"g"),
  ("CONTAINER","delay_reason","سبب التأخير",18,"g"),("CONTAINER","tracking_url","رابط التتبع",24,"g"),
  ("CONTAINER","ctr_gross_weight_kg","وزن الحاوية كغ",11,"n"),("CONTAINER","ctr_total_cbm","إجمالي CBM الحاوية",11,"n"),
@@ -1638,7 +1702,7 @@ CHINA_FLAT_COLS = [
  ("LINE","variant","المتغير",10,"g"),("LINE","cartons","الكراتين",9,"n"),("LINE","units_per_carton","قطع/كرتون",9,"n"),
  ("LINE","total_qty","إجمالي الكمية",10,"n"),("LINE","unit_cost","تكلفة الوحدة",10,"n"),("LINE","cbm","CBM",8,"n"),
  ("LINE","gross_weight_kg","وزن إجمالي",9,"n"),("LINE","net_weight_kg","وزن صافي",9,"n"),
- ("LINE","stock_stage","مرحلة المخزون",21,"g"),("LINE","production_ready_date","جاهزية الإنتاج",12,"d"),
+ ("LINE","production_ready_date","جاهزية الإنتاج",12,"d"),
  ("LINE","actual_load_date","تاريخ التحميل",12,"d"),("LINE","noon_sku","SKU نون",14,"t"),("LINE","amazon_sku","SKU أمازون",14,"t"),
  ("LINE","trendyol_sku","SKU تريندول",14,"t"),("LINE","image_url","رابط الصورة",20,"g"),("LINE","notes","ملاحظات المنتج",22,"g"),
  ("STAMP","last_updated_at","آخر تحديث",12,"d"),("STAMP","updated_by","حدّث بواسطة",11,"g"),
@@ -1650,60 +1714,67 @@ CHINA_FLAT_KEYS = [c[1] for c in CHINA_FLAT_COLS]
 CHINA_FLAT_FORMULA_KEYS = {c[1] for c in CHINA_FLAT_COLS if c[0] == "AUTO"} | {"product_image"}   # أعمدة معادلات — الموظف مبيكتبش فيها
 CHINA_FLAT_INPUT_KEYS = [c[1] for c in CHINA_FLAT_COLS if c[1] not in CHINA_FLAT_FORMULA_KEYS]
 CHINA_FLAT_LISTS = {
- "shipment_status": ["Factory Confirmed","Order Confirmed","In Production","Production Completed","Ready to Ship","Booked","Loaded",
-                     "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Delivered to Warehouse","On Hold","Cancelled"],
- "container_status": ["Factory Confirmed","Order Confirmed","In Production","Production Completed","Ready to Ship","Booked","Loaded",
-                      "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Delivered to Warehouse","On Hold","Cancelled"],
+ "status": [x[1] for x in CHINA_STATUS],
  "shipment_mode": ["SEA - FCL","SEA - LCL","AIR","COURIER","TRUCK"],
  "incoterm": ["EXW","FCA","FOB","CFR","CIF","CPT","CIP","DAP","DPU","DDP"],
  "currency": ["USD","CNY","SAR","EUR","HKD","AED"],
  "container_type": ["20GP","40GP","40HQ","45HQ","LCL","AIR"],
  "customs_status": ["Not Started","Documents Ready","Submitted","Under Clearance","Inspection","Cleared","On Hold"],
- "stock_stage": ["Factory Confirmed","In Production","Production Completed","Ready to Ship","Allocated to Container","Loaded",
-                 "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Warehouse Received","Cancelled"],
  "shipping_line": ["MSC","CMA CGM","Maersk","COSCO","Hapag-Lloyd","OOCL","Evergreen","ONE","PIL","TSL","ECON","WHL","ZG中古","Other"],
 }
-def china_stage_formulas(R):
-    """معادلتا «المرحلة الحالية» و«المطلوب دلوقتي» (عربي | English) — R(key) بترجع مرجع العمود (نطاق في جوجل شيت / خلية في إكسيل).
-    بترجع (stage, action) كنص معادلة من غير = ومن غير ARRAYFORMULA."""
-    cs, ss, sh, st_ = R("container_status"), R("shipment_status"), R("stock_stage"), R("stock_stage")
+def china_next_action_formula(R):
+    """معادلة «المطلوب دلوقتي» (عربي | English) — بتقرا الحالة والتواريخ. R(key) = مرجع العمود (نطاق/خلية). من غير = ومن غير ARRAYFORMULA."""
+    S = R("status")
+    H = lambda w: f'ISNUMBER(SEARCH("{w}",{S}))'
     cn, ae, pa, wa = R("container_no"), R("actual_etd"), R("port_arrival_actual"), R("warehouse_arrival_actual")
-    eta, cu, tr = R("eta_port"), R("customs_status"), R("tracking_url")
+    eta, tr, bl, prd = R("eta_port"), R("tracking_url"), R("bl_no"), R("production_ready_date")
     blank = f'LEN({R("internal_order_no")}&{R("po_no")}&{R("supplier_name")}&{cn}&{R("barcode")}&{R("sku")})=0'
-    cancel = f'(({cs}="Cancelled")+({ss}="Cancelled")+({st_}="Cancelled")>0)'
-    deliv = f'(({wa}<>"")+({cs}="Delivered to Warehouse")+({st_}="Warehouse Received")>0)'
-    atport = f'({pa}<>"")'
-    transit = f'(({ae}<>"")+({cs}="Shipped / In Transit")>0)'
-    prep = f'({cn}<>"")'
-    ready = f'(({st_}="Ready to Ship")+({st_}="Production Completed")+({ss}="Ready to Ship")+({ss}="Production Completed")>0)'
-    prod = f'(({st_}="In Production")+({ss}="In Production")>0)'
-    stage = (f'IF({blank},"",IF({cancel},"ملغي | Cancelled",IF({deliv},"وصلت المستودع | Delivered to warehouse",'
-             f'IF({atport},IF({cu}="Cleared","تم التخليص | Customs cleared","وصلت الميناء | At port"),'
-             f'IF({transit},"في البحر | In transit",IF({prep},"حاوية متجهزة | Container prepared",'
-             f'IF({ready},"جاهز للشحن في المصنع | Ready at factory",IF({prod},"قيد الإنتاج | In production","طلب مؤكد | Order confirmed"))))))))')
-    warn = (f'IF({cs}="","",IF({deliv},IF({cs}<>"Delivered to Warehouse","⚠ الحالة المختارة مختلفة عن التواريخ | Status differs from dates — ",""),'
-            f'IF({atport},IF(({cs}="Arrived at Port")+({cs}="Customs Clearance")+({cs}="Cleared")=0,"⚠ الحالة المختارة مختلفة عن التواريخ | Status differs from dates — ",""),'
-            f'IF({transit},IF({cs}<>"Shipped / In Transit","⚠ الحالة المختارة مختلفة عن التواريخ | Status differs from dates — ",""),""))))')
-    act = (f'IF({blank},"",IF({cancel},"—",IF({deliv},"✔ مكتمل | Completed",{warn}&'
-           f'IF({atport},IF({cu}="Cleared","سجّلي وصول المستودع | Enter warehouse arrival","حدّثي حالة التخليص ثم وصول المستودع | Update customs, then warehouse arrival"),'
-           f'IF({transit},IF({eta}="","سجّلي ETA الميناء | Enter port ETA",IF({tr}="","أضيفي رابط التتبع | Add tracking link","سجّلي وصول الميناء عند وصولها | Enter port arrival when it arrives")),'
-           f'IF({prep},"سجّلي ETD الفعلي وB/L وشركة الشحن وغيّري الحالة | Enter actual ETD, B/L, line; set status",'
-           f'IF({ready},"جهّزي الحاوية: رقم الحاوية والختم | Prepare container: number and seal",'
-           f'IF({prod},"سجّلي تاريخ جاهزية الإنتاج | Enter production ready date","أكدي الإنتاج وحالة الطلب | Confirm production and order status"))))))))')
-    return stage, act
+    cancel, deliv, cleared, customs, port = H("ملغي"), H("وصلت المستودع"), H("تم التخليص"), H("تحت التخليص"), H("وصلت الميناء")
+    transit, loaded, prep, ready = H("في البحر"), H("تم التحميل"), H("حاوية متجهزة"), H("جاهز للشحن")
+    done, prod, hold = H("اكتمل الإنتاج"), H("قيد الإنتاج"), H("موقوف")
+    def chain(pairs, default):
+        s = default
+        for cond, val in reversed(pairs):
+            s = f'IF({cond},{val},{s})'
+        return s
+    q = lambda t: '"' + t + '"'
+    W = "⚠ التواريخ أحدث من الحالة | Dates ahead of status — "
+    factory = H("تأكيد المصنع")
+    early_port = f'({transit})+({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
+    early_sail = f'({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
+    warn = (f'IF({S}="","",IF(({wa}<>"")*(1-({deliv}))*(1-({cancel}))>0,{q(W)},'
+            f'IF(({pa}<>"")*({early_port})>0,{q(W)},IF(({ae}<>"")*({early_sail})>0,{q(W)},""))))')
+    act = chain([
+        (f'{S}=""', q("اختاري الحالة | Select status")),
+        (cancel, q("—")),
+        (deliv, q("✔ مكتمل | Completed")),
+        (cleared, f'IF({wa}="",{q("سجّلي وصول المستودع | Enter warehouse arrival")},{q("غيّري الحالة لـ «وصلت المستودع» | Set status to Delivered")})'),
+        (customs, f'IF({pa}="",{q("سجّلي وصول الميناء الفعلي | Enter port arrival date")},{q("تابعي التخليص وحدّثي الحالة | Follow customs, update status")})'),
+        (port, f'IF({pa}="",{q("سجّلي وصول الميناء الفعلي | Enter port arrival date")},{q("حدّثي حالة التخليص | Update customs status")})'),
+        (transit, chain([(f'{ae}=""', q("سجّلي ETD الفعلي | Enter actual ETD")), (f'{eta}=""', q("سجّلي ETA الميناء | Enter port ETA")),
+                         (f'{tr}=""', q("أضيفي رابط التتبع | Add tracking link"))], q("تابعي الشحنة وسجّلي وصولها | Track; enter arrival"))),
+        (loaded, chain([(f'{cn}=""', q("سجّلي رقم الحاوية | Enter container no.")), (f'{bl}=""', q("سجّلي B/L وشركة الشحن | Enter B/L and shipping line"))],
+                       q("غيّري الحالة لـ «في البحر» عند الإبحار | Set In transit when sailed"))),
+        (prep, f'IF({cn}="",{q("سجّلي رقم الحاوية والختم | Enter container no. and seal")},{q("غيّري الحالة لـ «تم التحميل» بعد التحميل | Set Loaded after loading")})'),
+        (ready, q("جهّزي الحاوية | Prepare container")),
+        (done, q("أكدي جاهزية الشحن | Confirm ready to ship")),
+        (prod, f'IF({prd}="",{q("سجّلي تاريخ جاهزية الإنتاج | Enter production ready date")},{q("تابعي الإنتاج | Follow production")})'),
+        (hold, q("راجعي سبب الإيقاف في الملاحظات | Review hold reason in notes")),
+    ], q("تابعي المصنع وحدّثي الحالة | Follow factory, update status"))
+    return f'IF({blank},"",{warn}&{act})'
 
 _CF_SHIP_ONLY = ["internal_order_no","po_no","supplier_name","buyer_company","shipment_mode","incoterm","origin_location","invoice_no",
-                 "invoice_value","freight_value","currency","planned_etd","eta_destination","shipment_status","booking_no",
+                 "invoice_value","freight_value","currency","planned_etd","eta_destination","booking_no",
                  "container_count","final_destination"]
 _CF_SHIP_DATA = ["supplier_name","buyer_company","shipment_mode","incoterm","origin_location","invoice_no","invoice_value",
-                 "freight_value","planned_etd","eta_destination","shipment_status","booking_no","container_count","order_notes"]
+                 "freight_value","planned_etd","eta_destination","booking_no","container_count","order_notes"]
 _CF_CONT_ONLY = ["container_no","seal_no","container_type","vessel_name","voyage_no","port_arrival_actual","warehouse_arrival_actual",
-                 "container_status","customs_status","last_known_location","delay_reason"]
+                 "customs_status","last_known_location","delay_reason"]
 _CF_SHARED = ["shipping_line","bl_no","port_of_loading","destination_port","actual_etd","eta_port","tracking_url"]   # الحاوية أولاً ثم الطلب
 _CF_CONT_RENAME = {"gross_weight_kg": "ctr_gross_weight_kg", "total_cbm": "ctr_total_cbm",
                    "total_cartons": "ctr_total_cartons", "total_units": "ctr_total_units"}
 _CF_LINE = ["line_id","sku","model_no","barcode","product_name_en","product_name_ar","variant","cartons","units_per_carton",
-            "total_qty","unit_cost","cbm","gross_weight_kg","net_weight_kg","stock_stage","production_ready_date",
+            "total_qty","unit_cost","cbm","gross_weight_kg","net_weight_kg","production_ready_date",
             "actual_load_date","noon_sku","amazon_sku","trendyol_sku","image_url","notes"]
 
 def _cf_g(d, k):
@@ -1777,6 +1848,14 @@ def china_tables_to_flat(ships, conts, lines):
             if not r["currency"]:
                 r["currency"] = _cf_g(ln, "currency")
             stamp(r, ln)
+        src = {}
+        if ln:
+            src = {"stock_stage": _cf_g(ln, "stock_stage"), "container_status": _cf_g(ct, "container_status") if ct else ""}
+        elif ct:
+            src = {"container_status": _cf_g(ct, "container_status")}
+        elif sh:
+            src = {"shipment_status": _cf_g(sh, "shipment_status")}
+        r["status"] = china_status_label(china_row_status(src))
         return r
     rows, used_ship, used_cont = [], set(), set()
     for l in lines:
@@ -1802,6 +1881,28 @@ def china_tables_to_flat(ships, conts, lines):
     rows.sort(key=sk)
     return rows
 
+def _cs_container(codes):
+    codes = [x for x in codes if x]
+    if not codes:
+        return ""
+    nonc = [x for x in codes if x != "Cancelled"]
+    if not nonc:
+        return "Cancelled"
+    prog = [x for x in nonc if _cs_prog(x) >= 0]
+    return max(prog, key=_cs_prog) if prog else nonc[0]
+
+def _cs_shipment(codes):
+    codes = [x for x in codes if x]
+    if not codes:
+        return ""
+    nonc = [x for x in codes if x != "Cancelled"]
+    if not nonc:
+        return "Cancelled"
+    if "On Hold" in nonc:
+        return "On Hold"
+    prog = [x for x in nonc if _cs_prog(x) >= 0]
+    return min(prog, key=_cs_prog) if prog else nonc[0]
+
 def _cf_pick(rows, key, conflicts, label):
     """قيمة الحقل لمجموعة صفوف: أحدث last_updated_at ثم الأكتر تكرارًا ثم الأول. لو فيه قيم مختلفة بتتسجل كتعارض."""
     vals = [(_cf_g(r, key), _cf_g(r, "last_updated_at")) for r in rows if _cf_g(r, key)]
@@ -1818,9 +1919,19 @@ def _cf_pick(rows, key, conflicts, label):
 
 def china_flat_to_tables(flat_rows):
     """صفوف الشيت الواحد -> (ships, conts, lines, conflicts) بنفس شكل الجداول القديمة."""
-    rows = [{k: _cf_g(r, k) for k in CHINA_FLAT_INPUT_KEYS} for r in flat_rows]
+    rows = [{k: _cf_g(r, k) for k in CHINA_FLAT_INPUT_KEYS + CHINA_STATUS_LEGACY} for r in flat_rows]
     rows = [r for r in rows if any(r.values())]
+    for r in rows:
+        r["_code"] = china_row_status(r)
     conflicts = []
+    ctr_status = {}
+    for r in rows:
+        if r["container_no"]:
+            ctr_status.setdefault(r["container_no"], []).append(r["_code"])
+    ctr_status = {k: _cs_container(v) for k, v in ctr_status.items()}
+    pair_codes = {}
+    for r in rows:
+        pair_codes.setdefault((r["internal_order_no"], r["po_no"]), []).append(r["_code"])
     # ── الحاويات ──
     cgroups = {}
     for r in rows:
@@ -1837,6 +1948,7 @@ def china_flat_to_tables(flat_rows):
         c["final_destination"] = _cf_pick(grp, "final_destination", [], "")
         c["last_updated_at"] = max([r["last_updated_at"] for r in grp] or [""])
         c["updated_by"] = next((r["updated_by"] for r in grp if r["last_updated_at"] == c["last_updated_at"] and r["updated_by"]), "")
+        c["container_status"] = _cs_to_cont(ctr_status.get(cno, ""))
         c["record_key"] = "CTR|" + cno
         conts.append(c)
     # ── الشحنات/الطلبات ──
@@ -1858,6 +1970,7 @@ def china_flat_to_tables(flat_rows):
         s["notes"] = _cf_pick(grp, "order_notes", conflicts, label)
         s["last_updated_at"] = max([r["last_updated_at"] for r in grp] or [""])
         s["updated_by"] = next((r["updated_by"] for r in grp if r["last_updated_at"] == s["last_updated_at"] and r["updated_by"]), "")
+        s["shipment_status"] = _cs_to_ship(_cs_shipment(pair_codes.get((key[0], key[1]), [])))
         s["record_key"] = china_ship_record_key(s)
         ships.append(s)
     # ── أسطر المنتجات ──
@@ -1871,6 +1984,10 @@ def china_flat_to_tables(flat_rows):
             l[k] = r[k]
         for k in ("shipment_id", "internal_order_no", "po_no", "currency", "container_no", "last_updated_at", "updated_by"):
             l[k] = r[k]
+        code, ccode = r["_code"], ctr_status.get(r["container_no"], "")
+        if _cs_prog(code) >= 0 and _cs_prog(ccode) > _cs_prog(code):
+            code = ccode                       # الصف بياخد حالة حاويته لو أحدث منه
+        l["stock_stage"] = _cs_to_stock(code)
         if not l["line_id"]:
             base = re.sub(r"[^A-Za-z0-9]", "", r["internal_order_no"]) or "LINE"
             n = seq.get(base, 0)
@@ -1897,65 +2014,89 @@ def china_flat_to_tables(flat_rows):
 CHINA_STAFF_GUIDE = """📋 دليل تعبئة شيت الصين
 
 القاعدة: الشيت واحد (China). كل صف = منتج واحد داخل طلب، وبيانات الطلب والحاوية بتتكرر على صف كل منتج.
-ألوان الأعمدة: 🔵 الطلب/الشحنة | 🟠 الحاوية والتتبع | 🟢 المنتج | ⚪ التحديث | ⚙️ رمادي = محسوب تلقائي، لا تكتبي فيه.
+ألوان الأعمدة: 🔑 الباركود والصورة والحالة | 🔵 الطلب/الشحنة | 🟠 الحاوية والتتبع | 🟢 المنتج | ⚪ التحديث | ⚙️ رمادي = محسوب تلقائي، لا تكتبي فيه.
+الأعمدة المتثبتة (رقم الطلب، PO، الباركود، الصورة) بتفضل قدامك وإنتي بتمشي يمين.
+
+⭐ عمود «الحالة | Status» هو العمود الوحيد للحالة (اختاري من القايمة). كل صف حالته لوحده، والتطبيق بيحسب منها حالة الحاوية وحالة الشحنة (الطلب + PO) لوحده.
+عمود «المطلوب دلوقتي» بيقولك تدخلي إيه بعد كده، ولو ظهر ⚠ يبقى فيه تاريخ أحدث من الحالة المختارة.
 
 الخطوة 1 — طلب جديد من المصنع (صف لكل منتج):
  1) 🔵 رقم الطلب الداخلي (NO.xxx) + رقم PO + اسم المورد + شركة المشتري.
- 2) 🔵 طريقة الشحن + Incoterm + العملة + قيمة الفاتورة + حالة الطلب (Factory Confirmed / In Production ...).
- 3) 🟢 الباركود (هو اللي بيربط المنتج بالمتجر) + SKU + الموديل + اسم المنتج EN/AR + الكراتين + قطع/كرتون + إجمالي الكمية + تكلفة الوحدة + CBM + الأوزان.
- 4) 🟢 مرحلة المخزون + تاريخ جاهزية الإنتاج، وSKU نون/أمازون/تريندول لو معروفين.
+ 2) 🔑 الباركود (الصورة بتظهر لوحدها) + الحالة: تأكيد المصنع ← قيد الإنتاج ← اكتمل الإنتاج ← جاهز للشحن.
+ 3) 🔵 طريقة الشحن + Incoterm + العملة + قيمة الفاتورة.
+ 4) 🟢 SKU + الموديل + اسم المنتج EN/AR + الكراتين + قطع/كرتون + إجمالي الكمية + تكلفة الوحدة + CBM + الأوزان + تاريخ جاهزية الإنتاج، وSKU نون/أمازون/تريندول لو معروفين.
  5) لو الطلب فيه أكتر من منتج: صف لكل منتج، وانسخي بيانات 🔵 الطلب على كل صفوفه.
  معرّف السطر اتركيه فاضي — بيتولّد تلقائي.
 
 الخطوة 2 — تجهيز الحاوية:
  - على صف كل منتج داخل الحاوية: 🟠 رقم الحاوية + رقم الختم + نوع الحاوية (40HQ ...).
- - غيّري 🟢 مرحلة المخزون إلى Allocated to Container (وLoaded بعد التحميل) وسجّلي تاريخ التحميل.
+ - الحالة: «حاوية متجهزة» ثم «تم التحميل» بعد التحميل.
  - المنتج الموزع على أكتر من حاوية: صف لكل حاوية، وكل صف بكمية وCBM الحاوية دي بس.
 
 الخطوة 3 — تم الشحن:
  - 🔵 رقم الشحنة STxxxxx (بعد تخصيصها فقط — لا تكتبي NO.xxx هنا).
  - 🟠 شركة الشحن + B/L + اسم السفينة + رقم الرحلة + ميناء التحميل + ميناء الوصول + ETD الفعلي + ETA الميناء + رابط التتبع.
- - حالة الحاوية = Shipped / In Transit، ومرحلة المنتجات كذلك.
+ - الحالة: «في البحر».
 
 الخطوة 4 — تأخير أو وصول:
- - ETA اتغيّر: فلتر برقم الحاوية وعدّلي ETA على كل صفوفها، واكتبي سبب التأخير.
- - عند الوصول فعلاً: وصول فعلي للميناء ← حالة التخليص ← وصول فعلي للمستودع، وغيّري حالة الحاوية (Arrived at Port / Cleared / Delivered to Warehouse) ومرحلة المنتج (Warehouse Received).
+ - ETA اتغيّر: عدّلي ETA واكتبي سبب التأخير.
+ - عند الوصول فعلاً: الحالة «وصلت الميناء» ← «تحت التخليص» ← «تم التخليص» ← «وصلت المستودع»، وحالة التخليص الجمركي.
  - الوصول الفعلي يُكتب بعد الوصول الحقيقي فقط، مش ETA.
 
-في كل تعديل: اكتبي تاريخ اليوم في «آخر تحديث» واسمك في «حدّث بواسطة».
+التواريخ الأوتوماتيك (لو سكريبت Apps Script متركّب مرة واحدة): أول ما تغيّري «الحالة» بيتسجل «آخر تحديث» لوحده، وبيتملا تاريخ الحالة الفعلي لو فاضي (تم التحميل ← تاريخ التحميل، في البحر ← ETD الفعلي، وصلت الميناء ← وصول الميناء، وصلت المستودع ← وصول المستودع)، وبتتوحّد الحالة وبيانات الحاوية على كل صفوف نفس الحاوية. من غير السكريبت اكتبي التواريخ بإيدك.
 
 قواعد مهمة:
  - لا تغيّري الصفوف 1–3 (العناوين) ولا ترتّبي الأعمدة.
  - NO.xxx = رقم الطلب الداخلي فقط. STxxxxx = رقم الشحنة بعد تخصيصها.
  - RIYADH = الوجهة النهائية وليست ميناء. الميناء = JEDDAH أو DAMMAM.
  - عمود «اكتمال الصف»: MISSING = ناقص بيانات مطلوبة، OK = تمام.
- - عمود «المرحلة الحالية» بيتحسب تلقائي من التواريخ والحالة (مصنع / حاوية متجهزة / في البحر / الميناء / المستودع)، وعمود «المطلوب دلوقتي» بيقولك تدخلي إيه بعد كده. لو ظهر ⚠ يبقى الحالة المختارة مختلفة عن التواريخ.
- - الطلب الملغي: حالة الطلب والحاوية والمرحلة = Cancelled."""
+ - الطلب أو المنتج الملغي: الحالة = ملغي."""
 
-CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصقي الكود ▸ Save. بيوحّد بيانات الحاوية على كل صفوفها وبيختم «آخر تحديث» تلقائي.
+CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصقي الكود ▸ Save ▸ (أول مرة هيطلب صلاحية). بيختم «آخر تحديث» لوحده،
+// وبيملا تاريخ الحالة الفعلي لو فاضي، وبيوحّد الحالة وبيانات الحاوية على كل صفوفها.
 var CONT_COLS = ["container_type","seal_no","shipping_line","vessel_name","voyage_no","bl_no","port_of_loading","destination_port",
-  "actual_etd","eta_port","port_arrival_actual","warehouse_arrival_actual","container_status","customs_status","last_known_location",
+  "actual_etd","eta_port","port_arrival_actual","warehouse_arrival_actual","customs_status","last_known_location",
   "delay_reason","tracking_url","ctr_gross_weight_kg","ctr_total_cbm","ctr_total_cartons","ctr_total_units"];
+var STATUS_DATES = [["تم التحميل","actual_load_date"],["في البحر","actual_etd"],["وصلت الميناء","port_arrival_actual"],
+  ["وصلت المستودع","warehouse_arrival_actual"],["اكتمل الإنتاج","production_ready_date"],["جاهز للشحن","production_ready_date"]];
 function onEdit(e) {
   var sh = e.range.getSheet();
   if (sh.getName() !== "China" || e.range.getRow() < 4) return;
-  var keys = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0];
-  var row = e.range.getRow(), col = e.range.getColumn();
-  var stamp = keys.indexOf("last_updated_at") + 1;
-  if (stamp > 0 && col !== stamp) sh.getRange(row, stamp).setValue(new Date());
   if (e.range.getNumRows() > 1 || e.range.getNumColumns() > 1) return;
-  if (CONT_COLS.indexOf(keys[col - 1]) < 0) return;
-  var cn = keys.indexOf("container_no") + 1;
-  var no = sh.getRange(row, cn).getValue();
-  var last = sh.getLastRow();
+  var keys = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0];
+  var K = function (k) { return keys.indexOf(k) + 1; };
+  var row = e.range.getRow(), col = e.range.getColumn(), key = keys[col - 1];
+  var stamp = K("last_updated_at"), by = K("updated_by"), now = new Date();
+  var who = ""; try { who = Session.getActiveUser().getEmail(); } catch (x) {}
+  var touch = function (r) {
+    if (stamp > 0) sh.getRange(r, stamp).setValue(now);
+    if (by > 0 && who) sh.getRange(r, by).setValue(who);
+  };
+  var fillDate = function (r, status) {
+    for (var i = 0; i < STATUS_DATES.length; i++) {
+      if (String(status).indexOf(STATUS_DATES[i][0]) >= 0) {
+        var c = K(STATUS_DATES[i][1]);
+        if (c > 0 && !sh.getRange(r, c).getValue()) sh.getRange(r, c).setValue(now);
+      }
+    }
+  };
+  if (key === "last_updated_at" || key === "updated_by") return;
+  touch(row);
+  var isStatus = key === "status", isCont = CONT_COLS.indexOf(key) >= 0;
+  if (isStatus) fillDate(row, e.range.getValue());
+  if (!isStatus && !isCont) return;
+  var cn = K("container_no"), sc = K("status");
+  var no = sh.getRange(row, cn).getValue(), last = sh.getLastRow();
   if (!no || last < 4) return;
   var nos = sh.getRange(4, cn, last - 3, 1).getValues();
+  var sts = sh.getRange(4, sc, last - 3, 1).getValues();
   var val = e.range.getValue();
   for (var i = 0; i < nos.length; i++) {
-    if (nos[i][0] === no && (i + 4) !== row) {
-      sh.getRange(i + 4, col).setValue(val);
-      if (stamp > 0) sh.getRange(i + 4, stamp).setValue(new Date());
-    }
+    var r = i + 4;
+    if (nos[i][0] !== no || r === row || String(sts[i][0]).indexOf("ملغي") >= 0) continue;
+    sh.getRange(r, col).setValue(val);
+    if (isStatus) fillDate(r, val);
+    touch(r);
   }
 }"""
 
@@ -1974,7 +2115,7 @@ _CHINA_GROUP_STYLE = {   # (عنوان المجموعة, لون الشريط, ل
     "CONTAINER": ("🚢 الحاوية والتتبع — يتكرر على كل منتج في نفس الحاوية", "C55A11", "FCE4D6"),
     "LINE": ("📦 المنتج / الدفعة — صف لكل منتج", "2E7D32", "E2EFDA"),
     "STAMP": ("🕓 التحديث", "595959", "EDEDED"),
-    "KEY": ("🔑 الباركود والصورة", "6A1B9A", "E4D4F0"),
+    "KEY": ("🔑 الباركود · الصورة · الحالة", "6A1B9A", "E4D4F0"),
     "AUTO": ("⚙️ محسوب تلقائي — لا تكتبي هنا", "7F7F7F", "D9D9D9"),
 }
 CHINA_FLAT_MAX_ROWS = 3000
@@ -1982,20 +2123,19 @@ CHINA_FLAT_MAX_ROWS = 3000
 def _china_auto_formulas():
     c = {k: _china_col_letter(i + 1) for i, k in enumerate(CHINA_FLAT_KEYS)}
     R = lambda k: f"{c[k]}4:{c[k]}"
-    qty, cost, eta, pa, cs = R("total_qty"), R("unit_cost"), R("eta_port"), R("port_arrival_actual"), R("container_status")
-    delay_v = f'IF({pa}<>"",{pa}-{eta},IF(({cs}="Delivered to Warehouse")+({cs}="Cancelled")>0,0,TODAY()-{eta}))'
+    qty, cost, eta, pa, S = R("total_qty"), R("unit_cost"), R("eta_port"), R("port_arrival_actual"), R("status")
+    done = f'(ISNUMBER(SEARCH("وصلت المستودع",{S}))+ISNUMBER(SEARCH("ملغي",{S}))>0)'
+    delay_v = f'IF({pa}<>"",{pa}-{eta},IF({done},0,TODAY()-{eta}))'
     ident = f'{R("barcode")}&{R("sku")}&{R("product_name_en")}'
-    stg, act = china_stage_formulas(R)
     return {
-        "current_stage": f"=ARRAYFORMULA({stg})",
-        "next_action": f"=ARRAYFORMULA({act})",
+        "next_action": f"=ARRAYFORMULA({china_next_action_formula(R)})",
         "line_amount": f'=ARRAYFORMULA(IF(({qty}<>"")*({cost}<>""),{qty}*{cost},""))',
         "days_to_eta": f'=ARRAYFORMULA(IF({eta}="","",IFERROR({eta}-TODAY(),"")))',
         "delay_days": f'=ARRAYFORMULA(IF({eta}="","",IFERROR(IF({delay_v}>0,{delay_v},0),"")))',
         "row_state": (f'=ARRAYFORMULA(IF(LEN({R("internal_order_no")}&{R("po_no")}&{R("supplier_name")}&{R("container_no")}&{ident})=0,"",'
-                      f'IF(LEN({ident})>0,IF(({R("internal_order_no")}="")+({R("barcode")}="")+({qty}="")+({cost}="")+({R("stock_stage")}="")>0,"MISSING","OK"),'
-                      f'IF({R("container_no")}<>"",IF(({cs}="")+(({eta}="")*({cs}<>"Cancelled"))>0,"MISSING","OK"),'
-                      f'IF(({R("supplier_name")}="")+({R("po_no")}="")+({R("shipment_status")}="")>0,"MISSING","OK")))))'),
+                      f'IF(LEN({ident})>0,IF(({R("internal_order_no")}="")+({R("barcode")}="")+({qty}="")+({cost}="")+({S}="")>0,"MISSING","OK"),'
+                      f'IF({R("container_no")}<>"",IF(({S}="")+(({eta}="")*(ISERROR(SEARCH("ملغي",{S}))))>0,"MISSING","OK"),'
+                      f'IF(({R("supplier_name")}="")+({R("po_no")}="")+({S}="")>0,"MISSING","OK")))))'),
     }
 
 def _china_image_formula(r):
@@ -2089,26 +2229,21 @@ def _china_format_flat(ws):
         i = CHINA_FLAT_KEYS.index(key)
         reqs.append({"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rg(3, M, i, i + 1)], "booleanRule": {
             "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": formula}]}, "format": fmt}}}})
-    E, A, S_ = c["eta_port"], c["port_arrival_actual"], c["container_status"]
-    cf("eta_port", f'=AND(${E}4<>"",${E}4<TODAY(),${A}4="",${S_}4<>"Cancelled")', "F8CBAD", "9C0006", True)
+    E, A, S_ = c["eta_port"], c["port_arrival_actual"], c["status"]
+    cf("eta_port", f'=AND(${E}4<>"",${E}4<TODAY(),${A}4="",NOT(REGEXMATCH(${S_}4,"ملغي|وصلت المستودع")))', "F8CBAD", "9C0006", True)
     cf("eta_port", f'=AND(${E}4<>"",${E}4>=TODAY(),${E}4-TODAY()<=7,${A}4="")', "FFF2CC")
-    CSG, DD = c["current_stage"], c["delay_days"]
-    cf("current_stage", f'=REGEXMATCH(${CSG}4,"المصنع|الإنتاج|طلب مؤكد")', "FFF2CC")
-    cf("current_stage", f'=REGEXMATCH(${CSG}4,"متجهزة")', "FCE4D6")
-    cf("current_stage", f'=REGEXMATCH(${CSG}4,"البحر")', "DDEBF7")
-    cf("current_stage", f'=REGEXMATCH(${CSG}4,"الميناء|التخليص")', "F8CBAD")
-    cf("current_stage", f'=REGEXMATCH(${CSG}4,"المستودع")', "C6EFCE")
-    cf("current_stage", f'=REGEXMATCH(${CSG}4,"ملغي")', "D9D9D9", "7F7F7F")
-    cf("current_stage", f'=AND(N(${DD}4)>0,NOT(REGEXMATCH(${CSG}4,"المستودع|ملغي")))', "F8CBAD", "9C0006", True)
+    DD = c["delay_days"]
+    cf("status", f'=AND(N(${DD}4)>0,NOT(REGEXMATCH(${S_}4,"ملغي|وصلت المستودع")))', "F8CBAD", "9C0006", True)
+    cf("status", f'=REGEXMATCH(${S_}4,"ملغي")', "D9D9D9", "7F7F7F")
+    cf("status", f'=REGEXMATCH(${S_}4,"وصلت المستودع")', "C6EFCE")
+    cf("status", f'=REGEXMATCH(${S_}4,"وصلت الميناء|التخليص")', "F8CBAD")
+    cf("status", f'=REGEXMATCH(${S_}4,"في البحر")', "DDEBF7")
+    cf("status", f'=REGEXMATCH(${S_}4,"تم التحميل|متجهزة")', "FCE4D6")
+    cf("status", f'=REGEXMATCH(${S_}4,"قيد الإنتاج|تأكيد المصنع|اكتمل|جاهز")', "FFF2CC")
+    cf("status", f'=REGEXMATCH(${S_}4,"موقوف")', "FFEB9C", "9C5700", True)
     cf("next_action", f'=LEFT(${c["next_action"]}4,1)="⚠"', "FFEB9C", "9C5700", True)
     cf("row_state", f'=${c["row_state"]}4="MISSING"', "F8CBAD", "9C0006", True)
     cf("row_state", f'=${c["row_state"]}4="OK"', "C6EFCE")
-    for k in ("container_status", "shipment_status", "stock_stage"):
-        x = c[k]
-        cf(k, f'=${x}4="Cancelled"', "D9D9D9", "7F7F7F")
-        cf(k, f'=OR(${x}4="Warehouse Received",${x}4="Delivered to Warehouse")', "C6EFCE")
-        cf(k, f'=${x}4="Shipped / In Transit"', "DDEBF7")
-        cf(k, f'=${x}4="In Production"', "FFF2CC")
     ss.batch_update({"requests": reqs})
 
 def _china_layout_outdated(ws):
@@ -2214,6 +2349,7 @@ def _china_input_segments():
 
 def _china_write_flat(ws, flat_rows):
     """بيكتب أعمدة الإدخال بس من صف 4 (أعمدة المعادلات والصورة بتفضل زي ما هي)."""
+    flat_rows = china_flat_prepare(flat_rows)
     n = len(flat_rows)
     if ws.row_count < n + CHINA_FLAT_HDR_ROWS + 50:
         ws.add_rows(n + CHINA_FLAT_HDR_ROWS + 200 - ws.row_count)
@@ -2244,7 +2380,7 @@ def _china_read_flat(raw):
             break
     if hi is None:
         return []
-    pos = {str(c).strip(): j for j, c in enumerate(raw[hi]) if str(c).strip() in CHINA_FLAT_INPUT_KEYS}
+    pos = {str(c).strip(): j for j, c in enumerate(raw[hi]) if str(c).strip() in CHINA_FLAT_INPUT_KEYS + CHINA_STATUS_LEGACY}
     out = []
     for row in raw[hi + 1:]:
         d = {k: (str(row[j]).strip() if j < len(row) else "") for k, j in pos.items()}
@@ -2321,7 +2457,7 @@ def _china_parse_workbook(file_bytes):
         hit = None
         for i, r in enumerate(rows):
             low = {str(c).strip() for c in r if c is not None}
-            if {"container_no", "line_id", "internal_order_no", "supplier_name", "container_status", "barcode"} <= low:
+            if {"container_no", "line_id", "internal_order_no", "supplier_name", "barcode"} <= low and ("status" in low or "container_status" in low):
                 hit = i
                 break
         if hit is None:
@@ -2329,7 +2465,7 @@ def _china_parse_workbook(file_bytes):
         keys = [str(c).strip() if c is not None else "" for c in rows[hit]]
         flat = []
         for r in ws.iter_rows(min_row=hit + 2, values_only=True):
-            d = {k: _china_clean(r[j], k) for j, k in enumerate(keys) if k in CHINA_FLAT_INPUT_KEYS and j < len(r)}
+            d = {k: _china_clean(r[j], k) for j, k in enumerate(keys) if k in CHINA_FLAT_INPUT_KEYS + CHINA_STATUS_LEGACY and j < len(r)}
             if any(d.values()) and not _china_is_label_row(d):
                 flat.append(d)
         ships, conts, lines, _ = china_flat_to_tables(flat)
