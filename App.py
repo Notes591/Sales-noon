@@ -1611,6 +1611,7 @@ CHINA_FLAT_HDR_ROWS = 3          # صف 1 مجموعات | صف 2 مفاتيح |
 # (المجموعة, المفتاح, العنوان العربي, العرض, النوع: t نص / d تاريخ / n رقم / g عام)
 CHINA_FLAT_COLS = [
  ("ORDER","internal_order_no","رقم الطلب الداخلي NO.xxx",14,"t"),("ORDER","po_no","رقم طلب المصنع PO",16,"t"),
+ ("KEY","barcode","الباركود",16,"t"),("KEY","product_image","صورة المنتج (تلقائي من الباركود)",13,"g"),
  ("ORDER","supplier_name","اسم المورد",26,"g"),("ORDER","buyer_company","شركة المشتري",22,"g"),
  ("ORDER","shipment_id","رقم الشحنة STxxxxx",13,"t"),("ORDER","shipment_mode","طريقة الشحن",11,"g"),
  ("ORDER","incoterm","Incoterm",9,"g"),("ORDER","origin_location","منشأ البضاعة",14,"g"),
@@ -1632,7 +1633,7 @@ CHINA_FLAT_COLS = [
  ("CONTAINER","ctr_gross_weight_kg","وزن الحاوية كغ",11,"n"),("CONTAINER","ctr_total_cbm","إجمالي CBM الحاوية",11,"n"),
  ("CONTAINER","ctr_total_cartons","إجمالي كراتين الحاوية",11,"n"),("CONTAINER","ctr_total_units","إجمالي قطع الحاوية",11,"n"),
  ("LINE","line_id","معرّف السطر (تلقائي)",13,"t"),("LINE","sku","SKU الداخلي",14,"t"),("LINE","model_no","الموديل",14,"t"),
- ("LINE","barcode","الباركود",16,"t"),("LINE","product_name_en","اسم المنتج EN",30,"g"),("LINE","product_name_ar","اسم المنتج AR",24,"g"),
+ ("LINE","product_name_en","اسم المنتج EN",30,"g"),("LINE","product_name_ar","اسم المنتج AR",24,"g"),
  ("LINE","variant","المتغير",10,"g"),("LINE","cartons","الكراتين",9,"n"),("LINE","units_per_carton","قطع/كرتون",9,"n"),
  ("LINE","total_qty","إجمالي الكمية",10,"n"),("LINE","unit_cost","تكلفة الوحدة",10,"n"),("LINE","cbm","CBM",8,"n"),
  ("LINE","gross_weight_kg","وزن إجمالي",9,"n"),("LINE","net_weight_kg","وزن صافي",9,"n"),
@@ -1645,7 +1646,8 @@ CHINA_FLAT_COLS = [
  ("AUTO","delay_days","أيام التأخير (محسوب)",11,"g"),("AUTO","row_state","اكتمال الصف (محسوب)",12,"g"),
 ]
 CHINA_FLAT_KEYS = [c[1] for c in CHINA_FLAT_COLS]
-CHINA_FLAT_INPUT_KEYS = [c[1] for c in CHINA_FLAT_COLS if c[0] != "AUTO"]
+CHINA_FLAT_FORMULA_KEYS = {c[1] for c in CHINA_FLAT_COLS if c[0] == "AUTO"} | {"product_image"}   # أعمدة معادلات — الموظف مبيكتبش فيها
+CHINA_FLAT_INPUT_KEYS = [c[1] for c in CHINA_FLAT_COLS if c[1] not in CHINA_FLAT_FORMULA_KEYS]
 CHINA_FLAT_LISTS = {
  "shipment_status": ["Factory Confirmed","Order Confirmed","In Production","Production Completed","Ready to Ship","Booked","Loaded",
                      "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Delivered to Warehouse","On Hold","Cancelled"],
@@ -1941,6 +1943,7 @@ _CHINA_GROUP_STYLE = {   # (عنوان المجموعة, لون الشريط, ل
     "CONTAINER": ("🚢 الحاوية والتتبع — يتكرر على كل منتج في نفس الحاوية", "C55A11", "FCE4D6"),
     "LINE": ("📦 المنتج / الدفعة — صف لكل منتج", "2E7D32", "E2EFDA"),
     "STAMP": ("🕓 التحديث", "595959", "EDEDED"),
+    "KEY": ("🔑 الباركود والصورة", "6A1B9A", "E4D4F0"),
     "AUTO": ("⚙️ محسوب تلقائي — لا تكتبي هنا", "7F7F7F", "D9D9D9"),
 }
 CHINA_FLAT_MAX_ROWS = 3000
@@ -1961,6 +1964,18 @@ def _china_auto_formulas():
                       f'IF(({R("supplier_name")}="")+({R("po_no")}="")+({R("shipment_status")}="")>0,"MISSING","OK")))))'),
     }
 
+def _china_image_formula(r):
+    """صورة المنتج من الباركود: رابط الصورة اليدوي لو موجود، وإلا من نفس مصادر المبيعات
+    (Tacweed -> links n)، ثم (TacweedAmazon -> links a)، ثم منتجات تريندول. بتتحجّم على الخلية."""
+    c = {k: _china_col_letter(i + 1) for i, k in enumerate(CHINA_FLAT_KEYS)}
+    bc, u = f"${c['barcode']}{r}", f"${c['image_url']}{r}"
+    def via(code_tab, links_tab):
+        return (f"INDEX(ARRAYFORMULA(FILTER('{links_tab}'!$B$2:$B,ISNUMBER(MATCH('{links_tab}'!$A$2:$A,"
+                f"FILTER({code_tab}!$A$2:$A,{code_tab}!$B$2:$B&\"\"={bc}&\"\"),0))*('{links_tab}'!$B$2:$B<>\"\"))),1)")
+    ty = f"INDEX(FILTER(TrendyolProducts!$D$2:$D,TrendyolProducts!$B$2:$B&\"\"={bc}&\"\",TrendyolProducts!$D$2:$D<>\"\"),1)"
+    return (f'=IF({bc}="","",IFERROR(IMAGE(IF({u}<>"",{u},IFERROR({via("Tacweed","links n")},'
+            f'IFERROR({via("TacweedAmazon","links a")},{ty}))),1),""))')
+
 def _china_format_flat(ws):
     """بيكتب العناوين والمعادلات وينسّق الشيت (ألوان/تثبيت/قوايم/تلوين ذكي) — مرة واحدة عند الإنشاء الأول."""
     sid, N = ws.id, len(CHINA_FLAT_KEYS)
@@ -1971,6 +1986,9 @@ def _china_format_flat(ws):
         labels.append(lab)
     auto = _china_auto_formulas()
     ws.update(values=[band, CHINA_FLAT_KEYS, labels], range_name="A1", value_input_option="USER_ENTERED")
+    ic = _china_col_letter(CHINA_FLAT_KEYS.index("product_image") + 1)
+    ws.update(values=[[_china_image_formula(r)] for r in range(4, CHINA_FLAT_MAX_ROWS + 1)], range_name=f"{ic}4:{ic}{CHINA_FLAT_MAX_ROWS}",
+              value_input_option="USER_ENTERED")
     for k, f in auto.items():
         ws.update(values=[[f]], range_name=f"{_china_col_letter(CHINA_FLAT_KEYS.index(k) + 1)}4", value_input_option="USER_ENTERED")
     rg = lambda r0, r1, c0, c1: {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1, "startColumnIndex": c0, "endColumnIndex": c1}
@@ -2017,7 +2035,13 @@ def _china_format_flat(ws):
                                                "properties": {"pixelSize": 30}, "fields": "pixelSize"}})
     reqs.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "ROWS", "startIndex": 2, "endIndex": 3},
                                                "properties": {"pixelSize": 44}, "fields": "pixelSize"}})
-    reqs.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 3, "frozenColumnCount": 2}},
+    reqs.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "ROWS", "startIndex": 3, "endIndex": M},
+                                               "properties": {"pixelSize": 64}, "fields": "pixelSize"}})
+    pi = CHINA_FLAT_KEYS.index("product_image")
+    reqs.append({"repeatCell": {"range": rg(3, M, pi, pi + 1), "cell": {"userEnteredFormat": {
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "backgroundColor": _china_rgb("F2F2F2")}},
+        "fields": "userEnteredFormat(horizontalAlignment,verticalAlignment,backgroundColor)"}})
+    reqs.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 3, "frozenColumnCount": 4}},
                                            "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}})
     reqs.append({"setBasicFilter": {"filter": {"range": rg(2, M, 0, N)}}})
     c = {k: _china_col_letter(i + 1) for i, k in enumerate(CHINA_FLAT_KEYS)}
@@ -2040,6 +2064,15 @@ def _china_format_flat(ws):
         cf(k, f'=${x}4="Shipped / In Transit"', "DDEBF7")
         cf(k, f'=${x}4="In Production"', "FFF2CC")
     ss.batch_update({"requests": reqs})
+
+def _china_layout_outdated(ws):
+    """هل صف المفاتيح (صف 2) مش مطابق للترتيب الحالي؟ (شيت اتعمل بنسخة أقدم من الكود)"""
+    try:
+        keys = [str(c).strip() for c in ws.row_values(2)]
+    except Exception:
+        return False
+    keys = [k for k in keys if k]
+    return "container_no" in keys and keys != CHINA_FLAT_KEYS
 
 def get_china_flat_ws():
     """شيت China الواحد — بيتنشأ تلقائي أول مرة (بالتنسيق والمعادلات)، ولو كان فيه بيانات قديمة في التابات
@@ -2085,6 +2118,20 @@ def get_china_flat_ws():
             st.warning(f"⚠️ مقدرتش أنقل البيانات القديمة: {e}")
         st.session_state["china_flash"] = ("✅ تم إنشاء شيت China في Google Sheet" + (f" ونقل {moved} صف من البيانات القديمة له." if moved else ".")
                                            + " الموظفة تقدر تعدّل فيه مباشرة.")
+    elif _china_layout_outdated(ws):
+        try:
+            old_rows = _china_read_flat(ws.get_all_values())
+            tmp = ss.add_worksheet(title="China_new_tmp", rows=str(CHINA_FLAT_MAX_ROWS), cols=str(len(CHINA_FLAT_KEYS)))
+            _china_format_flat(tmp)
+            if old_rows:
+                _china_write_flat(tmp, old_rows)
+            ws.update_title(f"China_backup_{time.strftime('%Y%m%d_%H%M')}")
+            tmp.update_title(CHINA_FLAT_TAB)
+            ws = tmp
+            st.session_state["china_flash"] = (f"✅ اتحدّث ترتيب أعمدة شيت China (الباركود والصورة بعد PO) ونقل {len(old_rows)} صف. "
+                                               "النسخة القديمة اتحفظت كتاب باسم China_backup_… ومسموح تمسحيها بعد ما تتأكدي.")
+        except Exception as e:
+            st.warning(f"⚠️ تحديث ترتيب أعمدة شيت China فشل: {e}")
     elif not getattr(ws, "frozen_row_count", 0):
         try:
             _china_format_flat(ws)
@@ -2098,16 +2145,32 @@ def _china_cell(v):
     v = "" if v is None else str(v)
     return ("'" + v) if v[:1] in ("=", "+", "@") else v
 
+def _china_input_segments():
+    """مجموعات أعمدة الإدخال المتصلة (عشان أعمدة المعادلات في النص متتمسحش)."""
+    segs, cur = [], []
+    for i, k in enumerate(CHINA_FLAT_KEYS):
+        if k in CHINA_FLAT_FORMULA_KEYS:
+            if cur:
+                segs.append(cur)
+            cur = []
+        else:
+            cur.append((i, k))
+    if cur:
+        segs.append(cur)
+    return segs
+
 def _china_write_flat(ws, flat_rows):
-    """بيكتب أعمدة الإدخال بس من صف 4 (أعمدة المعادلات بتفضل زي ما هي)."""
-    last_col = _china_col_letter(len(CHINA_FLAT_INPUT_KEYS))
+    """بيكتب أعمدة الإدخال بس من صف 4 (أعمدة المعادلات والصورة بتفضل زي ما هي)."""
     n = len(flat_rows)
     if ws.row_count < n + CHINA_FLAT_HDR_ROWS + 50:
         ws.add_rows(n + CHINA_FLAT_HDR_ROWS + 200 - ws.row_count)
-    ws.batch_clear([f"A4:{last_col}{max(ws.row_count, 4)}"])
+    segs = _china_input_segments()
+    ws.batch_clear([f"{_china_col_letter(s[0][0] + 1)}4:{_china_col_letter(s[-1][0] + 1)}{max(ws.row_count, 4)}" for s in segs])
     for i in range(0, n, 800):
-        chunk = [[_china_cell(r.get(k, "")) for k in CHINA_FLAT_INPUT_KEYS] for r in flat_rows[i:i + 800]]
-        ws.update(values=chunk, range_name=f"A{4 + i}", value_input_option="USER_ENTERED")
+        part = flat_rows[i:i + 800]
+        for s in segs:
+            chunk = [[_china_cell(r.get(k, "")) for _, k in s] for r in part]
+            ws.update(values=chunk, range_name=f"{_china_col_letter(s[0][0] + 1)}{4 + i}", value_input_option="USER_ENTERED")
     clear_cache(ws)
 
 _CHINA_LABELS = {c[1]: c[2] for c in CHINA_FLAT_COLS}
