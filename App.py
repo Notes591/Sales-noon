@@ -1509,11 +1509,6 @@ def _china_get_or_create_ws(tab, cols, retries=5, delay=2):
             else:
                 raise e
 
-def get_china_sheets():
-    """تابات الصين الـ3 — بتتنشأ مرة واحدة بس لكل جلسة | The 3 China tabs, created once per session."""
-    if "china_sheets" not in st.session_state:
-        st.session_state["china_sheets"] = {tab: _china_get_or_create_ws(tab, cols) for tab, cols in CHINA_TABS.items()}
-    return st.session_state["china_sheets"]
 
 # ── تنظيف القيم / Value cleaning ──
 def _china_clean(v, field=""):
@@ -1567,15 +1562,8 @@ def _china_date(s):
         return None
 
 # ── مفاتيح السجلات (للتحديث بدل التكرار عند رفع نفس الملف تاني) | Row keys for upsert ──
-def _china_ship_key(r):
-    return r.get("record_key") or "|".join([r.get("internal_order_no", ""), r.get("po_no", ""), r.get("shipment_id", "")])
 
-def _china_line_key(r):
-    return r.get("line_id") or r.get("record_key") or "|".join(
-        [r.get("shipment_id", ""), r.get("container_no", ""), r.get("barcode", ""), r.get("sku", "")])
 
-def _china_cont_key(r):
-    return r.get("container_no") or r.get("record_key") or ""
 
 def _china_merge(existing, new, keyfn):
     order, d = [], {}
@@ -1592,16 +1580,603 @@ def _china_merge(existing, new, keyfn):
     return [d[k] for k in order]
 
 # ── قراءة ملف الإكسيل | Parse the uploaded workbook ──
+
+
+# ── قراءة/كتابة تابات الصين في جوجل شيت | Read / write the China tabs ──
+def _china_rows_from_raw(raw):
+    if not raw or len(raw) < 2:
+        return []
+    hdr = [str(h).strip() for h in raw[0]]
+    out = []
+    for row in raw[1:]:
+        if not any(str(c).strip() for c in row):
+            continue
+        out.append({h: (str(row[i]).strip() if i < len(row) else "") for i, h in enumerate(hdr) if h})
+    return out
+
+
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ══ شيت الصين الواحد | Single China sheet ══
+# الموظف بيدخل كل حاجة في شيت واحد اسمه China — كل صف = منتج/دفعة داخل طلب، وبيانات الطلب والحاوية بتتكرر على الصف.
+# التطبيق بيفكّه تلقائيًا لـ (شحنات / حاويات / منتجات) نفس الـ 3 جداول اللي باقي الكود شغال عليهم.
+# One row = one product lot; order + container data repeat on the row. The app splits it back into the same
+# 3 tables (shipments / containers / lines) that the rest of the code already works with.
+# ══════════════════════════════════════════════════════════════════════════════
+CHINA_FLAT_TAB = "China"
+CHINA_FLAT_HDR_ROWS = 3          # صف 1 مجموعات | صف 2 مفاتيح | صف 3 عناوين عربي | البيانات من صف 4
+# (المجموعة, المفتاح, العنوان العربي, العرض, النوع: t نص / d تاريخ / n رقم / g عام)
+CHINA_FLAT_COLS = [
+ ("ORDER","internal_order_no","رقم الطلب الداخلي NO.xxx",14,"t"),("ORDER","po_no","رقم طلب المصنع PO",16,"t"),
+ ("ORDER","supplier_name","اسم المورد",26,"g"),("ORDER","buyer_company","شركة المشتري",22,"g"),
+ ("ORDER","shipment_id","رقم الشحنة STxxxxx",13,"t"),("ORDER","shipment_mode","طريقة الشحن",11,"g"),
+ ("ORDER","incoterm","Incoterm",9,"g"),("ORDER","origin_location","منشأ البضاعة",14,"g"),
+ ("ORDER","invoice_no","رقم الفاتورة",14,"t"),("ORDER","invoice_value","قيمة الفاتورة",13,"n"),
+ ("ORDER","freight_value","قيمة الشحن",12,"n"),("ORDER","currency","العملة",8,"g"),
+ ("ORDER","planned_etd","ETD المخطط",12,"d"),("ORDER","eta_destination","ETA الوجهة النهائية",14,"d"),
+ ("ORDER","shipment_status","حالة الطلب/الشحنة",21,"g"),("ORDER","booking_no","رقم الحجز",14,"t"),
+ ("ORDER","container_count","عدد الحاويات",9,"n"),("ORDER","final_destination","الوجهة النهائية",11,"g"),
+ ("ORDER","order_notes","ملاحظات الطلب",24,"g"),
+ ("CONTAINER","container_no","رقم الحاوية",15,"t"),("CONTAINER","seal_no","رقم الختم",13,"t"),
+ ("CONTAINER","container_type","نوع الحاوية",10,"g"),("CONTAINER","shipping_line","شركة الشحن",13,"g"),
+ ("CONTAINER","vessel_name","اسم السفينة",18,"g"),("CONTAINER","voyage_no","رقم الرحلة",12,"t"),
+ ("CONTAINER","bl_no","رقم B/L",18,"t"),("CONTAINER","port_of_loading","ميناء التحميل",13,"g"),
+ ("CONTAINER","destination_port","ميناء الوصول",13,"g"),("CONTAINER","actual_etd","ETD الفعلي",12,"d"),
+ ("CONTAINER","eta_port","ETA الميناء",12,"d"),("CONTAINER","port_arrival_actual","وصول فعلي للميناء",13,"d"),
+ ("CONTAINER","warehouse_arrival_actual","وصول فعلي للمستودع",13,"d"),("CONTAINER","container_status","حالة الحاوية",21,"g"),
+ ("CONTAINER","customs_status","حالة التخليص",15,"g"),("CONTAINER","last_known_location","آخر موقع معروف",16,"g"),
+ ("CONTAINER","delay_reason","سبب التأخير",18,"g"),("CONTAINER","tracking_url","رابط التتبع",24,"g"),
+ ("CONTAINER","ctr_gross_weight_kg","وزن الحاوية كغ",11,"n"),("CONTAINER","ctr_total_cbm","إجمالي CBM الحاوية",11,"n"),
+ ("CONTAINER","ctr_total_cartons","إجمالي كراتين الحاوية",11,"n"),("CONTAINER","ctr_total_units","إجمالي قطع الحاوية",11,"n"),
+ ("LINE","line_id","معرّف السطر (تلقائي)",13,"t"),("LINE","sku","SKU الداخلي",14,"t"),("LINE","model_no","الموديل",14,"t"),
+ ("LINE","barcode","الباركود",16,"t"),("LINE","product_name_en","اسم المنتج EN",30,"g"),("LINE","product_name_ar","اسم المنتج AR",24,"g"),
+ ("LINE","variant","المتغير",10,"g"),("LINE","cartons","الكراتين",9,"n"),("LINE","units_per_carton","قطع/كرتون",9,"n"),
+ ("LINE","total_qty","إجمالي الكمية",10,"n"),("LINE","unit_cost","تكلفة الوحدة",10,"n"),("LINE","cbm","CBM",8,"n"),
+ ("LINE","gross_weight_kg","وزن إجمالي",9,"n"),("LINE","net_weight_kg","وزن صافي",9,"n"),
+ ("LINE","stock_stage","مرحلة المخزون",21,"g"),("LINE","production_ready_date","جاهزية الإنتاج",12,"d"),
+ ("LINE","actual_load_date","تاريخ التحميل",12,"d"),("LINE","noon_sku","SKU نون",14,"t"),("LINE","amazon_sku","SKU أمازون",14,"t"),
+ ("LINE","trendyol_sku","SKU تريندول",14,"t"),("LINE","image_url","رابط الصورة",20,"g"),("LINE","notes","ملاحظات المنتج",22,"g"),
+ ("STAMP","last_updated_at","آخر تحديث",12,"d"),("STAMP","updated_by","حدّث بواسطة",11,"g"),
+ # أعمدة محسوبة بمعادلة — الموظف مبيكتبش فيها
+ ("AUTO","line_amount","قيمة السطر (محسوب)",12,"g"),("AUTO","days_to_eta","أيام حتى ETA (محسوب)",11,"g"),
+ ("AUTO","delay_days","أيام التأخير (محسوب)",11,"g"),("AUTO","row_state","اكتمال الصف (محسوب)",12,"g"),
+]
+CHINA_FLAT_KEYS = [c[1] for c in CHINA_FLAT_COLS]
+CHINA_FLAT_INPUT_KEYS = [c[1] for c in CHINA_FLAT_COLS if c[0] != "AUTO"]
+CHINA_FLAT_LISTS = {
+ "shipment_status": ["Factory Confirmed","Order Confirmed","In Production","Production Completed","Ready to Ship","Booked","Loaded",
+                     "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Delivered to Warehouse","On Hold","Cancelled"],
+ "container_status": ["Factory Confirmed","Order Confirmed","In Production","Production Completed","Ready to Ship","Booked","Loaded",
+                      "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Delivered to Warehouse","On Hold","Cancelled"],
+ "shipment_mode": ["SEA - FCL","SEA - LCL","AIR","COURIER","TRUCK"],
+ "incoterm": ["EXW","FCA","FOB","CFR","CIF","CPT","CIP","DAP","DPU","DDP"],
+ "currency": ["USD","CNY","SAR","EUR","HKD","AED"],
+ "container_type": ["20GP","40GP","40HQ","45HQ","LCL","AIR"],
+ "customs_status": ["Not Started","Documents Ready","Submitted","Under Clearance","Inspection","Cleared","On Hold"],
+ "stock_stage": ["Factory Confirmed","In Production","Production Completed","Ready to Ship","Allocated to Container","Loaded",
+                 "Shipped / In Transit","Arrived at Port","Customs Clearance","Cleared","Warehouse Received","Cancelled"],
+ "shipping_line": ["MSC","CMA CGM","Maersk","COSCO","Hapag-Lloyd","OOCL","Evergreen","ONE","PIL","TSL","ECON","WHL","Other"],
+}
+_CF_SHIP_ONLY = ["internal_order_no","po_no","supplier_name","buyer_company","shipment_mode","incoterm","origin_location","invoice_no",
+                 "invoice_value","freight_value","currency","planned_etd","eta_destination","shipment_status","booking_no",
+                 "container_count","final_destination"]
+_CF_SHIP_DATA = ["supplier_name","buyer_company","shipment_mode","incoterm","origin_location","invoice_no","invoice_value",
+                 "freight_value","planned_etd","eta_destination","shipment_status","booking_no","container_count","order_notes"]
+_CF_CONT_ONLY = ["container_no","seal_no","container_type","vessel_name","voyage_no","port_arrival_actual","warehouse_arrival_actual",
+                 "container_status","customs_status","last_known_location","delay_reason"]
+_CF_SHARED = ["shipping_line","bl_no","port_of_loading","destination_port","actual_etd","eta_port","tracking_url"]   # الحاوية أولاً ثم الطلب
+_CF_CONT_RENAME = {"gross_weight_kg": "ctr_gross_weight_kg", "total_cbm": "ctr_total_cbm",
+                   "total_cartons": "ctr_total_cartons", "total_units": "ctr_total_units"}
+_CF_LINE = ["line_id","sku","model_no","barcode","product_name_en","product_name_ar","variant","cartons","units_per_carton",
+            "total_qty","unit_cost","cbm","gross_weight_kg","net_weight_kg","stock_stage","production_ready_date",
+            "actual_load_date","noon_sku","amazon_sku","trendyol_sku","image_url","notes"]
+
+def _cf_g(d, k):
+    v = d.get(k, "") if d else ""
+    return "" if v is None else str(v).strip()
+
+def _cf_num(v):
+    m = re.search(r"\d+", str(v or ""))
+    return int(m.group()) if m else 0
+
+def china_ship_record_key(s):
+    # مفتاح الطلب = رقم الطلب | PO | قيمة الفاتورة (من غير رقم الشحنة ST — عشان تخصيص ST بعدين يعدّل نفس السجل مش يكرره)
+    return "|".join([s.get("internal_order_no", ""), s.get("po_no", ""), s.get("invoice_value", "")])
+
+def china_tables_to_flat(ships, conts, lines):
+    """الـ 3 جداول -> صفوف الشيت الواحد. كل سطر منتج بياخد بيانات طلبه وحاويته؛ الطلبات اللي لسه ملهاش منتجات
+    والحاويات اللي لسه ملهاش منتجات بتتحط في صفوف لوحدها — فمفيش حاجة بتضيع."""
+    cmap = {_cf_g(c, "container_no"): c for c in conts if _cf_g(c, "container_no")}
+    by_pair, by_order = {}, {}
+    for x in ships:
+        o, p = _cf_g(x, "internal_order_no"), _cf_g(x, "po_no")
+        by_pair.setdefault((o, p), []).append(x)
+        by_order.setdefault(o, []).append(x)
+    def pick(cands, sid):
+        if not cands:
+            return None
+        for x in cands:
+            if sid and _cf_g(x, "shipment_id") == sid:
+                return x
+        return cands[0]
+    def stamp(r, rec):
+        t = _cf_g(rec, "last_updated_at")
+        if t and t >= r["last_updated_at"]:
+            r["last_updated_at"], r["updated_by"] = t, _cf_g(rec, "updated_by")
+    def build(sh, ct, ln):
+        r = {k: "" for k in CHINA_FLAT_KEYS}
+        if sh:
+            for k in _CF_SHIP_ONLY + _CF_SHARED:
+                r[k] = _cf_g(sh, k)
+            r["order_notes"] = _cf_g(sh, "notes")
+            r["shipment_id"] = _cf_g(sh, "shipment_id")
+            stamp(r, sh)
+        if ct:
+            for k in _CF_CONT_ONLY:
+                r[k] = _cf_g(ct, k)
+            dropped = []
+            for k in _CF_SHARED:
+                if _cf_g(ct, k):
+                    if sh and _cf_g(sh, k) and _cf_g(sh, k) != _cf_g(ct, k):
+                        dropped.append(f"{k} (في الطلب): {_cf_g(sh, k)}")      # قيمة الطلب المختلفة عن الحاوية — بنحفظها في الملاحظات بدل ما تضيع
+                    r[k] = _cf_g(ct, k)
+            if dropped:
+                r["order_notes"] = " | ".join(x for x in [r["order_notes"]] + ["; ".join(dropped)] if x)
+            for a, b in _CF_CONT_RENAME.items():
+                r[b] = _cf_g(ct, a)
+            if _cf_g(ct, "shipment_id") and not r["shipment_id"]:
+                r["shipment_id"] = _cf_g(ct, "shipment_id")
+            if _cf_g(ct, "final_destination") and not r["final_destination"]:
+                r["final_destination"] = _cf_g(ct, "final_destination")
+            stamp(r, ct)
+        if ln:
+            for k in _CF_LINE:
+                r[k] = _cf_g(ln, k)
+            if _cf_g(ln, "shipment_id") and not r["shipment_id"]:
+                r["shipment_id"] = _cf_g(ln, "shipment_id")
+            if _cf_g(ln, "container_no") and not r["container_no"]:
+                r["container_no"] = _cf_g(ln, "container_no")
+            for k in ("internal_order_no", "po_no"):
+                if not r[k]:
+                    r[k] = _cf_g(ln, k)
+            if not r["currency"]:
+                r["currency"] = _cf_g(ln, "currency")
+            stamp(r, ln)
+        return r
+    rows, used_ship, used_cont = [], set(), set()
+    for l in lines:
+        o, p, sid = _cf_g(l, "internal_order_no"), _cf_g(l, "po_no"), _cf_g(l, "shipment_id")
+        # ربط السطر بالطلب بتطابق (رقم الطلب + PO) بالظبط — لو الـ PO مختلف بيفضل صف الطلب لوحده ومفيش بيانات بتتدمج غلط
+        sh = pick(by_pair.get((o, p)) or [], sid)
+        ct = cmap.get(_cf_g(l, "container_no"))
+        if sh is not None:
+            used_ship.add(id(sh))
+        if ct is not None:
+            used_cont.add(_cf_g(ct, "container_no"))
+        rows.append(build(sh, ct, l))
+    for x in ships:
+        if id(x) not in used_ship:
+            rows.append(build(x, None, None))
+    for c in conts:
+        if _cf_g(c, "container_no") not in used_cont:
+            rows.append(build(None, c, None))
+    def sk(r):
+        o = r["internal_order_no"]
+        n = _cf_num(o)
+        return (0 if o else 1, -n, r["po_no"], r["container_no"], r["sku"])
+    rows.sort(key=sk)
+    return rows
+
+def _cf_pick(rows, key, conflicts, label):
+    """قيمة الحقل لمجموعة صفوف: أحدث last_updated_at ثم الأكتر تكرارًا ثم الأول. لو فيه قيم مختلفة بتتسجل كتعارض."""
+    vals = [(_cf_g(r, key), _cf_g(r, "last_updated_at")) for r in rows if _cf_g(r, key)]
+    if not vals:
+        return ""
+    distinct = {v for v, _ in vals}
+    if len(distinct) > 1:
+        conflicts.append({"السجل": label, "الحقل": key, "القيم": " | ".join(sorted(distinct))})
+        latest = max(t for _, t in vals)
+        cand = [v for v, t in vals if t == latest]
+        best = max(set(cand), key=lambda v: (cand.count(v), -cand.index(v)))
+        return best
+    return vals[0][0]
+
+def china_flat_to_tables(flat_rows):
+    """صفوف الشيت الواحد -> (ships, conts, lines, conflicts) بنفس شكل الجداول القديمة."""
+    rows = [{k: _cf_g(r, k) for k in CHINA_FLAT_INPUT_KEYS} for r in flat_rows]
+    rows = [r for r in rows if any(r.values())]
+    conflicts = []
+    # ── الحاويات ──
+    cgroups = {}
+    for r in rows:
+        if r["container_no"]:
+            cgroups.setdefault(r["container_no"], []).append(r)
+    conts = []
+    for cno, grp in cgroups.items():
+        c = {k: "" for k in CHINA_CONT_COLS}
+        for k in _CF_CONT_ONLY + _CF_SHARED:
+            c[k] = _cf_pick(grp, k, conflicts, f"حاوية {cno}")
+        for a, b in _CF_CONT_RENAME.items():
+            c[a] = _cf_pick(grp, b, conflicts, f"حاوية {cno}")
+        c["shipment_id"] = _cf_pick(grp, "shipment_id", conflicts, f"حاوية {cno}")
+        c["final_destination"] = _cf_pick(grp, "final_destination", [], "")
+        c["last_updated_at"] = max([r["last_updated_at"] for r in grp] or [""])
+        c["updated_by"] = next((r["updated_by"] for r in grp if r["last_updated_at"] == c["last_updated_at"] and r["updated_by"]), "")
+        c["record_key"] = "CTR|" + cno
+        conts.append(c)
+    # ── الشحنات/الطلبات ──
+    sgroups = {}
+    for r in rows:
+        is_line = bool(r["barcode"] or r["sku"] or r["model_no"] or r["product_name_en"] or r["product_name_ar"] or r["line_id"])
+        has_ship = any(r[k] for k in _CF_SHIP_DATA)       # بيانات خاصة بالطلب نفسه (مش مجرد رقم الطلب على سطر المنتج)
+        bare = (not r["container_no"]) and (not is_line) and bool(r["internal_order_no"] or r["po_no"] or r["shipment_id"])
+        if has_ship or bare:
+            key = (r["internal_order_no"], r["po_no"], r["invoice_value"])
+            sgroups.setdefault(key, []).append(r)
+    ships = []
+    for key, grp in sgroups.items():
+        s = {k: "" for k in CHINA_SHIP_COLS}
+        label = f"طلب {key[0]} / {key[1]}"
+        s["shipment_id"] = _cf_pick(grp, "shipment_id", conflicts, label)
+        for k in _CF_SHIP_ONLY + _CF_SHARED:
+            s[k] = _cf_pick(grp, k, conflicts, label)
+        s["notes"] = _cf_pick(grp, "order_notes", conflicts, label)
+        s["last_updated_at"] = max([r["last_updated_at"] for r in grp] or [""])
+        s["updated_by"] = next((r["updated_by"] for r in grp if r["last_updated_at"] == s["last_updated_at"] and r["updated_by"]), "")
+        s["record_key"] = china_ship_record_key(s)
+        ships.append(s)
+    # ── أسطر المنتجات ──
+    lines, seq = [], {}
+    taken = {r["line_id"] for r in rows if r["line_id"]}
+    for r in rows:
+        if not (r["barcode"] or r["sku"] or r["model_no"] or r["product_name_en"] or r["product_name_ar"] or r["line_id"]):
+            continue
+        l = {k: "" for k in CHINA_LINE_COLS}
+        for k in _CF_LINE:
+            l[k] = r[k]
+        for k in ("shipment_id", "internal_order_no", "po_no", "currency", "container_no", "last_updated_at", "updated_by"):
+            l[k] = r[k]
+        if not l["line_id"]:
+            base = re.sub(r"[^A-Za-z0-9]", "", r["internal_order_no"]) or "LINE"
+            n = seq.get(base, 0)
+            while True:
+                n += 1
+                cand = f"{base}-{n:03d}"
+                if cand not in taken:
+                    break
+            seq[base] = n
+            taken.add(cand)
+            l["line_id"] = cand
+        try:
+            if l["total_qty"] and l["unit_cost"]:
+                v = round(float(l["total_qty"].replace(",", "")) * float(l["unit_cost"].replace(",", "")), 2)
+                l["line_amount"] = str(int(v)) if v == int(v) else f"{v:.2f}".rstrip("0").rstrip(".")
+        except Exception:
+            pass
+        l["record_key"] = "SKU|" + l["line_id"]
+        lines.append(l)
+    return ships, conts, lines, conflicts
+
+
+# ── دليل الموظف + سكريبت اختياري | Staff guide + optional Apps Script ──
+CHINA_STAFF_GUIDE = """📋 دليل تعبئة شيت الصين
+
+القاعدة: الشيت واحد (China). كل صف = منتج واحد داخل طلب، وبيانات الطلب والحاوية بتتكرر على صف كل منتج.
+ألوان الأعمدة: 🔵 الطلب/الشحنة | 🟠 الحاوية والتتبع | 🟢 المنتج | ⚪ التحديث | ⚙️ رمادي = محسوب تلقائي، لا تكتبي فيه.
+
+الخطوة 1 — طلب جديد من المصنع (صف لكل منتج):
+ 1) 🔵 رقم الطلب الداخلي (NO.xxx) + رقم PO + اسم المورد + شركة المشتري.
+ 2) 🔵 طريقة الشحن + Incoterm + العملة + قيمة الفاتورة + حالة الطلب (Factory Confirmed / In Production ...).
+ 3) 🟢 الباركود (هو اللي بيربط المنتج بالمتجر) + SKU + الموديل + اسم المنتج EN/AR + الكراتين + قطع/كرتون + إجمالي الكمية + تكلفة الوحدة + CBM + الأوزان.
+ 4) 🟢 مرحلة المخزون + تاريخ جاهزية الإنتاج، وSKU نون/أمازون/تريندول لو معروفين.
+ 5) لو الطلب فيه أكتر من منتج: صف لكل منتج، وانسخي بيانات 🔵 الطلب على كل صفوفه.
+ معرّف السطر اتركيه فاضي — بيتولّد تلقائي.
+
+الخطوة 2 — تجهيز الحاوية:
+ - على صف كل منتج داخل الحاوية: 🟠 رقم الحاوية + رقم الختم + نوع الحاوية (40HQ ...).
+ - غيّري 🟢 مرحلة المخزون إلى Allocated to Container (وLoaded بعد التحميل) وسجّلي تاريخ التحميل.
+ - المنتج الموزع على أكتر من حاوية: صف لكل حاوية، وكل صف بكمية وCBM الحاوية دي بس.
+
+الخطوة 3 — تم الشحن:
+ - 🔵 رقم الشحنة STxxxxx (بعد تخصيصها فقط — لا تكتبي NO.xxx هنا).
+ - 🟠 شركة الشحن + B/L + اسم السفينة + رقم الرحلة + ميناء التحميل + ميناء الوصول + ETD الفعلي + ETA الميناء + رابط التتبع.
+ - حالة الحاوية = Shipped / In Transit، ومرحلة المنتجات كذلك.
+
+الخطوة 4 — تأخير أو وصول:
+ - ETA اتغيّر: فلتر برقم الحاوية وعدّلي ETA على كل صفوفها، واكتبي سبب التأخير.
+ - عند الوصول فعلاً: وصول فعلي للميناء ← حالة التخليص ← وصول فعلي للمستودع، وغيّري حالة الحاوية (Arrived at Port / Cleared / Delivered to Warehouse) ومرحلة المنتج (Warehouse Received).
+ - الوصول الفعلي يُكتب بعد الوصول الحقيقي فقط، مش ETA.
+
+في كل تعديل: اكتبي تاريخ اليوم في «آخر تحديث» واسمك في «حدّث بواسطة».
+
+قواعد مهمة:
+ - لا تغيّري الصفوف 1–3 (العناوين) ولا ترتّبي الأعمدة.
+ - NO.xxx = رقم الطلب الداخلي فقط. STxxxxx = رقم الشحنة بعد تخصيصها.
+ - RIYADH = الوجهة النهائية وليست ميناء. الميناء = JEDDAH أو DAMMAM.
+ - عمود «اكتمال الصف»: MISSING = ناقص بيانات مطلوبة، OK = تمام.
+ - الطلب الملغي: حالة الطلب والحاوية والمرحلة = Cancelled."""
+
+CHINA_APPS_SCRIPT = """// اختياري: Extensions ▸ Apps Script ▸ الصقي الكود ▸ Save. بيوحّد بيانات الحاوية على كل صفوفها وبيختم «آخر تحديث» تلقائي.
+var CONT_COLS = ["container_type","seal_no","shipping_line","vessel_name","voyage_no","bl_no","port_of_loading","destination_port",
+  "actual_etd","eta_port","port_arrival_actual","warehouse_arrival_actual","container_status","customs_status","last_known_location",
+  "delay_reason","tracking_url","ctr_gross_weight_kg","ctr_total_cbm","ctr_total_cartons","ctr_total_units"];
+function onEdit(e) {
+  var sh = e.range.getSheet();
+  if (sh.getName() !== "China" || e.range.getRow() < 4) return;
+  var keys = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0];
+  var row = e.range.getRow(), col = e.range.getColumn();
+  var stamp = keys.indexOf("last_updated_at") + 1;
+  if (stamp > 0 && col !== stamp) sh.getRange(row, stamp).setValue(new Date());
+  if (e.range.getNumRows() > 1 || e.range.getNumColumns() > 1) return;
+  if (CONT_COLS.indexOf(keys[col - 1]) < 0) return;
+  var cn = keys.indexOf("container_no") + 1;
+  var no = sh.getRange(row, cn).getValue();
+  var last = sh.getLastRow();
+  if (!no || last < 4) return;
+  var nos = sh.getRange(4, cn, last - 3, 1).getValues();
+  var val = e.range.getValue();
+  for (var i = 0; i < nos.length; i++) {
+    if (nos[i][0] === no && (i + 4) !== row) {
+      sh.getRange(i + 4, col).setValue(val);
+      if (stamp > 0) sh.getRange(i + 4, stamp).setValue(new Date());
+    }
+  }
+}"""
+
+def _china_col_letter(n):
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+def _china_rgb(h):
+    return {"red": int(h[0:2], 16) / 255, "green": int(h[2:4], 16) / 255, "blue": int(h[4:6], 16) / 255}
+
+_CHINA_GROUP_STYLE = {   # (عنوان المجموعة, لون الشريط, لون العناوين)
+    "ORDER": ("📋 الطلب / الشحنة — يتكرر على كل منتج في نفس الطلب", "1F4E79", "DDEBF7"),
+    "CONTAINER": ("🚢 الحاوية والتتبع — يتكرر على كل منتج في نفس الحاوية", "C55A11", "FCE4D6"),
+    "LINE": ("📦 المنتج / الدفعة — صف لكل منتج", "2E7D32", "E2EFDA"),
+    "STAMP": ("🕓 التحديث", "595959", "EDEDED"),
+    "AUTO": ("⚙️ محسوب تلقائي — لا تكتبي هنا", "7F7F7F", "D9D9D9"),
+}
+CHINA_FLAT_MAX_ROWS = 3000
+
+def _china_auto_formulas():
+    c = {k: _china_col_letter(i + 1) for i, k in enumerate(CHINA_FLAT_KEYS)}
+    R = lambda k: f"{c[k]}4:{c[k]}"
+    qty, cost, eta, pa, cs = R("total_qty"), R("unit_cost"), R("eta_port"), R("port_arrival_actual"), R("container_status")
+    delay_v = f'IF({pa}<>"",{pa}-{eta},IF(({cs}="Delivered to Warehouse")+({cs}="Cancelled")>0,0,TODAY()-{eta}))'
+    ident = f'{R("barcode")}&{R("sku")}&{R("product_name_en")}'
+    return {
+        "line_amount": f'=ARRAYFORMULA(IF(({qty}<>"")*({cost}<>""),{qty}*{cost},""))',
+        "days_to_eta": f'=ARRAYFORMULA(IF({eta}="","",IFERROR({eta}-TODAY(),"")))',
+        "delay_days": f'=ARRAYFORMULA(IF({eta}="","",IFERROR(IF({delay_v}>0,{delay_v},0),"")))',
+        "row_state": (f'=ARRAYFORMULA(IF(LEN({R("internal_order_no")}&{R("po_no")}&{R("supplier_name")}&{R("container_no")}&{ident})=0,"",'
+                      f'IF(LEN({ident})>0,IF(({R("internal_order_no")}="")+({R("barcode")}="")+({qty}="")+({cost}="")+({R("stock_stage")}="")>0,"MISSING","OK"),'
+                      f'IF({R("container_no")}<>"",IF(({cs}="")+(({eta}="")*({cs}<>"Cancelled"))>0,"MISSING","OK"),'
+                      f'IF(({R("supplier_name")}="")+({R("po_no")}="")+({R("shipment_status")}="")>0,"MISSING","OK")))))'),
+    }
+
+def _china_format_flat(ws):
+    """بيكتب العناوين والمعادلات وينسّق الشيت (ألوان/تثبيت/قوايم/تلوين ذكي) — مرة واحدة عند الإنشاء الأول."""
+    sid, N = ws.id, len(CHINA_FLAT_KEYS)
+    band, labels = [""] * N, []
+    for i, (g, k, lab, w, kind) in enumerate(CHINA_FLAT_COLS):
+        if i == 0 or CHINA_FLAT_COLS[i - 1][0] != g:
+            band[i] = _CHINA_GROUP_STYLE[g][0]
+        labels.append(lab)
+    auto = _china_auto_formulas()
+    row4 = [auto.get(k, "") for k in CHINA_FLAT_KEYS]
+    ws.update(values=[band, CHINA_FLAT_KEYS, labels, row4], range_name="A1", value_input_option="USER_ENTERED")
+    rg = lambda r0, r1, c0, c1: {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1, "startColumnIndex": c0, "endColumnIndex": c1}
+    M = CHINA_FLAT_MAX_ROWS
+    reqs = []
+    i = 0
+    while i < N:
+        g = CHINA_FLAT_COLS[i][0]
+        j = i
+        while j + 1 < N and CHINA_FLAT_COLS[j + 1][0] == g:
+            j += 1
+        st_ = _CHINA_GROUP_STYLE[g]
+        if j > i:
+            reqs.append({"mergeCells": {"range": rg(0, 1, i, j + 1), "mergeType": "MERGE_ALL"}})
+        reqs.append({"repeatCell": {"range": rg(0, 1, i, j + 1), "cell": {"userEnteredFormat": {
+            "backgroundColor": _china_rgb(st_[1]), "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+            "textFormat": {"bold": True, "fontSize": 12, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}}},
+            "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat)"}})
+        reqs.append({"repeatCell": {"range": rg(2, 3, i, j + 1), "cell": {"userEnteredFormat": {
+            "backgroundColor": _china_rgb(st_[2]), "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
+            "textFormat": {"bold": True, "fontSize": 10}}},
+            "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)"}})
+        if g == "AUTO":
+            reqs.append({"repeatCell": {"range": rg(3, M, i, j + 1), "cell": {"userEnteredFormat": {
+                "backgroundColor": _china_rgb("F2F2F2"), "horizontalAlignment": "CENTER"}},
+                "fields": "userEnteredFormat(backgroundColor,horizontalAlignment)"}})
+        i = j + 1
+    reqs.append({"repeatCell": {"range": rg(1, 2, 0, N), "cell": {"userEnteredFormat": {
+        "backgroundColor": _china_rgb("F7F7F7"), "horizontalAlignment": "CENTER",
+        "textFormat": {"fontSize": 8, "foregroundColor": _china_rgb("7F7F7F")}}},
+        "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,textFormat)"}})
+    for i, (g, k, lab, w, kind) in enumerate(CHINA_FLAT_COLS):
+        reqs.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": i, "endIndex": i + 1},
+                                                   "properties": {"pixelSize": int(w * 7 + 12)}, "fields": "pixelSize"}})
+        if kind in ("t", "d") and g != "AUTO":
+            nf = {"type": "TEXT"} if kind == "t" else {"type": "DATE", "pattern": "yyyy-mm-dd"}
+            reqs.append({"repeatCell": {"range": rg(3, M, i, i + 1), "cell": {"userEnteredFormat": {"numberFormat": nf, "horizontalAlignment": "CENTER"}},
+                                        "fields": "userEnteredFormat(numberFormat,horizontalAlignment)"}})
+        elif kind == "n":
+            reqs.append({"repeatCell": {"range": rg(3, M, i, i + 1), "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                                        "fields": "userEnteredFormat.horizontalAlignment"}})
+        if k in CHINA_FLAT_LISTS:
+            reqs.append({"setDataValidation": {"range": rg(3, M, i, i + 1), "rule": {"condition": {
+                "type": "ONE_OF_LIST", "values": [{"userEnteredValue": x} for x in CHINA_FLAT_LISTS[k]]}, "showCustomUi": True, "strict": False}}})
+    reqs.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "ROWS", "startIndex": 0, "endIndex": 1},
+                                               "properties": {"pixelSize": 30}, "fields": "pixelSize"}})
+    reqs.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "ROWS", "startIndex": 2, "endIndex": 3},
+                                               "properties": {"pixelSize": 44}, "fields": "pixelSize"}})
+    reqs.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 3, "frozenColumnCount": 2}},
+                                           "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}})
+    reqs.append({"setBasicFilter": {"filter": {"range": rg(2, M, 0, N)}}})
+    c = {k: _china_col_letter(i + 1) for i, k in enumerate(CHINA_FLAT_KEYS)}
+    def cf(key, formula, bg, fg=None, bold=False):
+        fmt = {"backgroundColor": _china_rgb(bg)}
+        if fg or bold:
+            fmt["textFormat"] = {"bold": bold, **({"foregroundColor": _china_rgb(fg)} if fg else {})}
+        i = CHINA_FLAT_KEYS.index(key)
+        reqs.append({"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rg(3, M, i, i + 1)], "booleanRule": {
+            "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": formula}]}, "format": fmt}}}})
+    E, A, S_ = c["eta_port"], c["port_arrival_actual"], c["container_status"]
+    cf("eta_port", f'=AND(${E}4<>"",${E}4<TODAY(),${A}4="",${S_}4<>"Cancelled")', "F8CBAD", "9C0006", True)
+    cf("eta_port", f'=AND(${E}4<>"",${E}4>=TODAY(),${E}4-TODAY()<=7,${A}4="")', "FFF2CC")
+    cf("row_state", f'=${c["row_state"]}4="MISSING"', "F8CBAD", "9C0006", True)
+    cf("row_state", f'=${c["row_state"]}4="OK"', "C6EFCE")
+    for k in ("container_status", "shipment_status", "stock_stage"):
+        x = c[k]
+        cf(k, f'=${x}4="Cancelled"', "D9D9D9", "7F7F7F")
+        cf(k, f'=OR(${x}4="Warehouse Received",${x}4="Delivered to Warehouse")', "C6EFCE")
+        cf(k, f'=${x}4="Shipped / In Transit"', "DDEBF7")
+        cf(k, f'=${x}4="In Production"', "FFF2CC")
+    ss.batch_update({"requests": reqs})
+
+def get_china_flat_ws():
+    """شيت China الواحد — بيتنشأ تلقائي أول مرة (بالتنسيق والمعادلات)، ولو كان فيه بيانات قديمة في التابات
+    الـ3 (ChinaShipments/ChinaLines/ChinaContainers) بتتنقل له مرة واحدة."""
+    if "china_flat_ws" in st.session_state:
+        return st.session_state["china_flat_ws"]
+    ws, created, last = None, False, None
+    for attempt in range(5):
+        try:
+            ws = ss.worksheet(CHINA_FLAT_TAB)
+            break
+        except gspread.exceptions.WorksheetNotFound:
+            try:
+                ws = ss.add_worksheet(title=CHINA_FLAT_TAB, rows=str(CHINA_FLAT_MAX_ROWS), cols=str(len(CHINA_FLAT_KEYS)))
+                created = True
+                break
+            except gspread.exceptions.APIError as e:
+                last = e
+                time.sleep(1 * (2 ** attempt))
+        except gspread.exceptions.APIError as e:
+            last = e
+            time.sleep(1 * (2 ** attempt))
+    if ws is None:
+        raise last
+    if created:
+        try:
+            _china_format_flat(ws)
+        except Exception as e:
+            st.warning(f"⚠️ اتعمل شيت China لكن التنسيق ما اكتملش: {e}")
+        moved = 0
+        try:
+            old = {}
+            for tab in ("ChinaShipments", "ChinaLines", "ChinaContainers"):
+                try:
+                    old[tab] = _china_rows_from_raw(ss.worksheet(tab).get_all_values())
+                except gspread.exceptions.WorksheetNotFound:
+                    old[tab] = []
+            if any(old.values()):
+                flat = china_tables_to_flat(old["ChinaShipments"], old["ChinaContainers"], old["ChinaLines"])
+                _china_write_flat(ws, flat)
+                moved = len(flat)
+        except Exception as e:
+            st.warning(f"⚠️ مقدرتش أنقل البيانات القديمة: {e}")
+        st.session_state["china_flash"] = ("✅ تم إنشاء شيت China في Google Sheet" + (f" ونقل {moved} صف من البيانات القديمة له." if moved else ".")
+                                           + " الموظفة تقدر تعدّل فيه مباشرة.")
+    st.session_state["china_flat_ws"] = ws
+    return ws
+
+def _china_cell(v):
+    v = "" if v is None else str(v)
+    return ("'" + v) if v[:1] in ("=", "+", "@") else v
+
+def _china_write_flat(ws, flat_rows):
+    """بيكتب أعمدة الإدخال بس من صف 4 (أعمدة المعادلات بتفضل زي ما هي)."""
+    last_col = _china_col_letter(len(CHINA_FLAT_INPUT_KEYS))
+    n = len(flat_rows)
+    if ws.row_count < n + CHINA_FLAT_HDR_ROWS + 50:
+        ws.add_rows(n + CHINA_FLAT_HDR_ROWS + 200 - ws.row_count)
+    ws.batch_clear([f"A4:{last_col}{max(ws.row_count, 4)}"])
+    for i in range(0, n, 800):
+        chunk = [[_china_cell(r.get(k, "")) for k in CHINA_FLAT_INPUT_KEYS] for r in flat_rows[i:i + 800]]
+        ws.update(values=chunk, range_name=f"A{4 + i}", value_input_option="USER_ENTERED")
+    clear_cache(ws)
+
+_CHINA_LABELS = {c[1]: c[2] for c in CHINA_FLAT_COLS}
+
+def _china_is_label_row(d):
+    """صف العناوين العربي (تحت صف المفاتيح) — مش بيانات."""
+    return sum(1 for k, v in d.items() if v and v == _CHINA_LABELS.get(k)) >= 3
+
+def _china_read_flat(raw):
+    """الصفوف الخام من الشيت -> قايمة dicts بمفاتيح الأعمدة (بتدوّر على صف المفاتيح، فمش مهم لو اتضاف صفوف فوق)."""
+    if not raw:
+        return []
+    hi = None
+    for i, r in enumerate(raw[:8]):
+        low = {str(c).strip() for c in r}
+        if "container_no" in low and "internal_order_no" in low:
+            hi = i
+            break
+    if hi is None:
+        return []
+    pos = {str(c).strip(): j for j, c in enumerate(raw[hi]) if str(c).strip() in CHINA_FLAT_INPUT_KEYS}
+    out = []
+    for row in raw[hi + 1:]:
+        d = {k: (str(row[j]).strip() if j < len(row) else "") for k, j in pos.items()}
+        if any(d.values()) and not _china_is_label_row(d):
+            out.append(d)
+    return out
+
+def _china_flat_raw(force=False):
+    """الخام من الشيت — بيتجدّد تلقائي كل دقيقتين (عشان تعديلات الموظفة تبان) أو بالزرار."""
+    ws = get_china_flat_ws()
+    ts = st.session_state.get("china_flat_ts", 0)
+    if force or time.time() - ts > 120:
+        raw = get_cached(ws, force=True)
+        st.session_state["china_flat_ts"] = time.time()
+        return raw
+    return get_cached(ws)
+
+def _china_current_tables(force=False):
+    return china_flat_to_tables(_china_read_flat(_china_flat_raw(force)))
+
+def _china_ship_key(r):
+    return china_ship_record_key(r)
+
+def _china_line_key(r):
+    return r.get("line_id") or r.get("record_key") or "|".join(
+        [r.get("shipment_id", ""), r.get("container_no", ""), r.get("barcode", ""), r.get("sku", "")])
+
+def _china_cont_key(r):
+    return r.get("container_no") or r.get("record_key") or ""
+
+def _china_clean_sheet_row(r, cols):
+    return {c: _china_clean(r.get(c), c) for c in cols if c not in CHINA_SKIP_COLS}
+
+# ── قراءة ملف الإكسيل: بيقبل الملف القديم (3 صفحات) أو شيت China الواحد | Parse either format ──
+def _china_header_row(rows, keys):
+    best, best_n = None, 0
+    for i, r in enumerate(rows[:15]):
+        n = sum(1 for c in r if c is not None and str(c).strip() in keys)
+        if n > best_n:
+            best, best_n = i, n
+    return best if best_n >= 6 else None
+
 def _china_parse_sheet(ws, cols):
     rows = list(ws.iter_rows(values_only=True))
-    hdr_i = None
-    for i, r in enumerate(rows[:15]):
-        if r and str(r[0] if r[0] is not None else "").strip().lower() == "shipment_id":
-            hdr_i = i
-            break
+    hdr_i = _china_header_row(rows, set(cols))
     if hdr_i is None:
         return None
-    hdr = [str(h).strip() if h is not None else "" for h in rows[hdr_i]]
+    hdr = []
+    for j, h in enumerate(rows[hdr_i]):
+        h = str(h).strip() if h is not None else ""
+        if h not in cols and j < len(cols):     # عنوان تالف (زي 1268 بدل shipment_id): بنعتمد على ترتيب العمود المتوقع
+            h = cols[j] if cols[j] not in [str(x).strip() for x in rows[hdr_i] if x is not None] else h
+        hdr.append(h)
     out = []
     for r in rows[hdr_i + 1:]:
         if not r or not any(c not in (None, "") for c in r):
@@ -1610,17 +2185,38 @@ def _china_parse_sheet(ws, cols):
         for j, h in enumerate(hdr):
             if h in cols and h not in CHINA_SKIP_COLS and j < len(r):
                 d[h] = _china_clean(r[j], h)
-        out.append(d)
+        if any(d.values()):
+            out.append(d)
     return out
 
 @st.cache_data(show_spinner=False)
 def _china_parse_workbook(file_bytes):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-    by_name = {n.strip().upper(): n for n in wb.sheetnames}
     res = {"schema": "", "ships": None, "lines": None, "conts": None}
-    for sheet_key, out_key, cols in (("SHIPMENTS", "ships", CHINA_SHIP_COLS),
-                                     ("SKU_LINES", "lines", CHINA_LINE_COLS),
+    # 1) شيت China الواحد: صفحة فيها مفاتيح الطلب والحاوية والمنتج مع بعض (الملف القديم بيفصلهم على 3 صفحات)
+    for ws in wb.worksheets:
+        rows = list(ws.iter_rows(min_row=1, max_row=8, values_only=True))
+        hit = None
+        for i, r in enumerate(rows):
+            low = {str(c).strip() for c in r if c is not None}
+            if {"container_no", "line_id", "internal_order_no", "supplier_name", "container_status", "barcode"} <= low:
+                hit = i
+                break
+        if hit is None:
+            continue
+        keys = [str(c).strip() if c is not None else "" for c in rows[hit]]
+        flat = []
+        for r in ws.iter_rows(min_row=hit + 2, values_only=True):
+            d = {k: _china_clean(r[j], k) for j, k in enumerate(keys) if k in CHINA_FLAT_INPUT_KEYS and j < len(r)}
+            if any(d.values()) and not _china_is_label_row(d):
+                flat.append(d)
+        ships, conts, lines, _ = china_flat_to_tables(flat)
+        res.update({"schema": "SMARTSTORE_CHINA_V5.1", "ships": ships, "lines": lines, "conts": conts})
+        return res
+    # 2) الملف القديم: SHIPMENTS / SKU_LINES / CONTAINERS
+    by_name = {n.strip().upper(): n for n in wb.sheetnames}
+    for sheet_key, out_key, cols in (("SHIPMENTS", "ships", CHINA_SHIP_COLS), ("SKU_LINES", "lines", CHINA_LINE_COLS),
                                      ("CONTAINERS", "conts", CHINA_CONT_COLS)):
         real = by_name.get(sheet_key)
         if not real:
@@ -1642,48 +2238,25 @@ def _china_parse_workbook(file_bytes):
         else:
             rows = [r for r in rows if r.get("container_no")]
         res[out_key] = rows
+    for r in res["ships"] or []:
+        r["record_key"] = china_ship_record_key(r)
+    for r in res["conts"] or []:
+        r["record_key"] = "CTR|" + r.get("container_no", "")
     return res
 
-# ── قراءة/كتابة تابات الصين في جوجل شيت | Read / write the China tabs ──
-def _china_rows_from_raw(raw):
-    if not raw or len(raw) < 2:
-        return []
-    hdr = [str(h).strip() for h in raw[0]]
-    out = []
-    for row in raw[1:]:
-        if not any(str(c).strip() for c in row):
-            continue
-        out.append({h: (str(row[i]).strip() if i < len(row) else "") for i, h in enumerate(hdr) if h})
-    return out
-
-def _china_write_sheet(ws, cols, rows):
-    last = None
-    for attempt in range(5):
-        try:
-            ws.clear()
-            values = [cols] + [[r.get(c, "") for c in cols] for r in rows]
-            for i in range(0, len(values), 500):
-                ws.append_rows(values[i:i + 500], value_input_option="RAW")
-            clear_cache(ws)
-            return True
-        except gspread.exceptions.APIError as e:
-            last = e
-            time.sleep(1 * (2 ** attempt))
-    raise last
-
 def _china_diff(parsed):
-    """مقارنة الملف المرفوع بالمحفوظ حاليًا: جديد / اتغيّر / موجود عندنا ومش في الملف / ثابت — عشان نتأكد
-    إن التحديث صح ومفيش تكرار قبل ما نحفظ. بيرجع (ملخص لكل صفحة, تفاصيل التغييرات)."""
-    sheets = get_china_sheets()
-    specs = [("SHIPMENTS", "ChinaShipments", CHINA_SHIP_COLS, "ships", _china_ship_key),
-             ("SKU_LINES", "ChinaLines", CHINA_LINE_COLS, "lines", _china_line_key),
-             ("CONTAINERS", "ChinaContainers", CHINA_CONT_COLS, "conts", _china_cont_key)]
+    """مقارنة الملف المرفوع بالموجود في شيت China: جديد / اتغيّر / موجود عندنا ومش في الملف / ثابت."""
+    cur_ships, cur_conts, cur_lines, _ = _china_current_tables(force=True)
+    specs = [("SHIPMENTS", CHINA_SHIP_COLS, "ships", _china_ship_key, cur_ships),
+             ("SKU_LINES", CHINA_LINE_COLS, "lines", _china_line_key, cur_lines),
+             ("CONTAINERS", CHINA_CONT_COLS, "conts", _china_cont_key, cur_conts)]
     summary, details = [], []
-    for label, tab, cols, pk, keyfn in specs:
+    skip = CHINA_SKIP_COLS | {"record_key", "row_state", "line_amount", "last_updated_at", "updated_by"}
+    for label, cols, pk, keyfn, cur in specs:
         new_rows = parsed.get(pk)
         if new_rows is None:
             continue
-        old = {keyfn(r): r for r in _china_rows_from_raw(get_cached(sheets[tab]))}
+        old = {keyfn(r): r for r in cur}
         new = {keyfn(r): r for r in new_rows}
         added = [k for k in new if k not in old]
         removed = [k for k in old if k not in new]
@@ -1691,7 +2264,7 @@ def _china_diff(parsed):
         for k in new:
             if k in old:
                 diffs = [(c, old[k].get(c, ""), new[k].get(c, "")) for c in cols
-                         if c not in CHINA_SKIP_COLS and old[k].get(c, "") != new[k].get(c, "")]
+                         if c not in skip and old[k].get(c, "") != new[k].get(c, "")]
                 if diffs:
                     changed.append(k)
                     for c, ov, nv in diffs:
@@ -1701,48 +2274,65 @@ def _china_diff(parsed):
     return summary, details
 
 def _china_do_import(parsed, replace, label=""):
-    sheets = get_china_sheets()
-    specs = [("ChinaShipments", CHINA_SHIP_COLS, parsed.get("ships"), _china_ship_key),
-             ("ChinaLines", CHINA_LINE_COLS, parsed.get("lines"), _china_line_key),
-             ("ChinaContainers", CHINA_CONT_COLS, parsed.get("conts"), _china_cont_key)]
-    counts = {}
-    for tab, cols, new_rows, keyfn in specs:
-        if new_rows is None:      # الصفحة دي مش موجودة في الملف — سيبها زي ما هي
-            continue
-        if replace:
-            final = new_rows
+    ws = get_china_flat_ws()
+    cur_ships, cur_conts, cur_lines, _ = _china_current_tables(force=True)
+    pieces = {}
+    for pk, cur, keyfn in (("ships", cur_ships, _china_ship_key), ("lines", cur_lines, _china_line_key), ("conts", cur_conts, _china_cont_key)):
+        new_rows = parsed.get(pk)
+        if new_rows is None:          # الصفحة دي مش في الملف — سيبها زي ما هي
+            pieces[pk] = cur
+        elif replace:
+            pieces[pk] = new_rows
         else:
-            existing = _china_rows_from_raw(get_cached(sheets[tab], force=True))
-            final = _china_merge(existing, new_rows, keyfn)
-        _china_write_sheet(sheets[tab], cols, final)
-        counts[tab] = len(final)
+            pieces[pk] = _china_merge(cur, new_rows, keyfn)
+    flat = china_tables_to_flat(pieces["ships"], pieces["conts"], pieces["lines"])
+    _china_write_flat(ws, flat)
+    st.session_state["china_flat_ts"] = 0
     try:
         save_setting("china_last_import", f"{now_str()} | {label} | {'استبدال' if replace else 'دمج'}")
     except Exception:
         pass
-    return counts
+    return {"SHIPMENTS": len(pieces["ships"]), "SKU_LINES": len(pieces["lines"]), "CONTAINERS": len(pieces["conts"]), "rows": len(flat)}
 
 def _china_delete_all():
-    sheets = get_china_sheets()
-    for tab, cols in CHINA_TABS.items():
-        _china_write_sheet(sheets[tab], cols, [])
+    _china_write_flat(get_china_flat_ws(), [])
+    st.session_state["china_flat_ts"] = 0
 
 def _china_delete_order(order_no):
-    """يحذف طلب (internal_order_no) كامل: صفوف الشحنات + أسطر المنتجات، والحاويات اللي كانت
-    مرتبطة بأسطره بس ومبقاش ليها أي سطر تاني | Deletes one order with its lines, plus
-    containers that only that order's lines used."""
-    sheets = get_china_sheets()
-    ships = _china_rows_from_raw(get_cached(sheets["ChinaShipments"], force=True))
-    lines = _china_rows_from_raw(get_cached(sheets["ChinaLines"], force=True))
-    conts = _china_rows_from_raw(get_cached(sheets["ChinaContainers"], force=True))
+    """يحذف طلب (internal_order_no) كامل: شحناته وأسطره، والحاويات اللي كانت مربوطة بأسطره بس."""
+    ships, conts, lines, _ = _china_current_tables(force=True)
     gone = {l.get("container_no", "") for l in lines if l.get("internal_order_no") == order_no} - {""}
     lines2 = [l for l in lines if l.get("internal_order_no") != order_no]
     still = {l.get("container_no", "") for l in lines2}
     conts2 = [c for c in conts if not (c.get("container_no", "") in gone and c.get("container_no", "") not in still)]
     ships2 = [s for s in ships if s.get("internal_order_no") != order_no]
-    _china_write_sheet(sheets["ChinaShipments"], CHINA_SHIP_COLS, ships2)
-    _china_write_sheet(sheets["ChinaLines"], CHINA_LINE_COLS, lines2)
-    _china_write_sheet(sheets["ChinaContainers"], CHINA_CONT_COLS, conts2)
+    _china_write_flat(get_china_flat_ws(), china_tables_to_flat(ships2, conts2, lines2))
+    st.session_state["china_flat_ts"] = 0
+
+
+def get_china_bundle():
+    raw = _china_flat_raw()
+    if st.session_state.get("china_bundle_src") is raw and "china_bundle" in st.session_state:
+        return st.session_state["china_bundle"]
+    ships, conts_list, lines, conflicts = china_flat_to_tables(_china_read_flat(raw))
+    conts = {c["container_no"]: c for c in conts_list if c.get("container_no")}
+    ship_by_pair, ship_by_no = {}, {}
+    for s in ships:
+        ship_by_pair.setdefault((s.get("internal_order_no", ""), s.get("po_no", "")), s)
+        ship_by_no.setdefault(s.get("internal_order_no", ""), s)
+    enriched = [_china_enrich(l, conts, ship_by_pair, ship_by_no) for l in lines]
+    by_code, by_noon_sku = {}, {}
+    for e in enriched:
+        if e["_norm"]:
+            by_code.setdefault(e["_norm"], []).append(e)
+        ns = e.get("noon_sku", "").strip().upper()
+        if ns:
+            by_noon_sku.setdefault(ns, []).append(e)
+    bundle = {"ships": ships, "conts": conts_list, "conts_map": conts, "lines": enriched,
+              "by_code": by_code, "by_noon_sku": by_noon_sku, "conflicts": conflicts}
+    st.session_state["china_bundle"] = bundle
+    st.session_state["china_bundle_src"] = raw
+    return bundle
 
 # ── البيانات المجمّعة والمربوطة (متكاشة) | The joined data bundle (cached) ──
 def _china_enrich(line, conts, ship_by_pair, ship_by_no):
@@ -1809,33 +2399,6 @@ def _china_enrich(line, conts, ship_by_pair, ship_by_no):
     e["_norm"] = _china_norm_code(line.get("barcode", ""))
     return e
 
-def get_china_bundle():
-    sheets = get_china_sheets()
-    raws = [get_cached(sheets[t]) for t in ("ChinaShipments", "ChinaLines", "ChinaContainers")]
-    src = st.session_state.get("china_bundle_src")
-    if src is not None and "china_bundle" in st.session_state and all(a is b for a, b in zip(src, raws)):
-        return st.session_state["china_bundle"]
-    ships = _china_rows_from_raw(raws[0])
-    lines = _china_rows_from_raw(raws[1])
-    conts_list = _china_rows_from_raw(raws[2])
-    conts = {c["container_no"]: c for c in conts_list if c.get("container_no")}
-    ship_by_pair, ship_by_no = {}, {}
-    for s in ships:
-        ship_by_pair.setdefault((s.get("internal_order_no", ""), s.get("po_no", "")), s)
-        ship_by_no.setdefault(s.get("internal_order_no", ""), s)
-    enriched = [_china_enrich(l, conts, ship_by_pair, ship_by_no) for l in lines]
-    by_code, by_noon_sku = {}, {}
-    for e in enriched:
-        if e["_norm"]:
-            by_code.setdefault(e["_norm"], []).append(e)
-        ns = e.get("noon_sku", "").strip().upper()
-        if ns:
-            by_noon_sku.setdefault(ns, []).append(e)
-    bundle = {"ships": ships, "conts": conts_list, "conts_map": conts, "lines": enriched,
-              "by_code": by_code, "by_noon_sku": by_noon_sku}
-    st.session_state["china_bundle"] = bundle
-    st.session_state["china_bundle_src"] = raws
-    return bundle
 
 def _china_code_to_skus():
     """كود (موحّد) -> قائمة SKUs المتجر المرتبطة بيه من تاب التكويد | normalised code -> store SKUs."""
@@ -2429,7 +2992,8 @@ def render_china_journey(lines, store_skus_fn, today):
 def render_china_upload(key_prefix, bundle):
     has_data = bool(bundle["lines"] or bundle["ships"] or bundle["conts"])
     ver = st.session_state.get("china_upl_ver", 0)
-    with st.expander("📤 رفع / تحديث ملف شحنات الصين | Upload China Shipments File", expanded=not has_data):
+    with st.expander("📤 رفع / تحديث من ملف إكسيل (اختياري — الإدخال الأساسي من شيت China) | Upload from Excel (optional)", expanded=not has_data):
+        st.caption("بيقبل ملف V5.1 القديم (3 صفحات) أو نسخة الشيت الواحد، ويدمجها في شيت China بدون تكرار | Accepts the old 3-sheet file or the single-sheet version")
         upl = st.file_uploader("ارفع ملف الإكسيل (xlsx/xlsm) | Upload the China Excel file",
                                type=["xlsx", "xlsm"], key=f"{key_prefix}_upl_{ver}")
         if upl:
@@ -2758,7 +3322,7 @@ def _china_days(date_str, today):
 
 def render_china_tab():
     st.subheader("🚢 شحنات الصين | China Shipments")
-    st.caption("بضاعة جاية من الصين — بيانات ملف الإكسيل (SHIPMENTS / SKU_LINES / CONTAINERS) مربوطة بالتكويد: "
+    st.caption("بضاعة جاية من الصين — بيانات شيت China (شيت واحد في Google Sheet بتعبّيه الموظفة مباشرة) مربوطة بالتكويد: "
                "الكود01 في تاب التكويد = barcode في SKU_LINES. الكمية القادمة بتظهر كمان جوه تابات مبيعات FBN وFBB | "
                "Incoming goods from China, linked to Tacweed (Code01 = barcode). Also shown inside the FBN/FBB sales tabs.")
     flash = st.session_state.pop("china_flash", None)
@@ -2766,6 +3330,27 @@ def render_china_tab():
         st.success(flash)
 
     bundle = get_china_bundle()
+    _cfw = get_china_flat_ws()
+    _cb1, _cb2, _cb3 = st.columns([2, 2, 3])
+    with _cb1:
+        st.link_button("📝 افتح شيت الصين للتعديل | Open sheet", f"https://docs.google.com/spreadsheets/d/{ss.id}/edit#gid={_cfw.id}",
+                       use_container_width=True)
+    with _cb2:
+        if st.button("🔄 حدّث من الشيت | Refresh", key="china_refresh_flat", use_container_width=True):
+            st.session_state["china_flat_ts"] = 0
+            st.session_state.pop("china_bundle", None)
+            st.session_state.pop("china_bundle_src", None)
+            st.rerun()
+    with _cb3:
+        st.caption("التعديل بيتم في الشيت مباشرة، والتطبيق بيقرأه تلقائي (كل دقيقتين أو بزرار التحديث) | Edit in the sheet; the app re-reads it automatically")
+    with st.expander("📖 دليل تعبئة الشيت للموظفة | Staff guide", expanded=False):
+        st.code(CHINA_STAFF_GUIDE, language=None)
+        st.markdown("**اختياري — سكريبت Google Apps Script** بيوحّد بيانات الحاوية على كل صفوفها وبيختم آخر تحديث تلقائي:")
+        st.code(CHINA_APPS_SCRIPT, language="javascript")
+    if bundle.get("conflicts"):
+        with st.expander(f"⚠️ {len(bundle['conflicts'])} تعارض في الشيت (نفس الحاوية/الطلب بقيم مختلفة) — راجعيها", expanded=False):
+            st.caption("التطبيق أخد القيمة الأحدث (حسب «آخر تحديث») مؤقتًا. صحّحي القيمة على كل صفوف نفس الحاوية/الطلب في الشيت.")
+            st.dataframe(pd.DataFrame(bundle["conflicts"]), use_container_width=True, hide_index=True)
     render_china_upload("china", bundle)
     _li = load_settings().get("china_last_import", "")
     if _li:
