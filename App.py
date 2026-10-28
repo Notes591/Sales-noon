@@ -1730,6 +1730,9 @@ def china_next_action_formula(R, L, link_prefix, row):
     H = lambda w: f'ISNUMBER(SEARCH("{w}",{S}))'
     cn, ae, pa, wa = R("container_no"), R("actual_etd"), R("port_arrival_actual"), R("warehouse_arrival_actual")
     eta, tr, bl, prd = R("eta_port"), R("tracking_url"), R("bl_no"), R("production_ready_date")
+    sl, seal = R("shipping_line"), R("seal_no")
+    isline = f'LEN({R("barcode")}&{R("sku")}&{R("product_name_en")})>0'
+    orderonly = f'(LEN({R("barcode")}&{R("sku")}&{R("product_name_en")})=0)*({cn}="")'
     blank = f'LEN({R("internal_order_no")}&{R("po_no")}&{R("supplier_name")}&{cn}&{R("barcode")}&{R("sku")})=0'
     cancel, deliv, cleared, customs, port = H("ملغي"), H("وصلت المستودع"), H("تم التخليص"), H("تحت التخليص"), H("وصلت الميناء")
     transit, loaded, prep, ready = H("في البحر"), H("تم التحميل"), H("حاوية متجهزة"), H("جاهز للشحن")
@@ -1754,6 +1757,11 @@ def china_next_action_formula(R, L, link_prefix, row):
         (f'{S}=""', leaf("اختاري الحالة | Select status", "status")),
         (cancel, leaf("—")),
         (deliv, leaf("✔ مكتمل | Completed")),
+        *[(f'({isline})*({R(k)}="")', leaf(f"أدخلي {ar} | Enter {en}", k)) for k, ar, en in (
+            ("internal_order_no", "رقم الطلب", "order no."), ("barcode", "الباركود", "barcode"),
+            ("total_qty", "الكمية", "quantity"), ("unit_cost", "تكلفة الوحدة", "unit cost"))],
+        *[(f'({orderonly})*({R(k)}="")', leaf(f"أدخلي {ar} | Enter {en}", k)) for k, ar, en in (
+            ("po_no", "رقم PO", "PO no."), ("supplier_name", "المورد", "supplier"))],
         (cleared, iff(f'{wa}=""', leaf("سجّلي وصول المستودع | Enter warehouse arrival", "warehouse_arrival_actual"),
                       leaf("غيّري الحالة لـ «وصلت المستودع» | Set status to Delivered", "status"))),
         (customs, iff(f'{pa}=""', leaf("سجّلي وصول الميناء الفعلي | Enter port arrival date", "port_arrival_actual"),
@@ -1762,19 +1770,25 @@ def china_next_action_formula(R, L, link_prefix, row):
                    leaf("حدّثي حالة التخليص | Update customs status", "customs_status"))),
         (transit, chain([(f'{ae}=""', leaf("سجّلي ETD الفعلي | Enter actual ETD", "actual_etd")),
                          (f'{eta}=""', leaf("سجّلي ETA الميناء | Enter port ETA", "eta_port")),
+                         (f'{sl}=""', leaf("سجّلي شركة الشحن | Enter shipping line", "shipping_line")),
+                         (f'{bl}=""', leaf("سجّلي B/L | Enter B/L no.", "bl_no")),
                          (f'{tr}=""', leaf("أضيفي رابط التتبع | Add tracking link", "tracking_url"))],
                         leaf("لما توصل سجّلي وصول الميناء | On arrival enter port arrival", "port_arrival_actual"))),
         (loaded, chain([(f'{cn}=""', leaf("سجّلي رقم الحاوية | Enter container no.", "container_no")),
-                        (f'{bl}=""', leaf("سجّلي B/L وشركة الشحن | Enter B/L and shipping line", "bl_no"))],
+                        (f'{seal}=""', leaf("سجّلي رقم الختم | Enter seal no.", "seal_no")),
+                        (f'{sl}=""', leaf("سجّلي شركة الشحن | Enter shipping line", "shipping_line")),
+                        (f'{bl}=""', leaf("سجّلي B/L | Enter B/L no.", "bl_no"))],
                        leaf("غيّري الحالة لـ «في البحر» عند الإبحار | Set In transit when sailed", "status"))),
-        (prep, iff(f'{cn}=""', leaf("سجّلي رقم الحاوية والختم | Enter container no. and seal", "container_no"),
-                   leaf("غيّري الحالة لـ «تم التحميل» بعد التحميل | Set Loaded after loading", "status"))),
+        (prep, chain([(f'{cn}=""', leaf("سجّلي رقم الحاوية | Enter container no.", "container_no")),
+                      (f'{seal}=""', leaf("سجّلي رقم الختم | Enter seal no.", "seal_no"))],
+                     leaf("غيّري الحالة لـ «تم التحميل» بعد التحميل | Set Loaded after loading", "status"))),
         (ready, leaf("جهّزي الحاوية: سجّلي رقمها | Prepare container: enter its number", "container_no")),
         (done, leaf("أكدي جاهزية الشحن وغيّري الحالة | Confirm ready to ship, update status", "status")),
         (prod, iff(f'{prd}=""', leaf("سجّلي تاريخ جاهزية الإنتاج | Enter production ready date", "production_ready_date"),
                    leaf("لما يخلص الإنتاج غيّري الحالة | Update status when production ends", "status"))),
         (hold, leaf("راجعي سبب الإيقاف في الملاحظات | Review hold reason in notes", "order_notes")),
-    ], leaf("أكدي الطلب مع المصنع وحدّثي الحالة | Confirm with factory, update status", "status"))
+    ], iff(f'{prd}=""', leaf("سجّلي تاريخ جاهزية الإنتاج المتوقع | Enter expected production ready date", "production_ready_date"),
+           leaf("لما يبدأ الإنتاج غيّري الحالة | Update status when production starts", "status")))
     early_port = f'({transit})+({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
     early_sail = f'({loaded})+({prep})+({ready})+({done})+({prod})+({factory})'
     W = q("⚠ التواريخ أحدث من الحالة | Dates ahead of status — ")
