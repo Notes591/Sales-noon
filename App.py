@@ -54,6 +54,9 @@ if "_gs_ss" not in st.session_state:
 ss = st.session_state["_gs_ss"]
 
 # ══ الأوراق ══
+CONTRACT_COLS = ["اسم العقد | Contract Name", "تاريخ البداية | Start Date", "تاريخ النهاية | End Date", "ملاحظات | Notes",
+                 "تم الاطلاع على | Acknowledged", "وقت الاطلاع | Acknowledged At"]
+
 TABS_CONFIG = {
     "Requests":          ["SKU","Quantity","Image URL","Date Added","File Name"],
     "Approved":          ["SKU","Quantity Requested","Quantity Approved","Image URL","Date Added","Date Approved"],
@@ -158,6 +161,7 @@ TABS_CONFIG = {
                                "Cost", "Clicks", "Views", "Orders", "Sales", "ROAS", "Date Uploaded"],
     # ملف منتجات تريندول (لربط Content ID بالـ Barcode) — بيتعمل تلقائي أول مرة
     "TrendyolProducts": ["Content ID", "Barcode", "Product Name", "Image URL", "Date Uploaded"],
+    "Contracts":        CONTRACT_COLS,
 }
 
 def get_or_create_worksheet(tab, headers, retries=5, delay=2):
@@ -355,6 +359,7 @@ stock_amazon_sheet   = sheets["StockAmazon"]
 daily_orders_trendyol_sheet = sheets["DailyOrdersTrendyol"]
 ads_ty_sheet = sheets["AdvertisementsTrendyol"]
 ty_products_sheet = sheets["TrendyolProducts"]
+contracts_sheet = sheets["Contracts"]
 settings_sheet       = sheets["Settings"]
 cancel_notif_sheet   = sheets["CancelNotifications"]
 tacweed_sheet        = sheets["Tacweed"]
@@ -9020,9 +9025,175 @@ def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, am
         f'<div style="margin-top:4px;">'
         f'<div style="font-size:13px;font-weight:800;color:#a78bfa;">{plat_badge("trendyol", 16)}تريندول: {ty}</div></div>'
         f'</div>')
+# ══════════════════════════════════════════════════════════════════════════════
+# ══ تنبيهات العقود | Contract milestone alerts ══
+# جدول العقود (تاب Contracts في جوجل شيت — بيتعمل تلقائي): اسم العقد + تاريخ البداية + تاريخ النهاية.
+# كل شهر من بداية العقد (ولحد النهاية) بيظهر في أعلى تاب المبيعات «انتهى الشهر N من العقد» لمدة يومين،
+# وخلال اليومين دول تصفّح المبيعات متوقف لحد ما تضغطي «تم الاطلاع». ممكن تضيفي/تحذفي العقود من هنا أو من الشيت مباشرة.
+# Every month after the contract start (up to the end date) a "month N ended" notice shows at the top of the Sales
+# tab for 2 days; while it's unacknowledged the Sales tab is blocked until «Acknowledged» is pressed.
+# ══════════════════════════════════════════════════════════════════════════════
+import calendar as _ct_cal
+
+CT_ORD_AR = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر"]
+CT_WINDOW_DAYS = 2        # مدة ظهور الإشعار (اليوم نفسه + اليوم اللي بعده)
+
+def _ct_parse_date(v):
+    """نص تاريخ -> date أو None. بيقبل yyyy-mm-dd و dd/mm/yyyy (لو الاتنين <=12 بنعتبره يوم/شهر) و mm/dd/yyyy لو اليوم > 12."""
+    s = str(v or "").strip()
+    if not s:
+        return None
+    s = s.replace("T", " ").split(" ")[0]
+    for sep in ("-", "/", "."):
+        p = s.split(sep)
+        if len(p) == 3 and all(x.isdigit() for x in p):
+            try:
+                if len(p[0]) == 4:
+                    y, m, d = int(p[0]), int(p[1]), int(p[2])
+                else:
+                    a, b, y = int(p[0]), int(p[1]), int(p[2])
+                    y = y + 2000 if y < 100 else y
+                    d, m = (a, b) if (a > 12 or b <= 12) else (b, a)
+                return datetime(y, m, d).date()
+            except Exception:
+                return None
+    return None
+
+def _ct_add_months(d, n):
+    m0 = d.month - 1 + n
+    y, m = d.year + m0 // 12, m0 % 12 + 1
+    return d.replace(year=y, month=m, day=min(d.day, _ct_cal.monthrange(y, m)[1]))
+
+def contract_events(start, end):
+    """[(token, date, عنوان عربي | English)] — نهاية كل شهر من العقد، وآخرها نهاية العقد."""
+    ev, n = [], 1
+    while n <= 600:
+        d = _ct_add_months(start, n)
+        if d >= end:
+            break
+        ar = CT_ORD_AR[n - 1] if n <= len(CT_ORD_AR) else str(n)
+        ev.append((f"M{n}", d, f"انتهى الشهر {ar} من العقد | Month {n} of the contract has ended"))
+        n += 1
+    ev.append(("END", end, "انتهى العقد | The contract has ended"))
+    return ev
+
+def _ct_read():
+    """صفوف العقد من الشيت (بالاسم مش بالمكان): قايمة dicts فيها row (رقم الصف في الشيت)."""
+    raw = get_cached(contracts_sheet) or []
+    if not raw:
+        return []
+    pos = {str(h).strip(): i for i, h in enumerate(raw[0])}
+    g = lambda row, col: (row[pos[col]].strip() if col in pos and pos[col] < len(row) and row[pos[col]] is not None else "")
+    out = []
+    for i, row in enumerate(raw[1:], start=2):
+        name = g(row, CONTRACT_COLS[0])
+        if not name and not g(row, CONTRACT_COLS[1]):
+            continue
+        out.append({"row": i, "name": name, "start": _ct_parse_date(g(row, CONTRACT_COLS[1])), "end": _ct_parse_date(g(row, CONTRACT_COLS[2])),
+                    "start_raw": g(row, CONTRACT_COLS[1]), "end_raw": g(row, CONTRACT_COLS[2]), "notes": g(row, CONTRACT_COLS[3]),
+                    "acked": {t.strip() for t in g(row, CONTRACT_COLS[4]).split(",") if t.strip()}, "pos": pos})
+    return out
+
+def contract_active_events(today=None):
+    """الإشعارات الشغالة النهاردة (النهاردة أو إمبارح كان تاريخها) — مع حالة «تم الاطلاع»."""
+    today = today or datetime.now().date()
+    res = []
+    for c in _ct_read():
+        if not c["start"] or not c["end"] or c["end"] <= c["start"]:
+            continue
+        for tok, d, label in contract_events(c["start"], c["end"]):
+            if d <= today <= d + timedelta(days=CT_WINDOW_DAYS - 1):
+                res.append({"c": c, "token": tok, "date": d, "label": label, "acked": tok in c["acked"],
+                            "days_left": (c["end"] - today).days})
+    return res
+
+def _ct_ack(events):
+    ts = now_str()
+    for e in events:
+        c = e["c"]
+        col_ack, col_ts = c["pos"].get(CONTRACT_COLS[4]), c["pos"].get(CONTRACT_COLS[5])
+        toks = sorted(c["acked"] | {x["token"] for x in events if x["c"]["row"] == c["row"]})
+        if col_ack is not None:
+            contracts_sheet.update_cell(c["row"], col_ack + 1, ",".join(toks))
+        if col_ts is not None:
+            contracts_sheet.update_cell(c["row"], col_ts + 1, ts)
+    clear_cache(contracts_sheet)
+
+def _contracts_manager():
+    with st.expander("📝 بيانات العقود | Contracts data", expanded=False):
+        st.caption("كل عقد: اسم + تاريخ بداية + تاريخ نهاية (سنوي أو شهري أو أي مدة). كل شهر من البداية بيظهر إشعار «انتهى الشهر N» يومين في أعلى المبيعات، ولحد ما تضغطي «تم الاطلاع» التصفّح متوقف. "
+                   "ممكن تعدّليهم هنا أو مباشرة في تاب Contracts في جوجل شيت (التاريخ بصيغة yyyy-mm-dd) | Add contracts here or directly in the Contracts tab")
+        rows = _ct_read()
+        today = datetime.now().date()
+        if rows:
+            table = []
+            for c in rows:
+                if not c["start"] or not c["end"] or c["end"] <= c["start"]:
+                    status, nxt = "⚠️ تاريخ غير صحيح", ""
+                else:
+                    months = (c["end"].year - c["start"].year) * 12 + c["end"].month - c["start"].month
+                    status = "لم يبدأ" if today < c["start"] else ("منتهي" if today > c["end"] else "جاري")
+                    upcoming = [d for _, d, _ in contract_events(c["start"], c["end"]) if d >= today]
+                    nxt = str(upcoming[0]) if upcoming else "—"
+                    status += f" · {months} شهر"
+                table.append({"العقد | Contract": c["name"], "البداية | Start": str(c["start"] or c["start_raw"]), "النهاية | End": str(c["end"] or c["end_raw"]),
+                              "الحالة | Status": status, "الإشعار القادم | Next notice": nxt, "ملاحظات | Notes": c["notes"]})
+            st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
+        else:
+            st.info("لا يوجد عقود مسجلة بعد | No contracts yet")
+        with st.form("ct_add_form", clear_on_submit=True):
+            c1, c2, c3 = st.columns([2, 1, 1])
+            nm = c1.text_input("اسم العقد | Contract name")
+            sd = c2.date_input("تاريخ البداية | Start date", value=today, key="ct_sd")
+            ed = c3.date_input("تاريخ النهاية | End date", value=today + timedelta(days=365), key="ct_ed")
+            nt = st.text_input("ملاحظات (اختياري) | Notes (optional)")
+            if st.form_submit_button("➕ إضافة عقد | Add contract"):
+                if not nm.strip():
+                    st.error("اكتبي اسم العقد | Enter a contract name")
+                elif ed <= sd:
+                    st.error("تاريخ النهاية لازم يكون بعد البداية | End must be after start")
+                else:
+                    contracts_sheet.append_row([nm.strip(), str(sd), str(ed), nt.strip(), "", ""], value_input_option="USER_ENTERED")
+                    clear_cache(contracts_sheet)
+                    st.success("✅ تمت الإضافة | Added")
+                    st.rerun()
+        if rows:
+            d1, d2 = st.columns([3, 1])
+            pick = d1.selectbox("حذف عقد | Delete a contract", [""] + [f"{c['row']} — {c['name']}" for c in rows], key="ct_del_pick")
+            if d2.button("🗑️ حذف | Delete", key="ct_del_btn", disabled=not pick):
+                contracts_sheet.delete_rows(int(pick.split(" — ")[0]))
+                clear_cache(contracts_sheet)
+                st.rerun()
+
+def _contracts_gate():
+    """بتتعرض في أعلى تاب المبيعات. بترجّع False (يعني امنعي باقي التاب) لو فيه إشعار عقد شغال ولسه ماتضغطش عليه «تم الاطلاع»."""
+    try:
+        events = contract_active_events()
+    except Exception as e:
+        st.warning(f"⚠️ مقدرتش أقرأ تاب العقود: {e}")
+        events = []
+    pending = [e for e in events if not e["acked"]]
+    for e in events:
+        if e["acked"]:
+            st.success(f"✅ عقد «{e['c']['name']}» — {e['label']} (تم الاطلاع) | Acknowledged")
+    if pending:
+        for e in pending:
+            st.error(f"🔔 عقد «{e['c']['name']}» — {e['label']}\n\n"
+                     f"📅 {e['date']} · البداية {e['c']['start']} · النهاية {e['c']['end']} · المتبقي {max(e['days_left'], 0)} يوم | days left")
+        st.warning("🚫 تصفّح المبيعات متوقف لحد ما تضغطي «تم الاطلاع» | Sales browsing is blocked until you press «Acknowledged»")
+        if st.button("✅ تم الاطلاع | Acknowledged", key="ct_ack_btn", type="primary"):
+            try:
+                _ct_ack(pending)
+            except Exception as e:
+                st.error(f"❌ مقدرتش أسجّل الاطلاع: {e}")
+                return False
+            st.rerun()
+    _contracts_manager()
+    return not pending
+
 if st.session_state["nav_page"] == "tab14":
     with tab14:
-        if _tab_gate("tab14", "🛒 المبيعات | Sales"):
+        if _tab_gate("tab14", "🛒 المبيعات | Sales") and _contracts_gate():
             st.subheader("🛒 المبيعات اليومية | Daily Sales")
             st.caption("المفتاح الأساسي هو كود التكويد 🏷️ — كل بلوك = SKU نون (مرتب تنازليًا بمبيعات أمس) + ASIN أمازون لنفس الكود جنبه (والكود بيتكرر): "
                        "نون 🟢 | أمازون 🟠 | تريندول 🟣 | "
