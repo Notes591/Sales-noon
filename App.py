@@ -1519,7 +1519,14 @@ def render_china_images_upload(key_prefix):
                 st.warning("مالقيتش صور مرتبطة بباركود في الملف")
         st.markdown("**الخطوة 2 — ارفعها على Drive:** اعمل مجلد في Google Drive بتاعك، فك الـ ZIP وارفع الصور جواه (سحب وإفلات). "
                     "بعدين اضغط مشاركة على المجلد واختار «أي شخص معه الرابط — مشاهد» (عشان الصور تظهر في التطبيق والشيت).")
-        st.markdown("**الخطوة 3 — اربط المجلد:** الصق رابط المجلد أو الـ ID بتاعه.")
+        try:
+            _sa = st.secrets["gcp_service_account"]["client_email"]
+        except Exception:
+            _sa = ""
+        st.markdown("**الخطوة 3 — اربط المجلد:** شارك المجلد كمان مع إيميل التطبيق (حساب الخدمة) بصلاحية «مشاهد» عشان يقدر يقرا أسماء الملفات، "
+                    "وبعدين الصق رابط المجلد أو الـ ID بتاعه.")
+        if _sa:
+            st.code(_sa, language=None)
         cur = load_settings().get("china_images_folder_id", "")
         raw_id = st.text_input("رابط/ID مجلد Drive", value=cur, key=f"{key_prefix}_chimg_folder").strip()
         m = re.search(r"folders/([A-Za-z0-9_-]+)", raw_id)
@@ -1539,7 +1546,7 @@ def render_china_images_upload(key_prefix):
                     seen.add(nm)
                     rows.append([nm, f"https://drive.google.com/thumbnail?id={f['id']}&sz=w500", f["id"], ts])
             if not rows:
-                st.warning("المجلد فاضي من الصور (أو الصيغة مش jpg/png).")
+                st.warning("مالقيتش صور في المجلد. غالبًا المجلد مش متشارك مع إيميل التطبيق (حساب الخدمة) — شاركه بصلاحية «مشاهد» — أو الصور جوه مجلد فرعي أو الصيغة مش jpg/png.")
                 return
             if fid != cur:
                 save_setting("china_images_folder_id", fid)
@@ -9629,14 +9636,14 @@ def _t14_store_chip(store, parts):
     """شريحة مبيعات متجر واحد (بولد وواضحة): اسم المتجر + كل قناة (أمس / إجمالي الأيام). parts = [(اسم القناة, أمس, إجمالي)]."""
     _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "أمازون"), "ty": ("#4c1d95", "#a78bfa", "#ede9fe", "تريندول")}[store]
     segs = "".join(
-        f'<span style="display:inline-flex;align-items:baseline;gap:5px;margin-inline-start:12px;padding-inline-start:12px;'
+        f'<span style="display:inline-flex;align-items:baseline;gap:3px;margin-inline-start:7px;padding-inline-start:7px;'
         f'border-inline-start:1px solid {_sty[1]}88;white-space:nowrap;">'
         f'<b style="color:#ffffff;">{nm}</b>'
-        f'<span style="color:{_sty[2]};">أمس</span><bdi style="color:#ffffff;font-weight:800;font-size:16px;">{y}</bdi>'
-        f'<span style="color:{_sty[2]};">| {sales_display_days} أيام</span><bdi style="color:#ffffff;font-weight:800;">{t}</bdi></span>'
+        f'<span style="color:{_sty[2]};">أمس</span><bdi style="color:#ffffff;font-weight:800;font-size:13px;">{y}</bdi>'
+        f'<span style="color:{_sty[2]};">|{sales_display_days}أ</span><bdi style="color:#ffffff;font-weight:800;">{t}</bdi></span>'
         for nm, y, t in parts)
-    return (f'<span dir="rtl" style="display:inline-block;background:{_sty[0]};border:1px solid {_sty[1]};border-radius:8px;'
-            f'padding:6px 12px;margin:3px 0 3px 8px;font-size:14px;"><b style="color:{_sty[1]};font-size:15px;">{plat_badge({"noon": "noon", "amz": "amazon", "ty": "trendyol"}[store], 20)}{_sty[3]}</b>{segs}</span>')
+    return (f'<span dir="rtl" style="display:inline-block;background:{_sty[0]};border:1px solid {_sty[1]};border-radius:6px;'
+            f'padding:3px 8px;margin:0;font-size:12px;white-space:nowrap;"><b style="color:{_sty[1]};font-size:12px;">{plat_badge({"noon": "noon", "amz": "amazon", "ty": "trendyol"}[store], 14)}{_sty[3]}</b>{segs}</span>')
 
 def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, amz, fsab, fba, ty=0):
     """تايل إجمالي يوم — كل سطر بخط بولد وبترتيب ثابت (المتجر ثم قنواته)."""
@@ -10224,7 +10231,8 @@ if st.session_state["nav_page"] == "tab14":
                             _chips += _t14_store_chip("amz", [("FSAB", y_a, t_a), ("FBA", y_f, t_f)])
                         if b["tb"] and (_vw in ("all", "ty")):
                             _chips += _t14_store_chip("ty", [("TY", y_t, t_t)])
-                        st.markdown('<div dir="rtl" style="margin:6px 0;"><b style="color:#e2e8f0;font-size:14px;margin-inline-end:8px;">🛒 اتباع منه:</b>'
+                        st.markdown('<div dir="rtl" style="margin:4px 0;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">'
+                                    '<b style="color:#e2e8f0;font-size:13px;">🛒 اتباع منه:</b>'
                                     + _chips + '</div>', unsafe_allow_html=True)
                         render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالكود)
 
