@@ -3616,6 +3616,42 @@ def china_build_alerts(bundle, today, cfg):
             "اطلب من الصين تكتب تاريخ الوصول لمخزن الرياض — من غيره مش هقدر أحسب «متاح للبيع» ولا الفجوة.",
             sorted(miss.values(), key=lambda r: -r["القطع"])))
 
+    # ── تنبيهات على مستوى الكود عبر المتاجر الثلاثة (نون + أمازون + تريندول) ──
+    try:
+        xrows, _unm = _cross_cached()
+        wh_codes = get_warehouse_stock_map()
+        inc_by = {}
+        for l in lines:
+            if l["_status"] == "incoming" and l["_norm"]:
+                inc_by[l["_norm"]] = inc_by.get(l["_norm"], 0) + l["_qty"]
+        seen_norm = set(inc_by) | {l["_norm"] for l in lines if l["_norm"]}
+        dead_inc, no_ship = [], []
+        lead_total = cfg["china_lead_time_days"] + cfg["china_reorder_safety_days"]
+        for r in xrows:
+            nc = _china_norm_code(r["code"])
+            if nc in inc_by and r["total"] == 0 and r["prev_total"] == 0:
+                dead_inc.append({"الكود": r["code"], "قطع جاية من الصين": f"{inc_by[nc]:,}", "مبيعات 60 يوم (نون+أمازون+تريندول)": 0,
+                                 "مخزون المستودع": f"{r['wh']:,.0f}"})
+            elif nc in inc_by and r["total"] == 0 and r["wh"] > 0:
+                dead_inc.append({"الكود": r["code"], "قطع جاية من الصين": f"{inc_by[nc]:,}", "مبيعات 60 يوم (نون+أمازون+تريندول)": r["prev_total"],
+                                 "مخزون المستودع": f"{r['wh']:,.0f}"})
+            if nc not in seen_norm and r["code"] in wh_codes and r["total"] >= 30:
+                rate = r["total"] / 30.0
+                days = r["wh"] / rate
+                if days <= lead_total + 30:
+                    no_ship.append({"الكود": r["code"], "مبيعات 30 يوم": r["total"], "نون/أمازون/تريندول": f"{r['noon']}/{r['amz']}/{r['ty']}",
+                                    "مخزون المستودع": f"{r['wh']:,.0f}", "يكفي (يوم)": round(days), "مدة التوريد + الأمان": lead_total})
+        if no_ship:
+            no_ship.sort(key=lambda x: x["يكفي (يوم)"])
+            sev = 0 if no_ship[0]["يكفي (يوم)"] <= lead_total else 1
+            alerts.append(_china_alert(sev, "🔴" if sev == 0 else "🟠", "كود بيبيع في المتاجر ومفيش له أي شحنة من الصين ومخزونه قرب يخلص",
+                "الأكواد دي مالهاش سطر في ملف الصين خالص — اطلب شحنة جديدة أو ضيفها للملف.", no_ship[:200]))
+        if dead_inc:
+            alerts.append(_china_alert(1, "🟠", "بضاعة جاية من الصين لكود مبيعاته صفر في كل المتاجر آخر 30 يوم",
+                "راجع الطلب قبل ما الشحنة توصل: ممكن يتأجل أو يتلغى أو المنتج محتاج تفعيل/إعلان.", dead_inc[:200]))
+    except Exception:
+        pass
+
     # ── الملف قديم؟ ──
     upd = [d for d in (_china_date(x.get("last_updated_at")) for x in list(lines) + list(conts) + list(bundle["ships"])) if d]
     if upd and (today - max(upd)).days > stale:
@@ -5397,6 +5433,81 @@ def _build_ty_ads(raw):
 def get_ads_map_trendyol():
     return _memo_from_sheet(ads_ty_sheet, "ty_ads", _build_ty_ads)
 
+def _ads_file_rows(fileobj, name, sheet_headers, key_cols):
+    """يقرا xlsx/csv ويرجّع صفوف بترتيب هيدر الشيت (المطابقة بالاسم مش بالمكان) | rows aligned to the sheet header by name."""
+    import io, csv
+    raw = []
+    if str(name).lower().endswith(".csv"):
+        txt = fileobj.getvalue().decode("utf-8-sig", errors="replace")
+        raw = [list(r) for r in csv.reader(io.StringIO(txt))]
+    else:
+        import openpyxl
+        wb = openpyxl.load_workbook(fileobj, read_only=True, data_only=True)
+        raw = [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
+    want = {h.strip().lower() for h in key_cols}
+    hi = None
+    for i, r in enumerate(raw[:15]):
+        low = {str(c).strip().lower() for c in r if c is not None}
+        if want & low:
+            hi = i
+            break
+    if hi is None:
+        raise ValueError("مش لاقي عمود أساسي في الملف: " + " / ".join(key_cols))
+    fidx = {}
+    for j, c in enumerate(raw[hi]):
+        k = str(c).strip().lower() if c is not None else ""
+        if k and k not in fidx:
+            fidx[k] = j
+    cols = [fidx.get(h.strip().lower()) for h in sheet_headers]
+    matched = [h for h, c in zip(sheet_headers, cols) if c is not None]
+    missing = [h for h, c in zip(sheet_headers, cols) if c is None]
+    kc = [fidx[k.strip().lower()] for k in key_cols if k.strip().lower() in fidx][0]
+    out = []
+    for r in raw[hi + 1:]:
+        if kc >= len(r) or r[kc] is None or not str(r[kc]).strip():
+            continue
+        out.append([("" if (c is None or c >= len(r) or r[c] is None) else r[c]) for c in cols])
+    return out, matched, missing
+
+def render_generic_ads_upload(key_prefix, sheet, sheet_name, title, key_cols):
+    """رفع ملف إعلانات (نون / أمازون) — بيستبدل محتوى الشيت بالكامل بالملف الجديد | replace the ads sheet with the uploaded file."""
+    with st.expander(title, expanded=False):
+        st.caption(f"الملف بيتقرا بأسماء الأعمدة (مش أماكنها) وبيستبدل كل محتوى شيت {sheet_name}. الهيدر في الشيت زي ما هو.")
+        upl = st.file_uploader("ارفع الملف (xlsx / csv)", type=["xlsx", "xlsm", "csv"], key=f"{key_prefix}_{sheet_name}_up")
+        if not upl:
+            return
+        hdr = [h.strip() for h in sheet.row_values(1) if str(h).strip()] or list(TABS_CONFIG[sheet_name])
+        try:
+            rows, matched, missing = _ads_file_rows(upl, upl.name, hdr, key_cols)
+        except Exception as e:
+            st.error(f"❌ تعذر قراءة الملف: {e}")
+            return
+        if not rows:
+            st.warning("الملف مفيهوش صفوف | no rows")
+            return
+        st.info(f"📊 {len(rows)} صف | أعمدة اتطابقت {len(matched)} من {len(hdr)}")
+        if missing:
+            st.warning("أعمدة مش موجودة في الملف وهتتساب فاضية: " + "، ".join(missing[:12]))
+        if len(matched) < 3:
+            st.error("❌ الملف مش شبه شكل الشيت (أقل من 3 أعمدة اتطابقت) — مش هرفع.")
+            return
+        if st.button("⬆️ رفع واستبدال | Upload & replace", key=f"{key_prefix}_{sheet_name}_go", type="primary", use_container_width=True):
+            with st.spinner("جاري الرفع..."):
+                ok = safe_delete_all(sheet)
+                if ok:
+                    try:
+                        for i in range(0, len(rows), 2000):
+                            sheet.append_rows(rows[i:i + 2000], value_input_option="RAW")
+                    except Exception as e:
+                        ok = False
+                        st.error(f"❌ فشل الرفع: {e}")
+                else:
+                    st.error("❌ مقدرتش أمسح الشيت القديم — محصلش رفع.")
+            clear_cache(sheet)
+            if ok:
+                st.success(f"✅ تم — {len(rows)} صف")
+                st.rerun()
+
 def render_trendyol_ads_upload(key_prefix):
     """رفع تقرير إعلانات تريندول — بيستبدل محتوى شيت AdvertisementsTrendyol (التقرير لقطة كاملة بإجماليات الحملات)."""
     with st.expander("📤 رفع تقرير إعلانات تريندول | Upload Trendyol Ads Report", expanded=False):
@@ -6499,6 +6610,198 @@ def compute_no_sale_rows_amazon(days=7):
     rows.sort(key=lambda x: -x["stock"])
     return rows
 
+
+# ══ 🔀 تحليل الأكواد عبر المتاجر | Cross-store code analysis ══
+# كل كود (من تاب التكويد) = منتج واحد: SKU نون = Barcode تريندول، وASIN أمازون من TacweedAmazon.
+# بنجمع مبيعات آخر 30 يوم وآخر 30 قبلها لكل متجر ونطلّع تنبيهات المقارنة.
+def _avg_price_from(prices_for_key):
+    tot, q = 0.0, 0
+    for lst in (prices_for_key or {}).values():
+        for it in lst:
+            try:
+                pr = float(str(it[0]).replace(",", "").strip())
+                qt = int(it[1]) if it[1] else 1
+            except Exception:
+                continue
+            if pr > 0:
+                tot += pr * qt
+                q += qt
+    return (tot / q) if q else None
+
+def compute_cross_store_analysis(win=30):
+    today = datetime.now().date()
+    d_now = [today - timedelta(days=i) for i in range(1, win + 1)]
+    d_prev = [today - timedelta(days=i) for i in range(win + 1, 2 * win + 1)]
+    d_all = d_now + d_prev
+    sn = set(d_now)
+    c_noon = build_daily_orders_counts(d_all)
+    c_amz = build_daily_orders_counts_amazon(d_all, mode="all", group_by="asin")
+    c_ty = build_daily_orders_counts_trendyol(d_all)
+    p_noon = build_daily_orders_prices(d_now)
+    p_amz = build_daily_orders_prices_amazon_all_asin(d_now)
+    p_ty = build_daily_orders_prices_trendyol(d_now)
+
+    def split(cnts, key):
+        dc = cnts.get(key, {})
+        a = sum(v for d, v in dc.items() if d in sn)
+        return a, sum(dc.values()) - a
+
+    wh = get_warehouse_stock_map()
+    noon_map, amz_map = get_tacweed_map(), get_tacweed_amazon_map()
+    rev_n, rev_a = get_tacweed_reverse_map(), get_tacweed_amazon_reverse_map()
+    ty_listed = set(get_ty_products()["name"].keys()) | set(get_trendyol_bundle()["name"].keys())
+    links = get_links_map()
+    codes = set(rev_n) | set(rev_a) | set(wh)
+    rows = []
+    for code in codes:
+        skus, asins = rev_n.get(code, []), rev_a.get(code, [])
+        n_now = n_prev = a_now = a_prev = t_now = t_prev = 0
+        for k in skus:
+            x, y = split(c_noon, k); n_now += x; n_prev += y
+            x, y = split(c_ty, k); t_now += x; t_prev += y
+        for k in asins:
+            x, y = split(c_amz, k); a_now += x; a_prev += y
+        n_stock = sum(inv_map.get(k, {}).get("total_stock", 0) or 0 for k in skus)
+        a_stock = sum(amz_map_stock(k) for k in asins)
+        n_listed = any(k in inv_map for k in skus)
+        a_listed = any(k in amz_inv_map_asin for k in asins)
+        t_listed = any(k in ty_listed for k in skus) or t_now + t_prev > 0
+        try:
+            w = float(str(wh.get(code, 0)).replace(",", "").strip() or 0)
+        except Exception:
+            w = 0.0
+        pr = {}
+        for nm, mp, ks in (("noon", p_noon, skus), ("amz", p_amz, asins), ("ty", p_ty, skus)):
+            vals = [v for v in (_avg_price_from(mp.get(k)) for k in ks) if v]
+            if vals:
+                pr[nm] = sum(vals) / len(vals)
+        rows.append({
+            "code": code, "img": next((links.get(k) for k in skus if links.get(k)), ""),
+            "skus": skus, "asins": asins, "wh": w,
+            "noon": n_now, "amz": a_now, "ty": t_now,
+            "noon_prev": n_prev, "amz_prev": a_prev, "ty_prev": t_prev,
+            "n_stock": n_stock, "a_stock": a_stock,
+            "n_listed": n_listed, "a_listed": a_listed, "t_listed": t_listed,
+            "price": pr, "total": n_now + a_now + t_now, "prev_total": n_prev + a_prev + t_prev,
+        })
+    # مبيعات من غير كود | sales with no mapping
+    unm = []
+    for k in c_noon:
+        if k not in noon_map:
+            x = sum(v for d, v in c_noon[k].items() if d in sn)
+            if x:
+                unm.append({"store": "🟢 نون", "key": k, "qty": x})
+    for k in c_amz:
+        if k not in amz_map:
+            x = sum(v for d, v in c_amz[k].items() if d in sn)
+            if x:
+                unm.append({"store": "🟠 أمازون", "key": k, "qty": x})
+    for k in c_ty:
+        if k not in noon_map:
+            x = sum(v for d, v in c_ty[k].items() if d in sn)
+            if x:
+                unm.append({"store": "🟣 تريندول", "key": k, "qty": x})
+    unm.sort(key=lambda r: -r["qty"])
+    return rows, unm
+
+def amz_map_stock(asin_up):
+    return (amz_inv_map_asin.get(asin_up, {}) or {}).get("stock", 0) or 0
+
+_XS_NAMES = {"noon": "نون", "amz": "أمازون", "ty": "تريندول"}
+
+def build_cross_alerts(rows, min_units=5):
+    """يرجّع dict اسم_التنبيه -> قائمة صفوف (code, نص) | alert name -> list of (row, text)."""
+    A = {k: [] for k in ("gap", "nolist", "oos", "dead", "drop", "price")}
+    for r in rows:
+        sell = {k: r[k] for k in ("noon", "amz", "ty")}
+        stock = {"noon": r["n_stock"], "amz": r["a_stock"], "ty": None}
+        listed = {"noon": r["n_listed"], "amz": r["a_listed"], "ty": r["t_listed"]}
+        best = max(sell, key=sell.get)
+        if sell[best] >= min_units:
+            for o in sell:
+                if o == best:
+                    continue
+                if listed[o] and sell[o] == 0:
+                    A["gap"].append((r, f"بيبيع {sell[best]} في {_XS_NAMES[best]} وصفر في {_XS_NAMES[o]} رغم إنه موجود هناك (آخر 30 يوم) — راجع السعر/الصور/الإعلان"))
+                elif not listed[o] and (r["wh"] > 0 or stock.get(best) or sell[best] >= 3 * min_units):
+                    A["nolist"].append((r, f"بيبيع {sell[best]} في {_XS_NAMES[best]} ومش معروض في {_XS_NAMES[o]} — فرصة نشر"))
+            for o in ("noon", "amz"):
+                if o != best and listed[o] and stock[o] == 0 and r["wh"] > 0:
+                    A["oos"].append((r, f"مخزون {_XS_NAMES[o]} صفر والكود بيبيع {sell[best]} في {_XS_NAMES[best]} والمستودع فيه {r['wh']:,.0f} — حوّل/اشحن"))
+        tot_stock = (r["n_stock"] or 0) + (r["a_stock"] or 0) + r["wh"]
+        if tot_stock > 0 and r["total"] == 0 and (r["n_listed"] or r["a_listed"] or r["wh"] > 0):
+            A["dead"].append((r, f"مخزون {tot_stock:,.0f} (نون {r['n_stock']:,.0f} + أمازون {r['a_stock']:,.0f} + مستودع {r['wh']:,.0f}) ومفيش أي بيع في أي متجر آخر 30 يوم"))
+        if r["prev_total"] >= 10 and r["total"] <= r["prev_total"] * 0.5:
+            A["drop"].append((r, f"المبيعات نزلت من {r['prev_total']} إلى {r['total']} ({(1 - r['total'] / r['prev_total']) * 100:.0f}%-) مقارنة بالـ30 يوم اللي قبلها (كل المتاجر)"))
+        pr = r["price"]
+        if len(pr) >= 2:
+            lo, hi = min(pr, key=pr.get), max(pr, key=pr.get)
+            if pr[lo] > 0 and pr[hi] / pr[lo] >= 1.3:
+                A["price"].append((r, f"فرق سعر: {_XS_NAMES[hi]} {pr[hi]:.0f} مقابل {_XS_NAMES[lo]} {pr[lo]:.0f} ({(pr[hi] / pr[lo] - 1) * 100:.0f}%) — تريندول بسعر صافي بعد الخصم"))
+    for k in A:
+        A[k].sort(key=lambda t: -(t[0]["total"] + t[0]["prev_total"]))
+    return A
+
+def render_cross_store_tab():
+    st.caption("كل كود = منتج واحد عبر نون وأمازون وتريندول (من تاب التكويد). آخر 30 يوم مقابل الـ30 اللي قبلها. المنتجات اللي من غير كود مش هتظهر هنا إلا في تنبيه «مبيعات من غير كود».")
+    with st.spinner("جاري تحليل الأكواد..."):
+        rows, unm = _cross_cached()
+    if not rows:
+        st.info("لا توجد أكواد — املأ تاب التكويد أولاً | No codes found")
+        return
+    min_u = st.number_input("أقل عدد مبيعات يعتبر «بيبيع» | Min units", min_value=1, max_value=100, value=5, key="xs_min")
+    A = build_cross_alerts(rows, int(min_u))
+    titles = [
+        ("gap", "🟠 بيبيع في متجر وصفر في متجر تاني (موجود فيه)"),
+        ("nolist", "🔵 بيبيع وغير معروض في متجر تاني — فرصة نشر"),
+        ("oos", "🔴 مخزون صفر في متجر والمستودع فيه بضاعة والكود بيبيع في غيره"),
+        ("dead", "⚫ مخزون راكد: مفيش بيع في أي متجر"),
+        ("drop", "📉 هبوط مبيعات الكود (كل المتاجر)"),
+        ("price", "💲 فرق سعر كبير بين المتاجر"),
+        ("unm", "❓ مبيعات من غير كود (مش مربوطة بالتكويد)"),
+    ]
+    cnt = {k: len(v) for k, v in A.items()}
+    cnt["unm"] = len(unm)
+    st.markdown(" &nbsp;|&nbsp; ".join(f"{t.split(' ')[0]} **{cnt[k]}**" for k, t in titles))
+    pick = st.radio("التنبيه | Alert", [f"{t} ({cnt[k]})" for k, t in titles], key="xs_pick")
+    key = titles[[f"{t} ({cnt[k]})" for k, t in titles].index(pick)][0]
+    if key == "unm":
+        if not unm:
+            st.success("✅ كل المبيعات مربوطة بكود")
+            return
+        df = pd.DataFrame([{"المتجر": u["store"], "SKU / ASIN / Barcode": u["key"], "مبيع 30 يوم": u["qty"]} for u in unm])
+        dl_btn(df, "unmapped_sales", key="dlbtn_xs_unm")
+        for u in page_slice(unm, "pg_xs_unm", 30):
+            st.markdown(f"{u['store']} &nbsp; `{u['key']}` &nbsp;—&nbsp; **{u['qty']}** قطعة")
+        page_more(unm, "pg_xs_unm", 30)
+        return
+    items = A[key]
+    if not items:
+        st.success("✅ مفيش حالات")
+        return
+    df = pd.DataFrame([{"الكود": r["code"], "نون": r["noon"], "أمازون": r["amz"], "تريندول": r["ty"],
+                        "مخزون نون": r["n_stock"], "مخزون أمازون": r["a_stock"], "مستودع": r["wh"], "ملاحظة": t} for r, t in items])
+    dl_btn(df, f"xs_{key}", key=f"dlbtn_xs_{key}")
+    for r, t in page_slice(items, f"pg_xs_{key}", 25):
+        c1, c2 = st.columns([1, 7])
+        with c1:
+            show_img(r["img"], 60)
+        with c2:
+            st.markdown(f"**الكود:** `{r['code']}` &nbsp;|&nbsp; 🟢 {r['noon']} &nbsp; 🟠 {r['amz']} &nbsp; 🟣 {r['ty']} &nbsp;|&nbsp; 🏭 مستودع {r['wh']:,.0f}")
+            st.caption(t)
+        st.divider()
+    page_more(items, f"pg_xs_{key}", 25)
+
+def _cross_cached():
+    sig = (len(get_cached(daily_orders_sheet)), len(get_cached(daily_orders_amazon_sheet)),
+           len(get_trendyol_bundle()["rows"]), len(get_tacweed_map()), len(get_warehouse_stock_map()), datetime.now().date())
+    c = st.session_state.get("_xs_cache")
+    if c and c[0] == sig:
+        return c[1]
+    res = compute_cross_store_analysis()
+    st.session_state["_xs_cache"] = (sig, res)
+    return res
+
 ordinal_map = {1:"الثانية|Second",2:"الثالثة|Third",3:"الرابعة|Fourth",4:"الخامسة|Fifth"}
 
 
@@ -6805,8 +7108,10 @@ def render_upload_tab():
     if _grp.startswith("🅽"):
         render_tacweed_upload("up")
         render_inventory_upload()
+        render_generic_ads_upload("up", ads_sheet, "Advertisements", "📤 رفع إعلانات نون | Upload Noon Ads", ["Sku", "SKU"])
     elif _grp.startswith("📦"):
         render_tacweed_amazon_upload("up")
+        render_generic_ads_upload("up", ads_amz_sheet, "AdvertisementsAmz", "📤 رفع إعلانات أمازون | Upload Amazon Ads", ["المنتجات"])
         st.caption("مخزون أمازون (StockAmazon) بيتحدّث يدويًا في الشيت نفسه | Amazon stock (StockAmazon) is updated manually in the sheet")
     elif _grp.startswith("🟣"):
         render_trendyol_upload("up")
@@ -9453,8 +9758,8 @@ if st.session_state["nav_page"] == "tab14":
                                          placeholder="اكتب كود التكويد أو SKU أو ASIN...")
                 q_t14 = srch_t14.strip().upper()
                 # ══ عرض متجر واحد في المرة (أريح للعين) أو الكل زي الشكل القديم ══
-                _VIEWS = {"🟢 نون | Noon": "noon", "🟠 أمازون | Amazon": "amz", "🟣 تريندول | Trendyol": "ty",
-                          "🧩 الكل جنب بعض (الشكل القديم) | All side by side": "all"}
+                _VIEWS = {"🧩 الكل | All": "all", "🟢 نون | Noon": "noon", "🟠 أمازون | Amazon": "amz",
+                          "🟣 تريندول | Trendyol": "ty"}
                 _vw = _VIEWS[st.radio("🏬 اعرض متجر | Show store", list(_VIEWS), horizontal=True, key="t14_view")]
 
                 def _yv(chs, ch):
@@ -9849,16 +10154,13 @@ if st.session_state["nav_page"] == "tab_dash":
             if not inv_map and not amz_inv_map_asin and not get_trendyol_bundle()["rows"]:
                 st.info("ارفع ملف المخزون (نون أو أمازون) أو مبيعات تريندول أولاً | Upload Inventory (Noon/Amazon) or Trendyol sales first")
             else:
-                (_dash_all_subtab_td, _dash_fbn_subtab_td, _dash_fbb_subtab_td,
-                 _dash_amz_all_subtab_td, _dash_amz_normal_subtab_td, _dash_amz_fba_subtab_td, _dash_ty_subtab_td) = st.tabs(
-                    ["🔷 الكل (FBN+FBB) | All Combined",
-                     "🅽 مبيعات نون FBN | Noon FBN Sales",
-                     "🅱 مبيعات نون FBB | Noon FBB Sales",
-                     "🟠 امازون الكل | Amazon All",
-                     "🅽 امازون عادي (FSAB) | Amazon Normal",
-                     "📦 امازون تخزين FBA | Amazon FBA Storage",
-                     "🟣 تريندول | Trendyol"])
-                with _dash_all_subtab_td:
+                _DSUB = ["🔷 الكل (FBN+FBB) | All Combined", "🅽 مبيعات نون FBN | Noon FBN Sales", "🅱 مبيعات نون FBB | Noon FBB Sales",
+                         "🟠 امازون الكل | Amazon All", "🅽 امازون عادي (FSAB) | Amazon Normal", "📦 امازون تخزين FBA | Amazon FBA Storage",
+                         "🟣 تريندول | Trendyol", "🔀 تحليل الأكواد عبر المتاجر | Cross-store"]
+                # راديو بدل st.tabs: بيرسم القسم المختار بس (أسرع بكتير) | radio renders only the chosen section
+                _dsel = st.radio("القسم | Section", _DSUB, horizontal=True, key="dash_sub", label_visibility="collapsed")
+                _di = _DSUB.index(_dsel)
+                if _di == 0:
                     # ── الكل مع بعض: كل الطلبات (FBN + FBB) من غير أي فلترة على نوع
                     #    التنفيذ — عشان في النهاية هو متجر نون واحد ومبيعات واحدة | All
                     #    orders combined (FBN + FBB) with no fulfillment-type filter —
@@ -9869,7 +10171,7 @@ if st.session_state["nav_page"] == "tab_dash":
                         _render_sales_dashboard_body(
                             build_daily_orders_counts, build_daily_orders_prices,
                             build_daily_orders_family_stats, "all")
-                with _dash_fbn_subtab_td:
+                if _di == 1:
                     # ── FBN بس: مستبعد منه أي طلب مصنّف FBB (Fulfillment=FBP)،
                     #    عشان FBN + FBB = تاب "الكل" بالظبط من غير أي تكرار |
                     #    FBN only: excludes anything classified as FBB
@@ -9881,7 +10183,7 @@ if st.session_state["nav_page"] == "tab_dash":
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_fbn, build_daily_orders_prices_fbn,
                             build_daily_orders_family_stats_fbn, "fbn")
-                with _dash_fbb_subtab_td:
+                if _di == 2:
                     if not inv_map:
                         st.info("ارفع ملف مخزون نون أولاً من تاب «رفع ملف» | Upload Noon Inventory first")
                     else:
@@ -9896,28 +10198,28 @@ if st.session_state["nav_page"] == "tab_dash":
                 #    DailyOrdersAmazon and StockAmazon stock only (never Noon's inv_map),
                 #    split the same way (All/Normal/FBA) as the Amazon Sales tab itself.
                 #    Grouped by ASIN (not MSKU) so it joins correctly against Amazon stock.
-                with _dash_amz_all_subtab_td:
+                if _di == 3:
                     if not amz_inv_map_asin:
                         st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
                     else:
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_amazon_all_asin, build_daily_orders_prices_amazon_all_asin,
                             build_daily_orders_family_stats_amazon_all, "amz_all", channel="amazon")
-                with _dash_amz_normal_subtab_td:
+                if _di == 4:
                     if not amz_inv_map_asin:
                         st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
                     else:
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_amazon_normal_asin, build_daily_orders_prices_amazon_normal_asin,
                             build_daily_orders_family_stats_amazon_normal, "amz_normal", channel="amazon")
-                with _dash_amz_fba_subtab_td:
+                if _di == 5:
                     if not amz_inv_map_asin:
                         st.info("ارفع ملف مخزون أمازون (StockAmazon) أولاً | Upload Amazon Stock (StockAmazon) first")
                     else:
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_amazon_fba_asin, build_daily_orders_prices_amazon_fba_asin,
                             build_daily_orders_family_stats_amazon_fba, "amz_fba", channel="amazon")
-                with _dash_ty_subtab_td:
+                if _di == 6:
                     plat_header("trendyol", "داشبورد تريندول | Trendyol Dashboard")
                     if not get_trendyol_bundle()["rows"]:
                         st.info("ارفع ملف طلبات تريندول من تاب «رفع ملف» أولاً | Upload Trendyol orders from the Sales tab first")
@@ -9925,6 +10227,8 @@ if st.session_state["nav_page"] == "tab_dash":
                         _render_sales_dashboard_body(
                             build_daily_orders_counts_trendyol, build_daily_orders_prices_trendyol,
                             build_daily_orders_family_stats_trendyol, "ty_all", channel="trendyol")
+                if _di == 7:
+                    render_cross_store_tab()
 
         # ══ TAB 15 — تحليل الجدولة ══
         # ══ TAB 16 — مخزون بدون بيع ══
