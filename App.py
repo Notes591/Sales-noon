@@ -161,6 +161,8 @@ TABS_CONFIG = {
                                "Cost", "Clicks", "Views", "Orders", "Sales", "ROAS", "Date Uploaded"],
     # ملف منتجات تريندول (لربط Content ID بالـ Barcode) — بيتعمل تلقائي أول مرة
     "TrendyolProducts": ["Content ID", "Barcode", "Product Name", "Image URL", "Date Uploaded"],
+    # صور منتجات الصين (باركود -> رابط صورة على Google Drive) — بتترفع من تاب «رفع ملف» > عام
+    "ChinaImages":      ["Barcode", "Image URL", "Drive File ID", "Date Uploaded"],
     "Contracts":        CONTRACT_COLS,
 }
 
@@ -359,6 +361,7 @@ stock_amazon_sheet   = sheets["StockAmazon"]
 daily_orders_trendyol_sheet = sheets["DailyOrdersTrendyol"]
 ads_ty_sheet = sheets["AdvertisementsTrendyol"]
 ty_products_sheet = sheets["TrendyolProducts"]
+china_img_sheet = sheets["ChinaImages"]
 contracts_sheet = sheets["Contracts"]
 settings_sheet       = sheets["Settings"]
 cancel_notif_sheet   = sheets["CancelNotifications"]
@@ -1359,6 +1362,191 @@ def render_tacweed_amazon_upload(key_prefix):
             except Exception as e:
                 st.error(f"❌ {e}")
 
+_XL_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+
+def extract_excel_images(fileobj):
+    """يرجّع [(barcode, bytes_الصورة)] من إكسيل فيه صور داخل الخلايا (Place in cell) | in-cell pictures keyed by the barcode column."""
+    import openpyxl
+    import zipfile
+    from xml.etree import ElementTree as ET
+    raw = fileobj.getvalue() if hasattr(fileobj, 'getvalue') else (fileobj if isinstance(fileobj, (bytes, bytearray)) else fileobj.read())
+    z = zipfile.ZipFile(io.BytesIO(raw))
+    names = set(z.namelist())
+    # vm -> media
+    rels = {}
+    rp = "xl/richData/_rels/richValueRel.xml.rels"
+    for r in ET.fromstring(z.read(rp)):
+        rels[r.get("Id")] = "xl/" + r.get("Target").replace("../", "")
+    rel_ids = [e.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+               for e in ET.fromstring(z.read("xl/richData/richValueRel.xml"))]
+    rv = [[v.text for v in e if v.tag.endswith("}v")] for e in ET.fromstring(z.read("xl/richData/rdrichvalue.xml"))]
+    # أي حقل فيه رقم صالح كـ index للصورة: الأول عادةً (LocalImageIdentifier)
+    def media_for_vm(vm):
+        try:
+            idx = int(rv[vm - 1][0])
+            return rels[rel_ids[idx]]
+        except Exception:
+            return None
+    # أول ورقة
+    wbx = ET.fromstring(z.read("xl/workbook.xml"))
+    sheet0 = "xl/worksheets/sheet1.xml"
+    wrels = {r.get("Id"): r.get("Target") for r in ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))}
+    s = wbx.find("m:sheets", _XL_NS)[0]
+    t = wrels.get(s.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"), "")
+    sheet0 = "xl/" + t.lstrip("/").replace("xl/", "") if t else sheet0
+    # رؤوس الأعمدة: عمود الباركود وعمود الصورة
+    ws = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True).worksheets[0]
+    hdr = None; vals = {}
+    for i, row in enumerate(ws.iter_rows(values_only=True), 1):
+        if hdr is None:
+            hdr = [str(c).strip() if c is not None else "" for c in row]
+            ib = next((j for j, h in enumerate(hdr) if "باركود" in h or h.lower() == "barcode"), 1)
+            continue
+        v = row[ib] if ib < len(row) else None
+        if v is not None and str(v).strip():
+            vals[i] = str(int(v)) if isinstance(v, float) and v == int(v) else str(v).strip()
+    ii = next((j for j, h in enumerate(hdr) if h == "الصورة" or "image" in h.lower() or "صورة" in h), 4)
+    col = ""
+    n = ii
+    while True:
+        col = chr(65 + n % 26) + col
+        n = n // 26 - 1
+        if n < 0: break
+    out = {}
+    for _, c in ET.iterparse(io.BytesIO(z.read(sheet0)), events=("end",)):
+        if c.tag.endswith("}c") and c.get("vm"):
+            ref = c.get("r"); m = re.match(r"([A-Z]+)(\d+)", ref)
+            if m and m.group(1) == col:
+                bc = vals.get(int(m.group(2)))
+                mp = media_for_vm(int(c.get("vm")))
+                if bc and mp and mp in names and bc not in out:
+                    out[bc] = z.read(mp)
+        c.clear()
+    # صور عايمة (Drawing) متثبتة على الخلية: from.row (يبدأ من 0) + العمود | floating pictures anchored to cells
+    dp = "xl/drawings/drawing1.xml"
+    if dp in names:
+        dr = {r.get("Id"): "xl/" + r.get("Target").replace("../", "") for r in ET.fromstring(z.read("xl/drawings/_rels/drawing1.xml.rels"))}
+        X = "{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}"
+        A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+        for anc in ET.fromstring(z.read(dp)):
+            fr = anc.find(X + "from"); pic = anc.find(X + "pic")
+            if fr is None or pic is None:
+                continue
+            if int(fr.find(X + "col").text) != ii:
+                continue
+            blip = pic.find(".//" + A + "blip")
+            mp = dr.get(blip.get(R + "embed")) if blip is not None else None
+            bc = vals.get(int(fr.find(X + "row").text) + 1)
+            if bc and mp and mp in names and bc not in out:
+                out[bc] = z.read(mp)
+    return list(out.items())
+
+
+
+def _drive_call(http, method, url, body=None, headers=None):
+    import json as _json
+    resp, content = http.request(url, method=method, body=body, headers=headers or {})
+    if resp.status >= 300:
+        raise RuntimeError(f"Drive {resp.status}: {content[:200]!r}")
+    return _json.loads(content or b"{}")
+
+def _drive_http():
+    import httplib2
+    _c = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+    return _c.authorize(httplib2.Http(timeout=60))
+
+def _drive_folder_id(http):
+    import json as _json, urllib.parse as _up
+    fid = load_settings().get("china_images_folder_id", "")
+    if fid:
+        return fid
+    d = _drive_call(http, "POST", "https://www.googleapis.com/drive/v3/files",
+                    _json.dumps({"name": "ChinaProductImages", "mimeType": "application/vnd.google-apps.folder"}),
+                    {"Content-Type": "application/json"})
+    save_setting("china_images_folder_id", d["id"])
+    return d["id"]
+
+def _drive_upload_jpeg(http, folder, name, data):
+    import json as _json
+    bd = "chinaimgboundary"
+    meta = _json.dumps({"name": name, "parents": [folder]})
+    body = (f"--{bd}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{bd}\r\nContent-Type: image/jpeg\r\n\r\n").encode() \
+        + data + f"\r\n--{bd}--".encode()
+    d = _drive_call(http, "POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", body,
+                    {"Content-Type": f"multipart/related; boundary={bd}"})
+    _drive_call(http, "POST", f"https://www.googleapis.com/drive/v3/files/{d['id']}/permissions",
+                _json.dumps({"role": "reader", "type": "anyone"}), {"Content-Type": "application/json"})
+    return d["id"]
+
+def _shrink_jpeg(raw, side=500):
+    from PIL import Image
+    im = Image.open(io.BytesIO(raw))
+    if im.mode in ("RGBA", "LA", "P"):
+        im = im.convert("RGBA")
+        bg = Image.new("RGB", im.size, (255, 255, 255))
+        bg.paste(im, mask=im.split()[-1])
+        im = bg
+    else:
+        im = im.convert("RGB")
+    im.thumbnail((side, side))
+    out = io.BytesIO()
+    im.save(out, "JPEG", quality=85)
+    return out.getvalue()
+
+def render_china_images_upload(key_prefix):
+    """رفع ملف جرد فيه صور المنتجات (بالباركود) -> الصور بتتخزن على Google Drive وروابطها في شيت ChinaImages، وتاب الصين وشيت China بياخدوا الصور منه."""
+    with st.expander("🖼️ رفع صور منتجات الصين (من ملف إكسيل فيه صور) | Upload China product images", expanded=False):
+        st.caption("ارفع ملف الجرد (عمود «رمز الباركود» وعمود «الصورة»). بنطلّع الصورة قدّام كل باركود، نصغّرها، ونرفعها على Google Drive "
+                   "(مجلد ChinaProductImages) ونخزّن الرابط في شيت ChinaImages. تاب شحنات الصين وشيت China بياخدوا الصور من هناك.")
+        upl = st.file_uploader("ملف الجرد (xlsx)", type=["xlsx", "xlsm"], key=f"{key_prefix}_chimg_up")
+        redo = st.checkbox("استبدل الصور الموجودة بنفس الباركود (الافتراضي: الجديد بس)", key=f"{key_prefix}_chimg_redo")
+        if upl:
+            try:
+                with st.spinner("جاري استخراج الصور من الملف..."):
+                    pics = extract_excel_images(upl)
+            except Exception as e:
+                st.error(f"❌ تعذر قراءة الملف: {e}")
+                return
+            if not pics:
+                st.warning("مالقيتش صور مرتبطة بباركود في الملف")
+                return
+            have = {_china_norm_code(r[0]): i for i, r in enumerate(get_cached(china_img_sheet)[1:], start=2) if r and str(r[0]).strip()}
+            todo = [(b, d) for b, d in pics if redo or _china_norm_code(b) not in have]
+            st.info(f"🖼️ {len(pics)} صورة في الملف | الجديد/المطلوب رفعه: {len(todo)}")
+            if todo and st.button("⬆️ ارفع الصور | Upload images", key=f"{key_prefix}_chimg_go", type="primary", use_container_width=True):
+                http = _drive_http()
+                folder = _drive_folder_id(http)
+                bar = st.progress(0.0)
+                ts = now_str()
+                new_rows, fails = [], []
+                for n, (bc, raw) in enumerate(todo, 1):
+                    try:
+                        fid = _drive_upload_jpeg(http, folder, f"{bc}.jpg", _shrink_jpeg(raw))
+                        new_rows.append([bc, f"https://drive.google.com/thumbnail?id={fid}&sz=w500", fid, ts])
+                    except Exception as e:
+                        fails.append(f"{bc}: {e}")
+                    bar.progress(n / len(todo))
+                if new_rows:
+                    upd = [r for r in new_rows if _china_norm_code(r[0]) in have]
+                    add = [r for r in new_rows if _china_norm_code(r[0]) not in have]
+                    for r in upd:
+                        china_img_sheet.update(values=[r], range_name=f"A{have[_china_norm_code(r[0])]}:D{have[_china_norm_code(r[0])]}",
+                                               value_input_option="RAW")
+                    if add:
+                        china_img_sheet.append_rows(add, value_input_option="RAW")
+                    clear_cache(china_img_sheet)
+                    st.session_state.pop("china_bundle", None)
+                st.success(f"✅ اترفعت {len(new_rows)} صورة" + (f" — فشل {len(fails)}" if fails else ""))
+                if fails:
+                    st.error("\n".join(fails[:8]))
+        st.divider()
+        st.caption("لو شيت China فيه معادلة الصور القديمة، اضغط هنا مرة واحدة بعد أول رفع عشان يبدأ ياخد الصور من ChinaImages:")
+        if st.button("🔄 حدّث معادلة صور شيت China | Refresh image formulas", key=f"{key_prefix}_chimg_formula"):
+            with st.spinner("جاري التحديث..."):
+                _china_write_image_formulas(get_china_flat_ws())
+            st.success("✅ تم")
+
 def render_warehouse_stock_upload(key_prefix):
     """واجهة رفع ملف جرد المستودع (بيتكشف شيت فيه عمود باركود وعمود كمية إجمالية تلقائيًا)."""
     with st.expander("📤 رفع ملف جرد المستودع | Upload Warehouse Stock File", expanded=False):
@@ -2222,9 +2410,10 @@ def _china_image_formula(r):
     def via(code_tab, links_tab):
         return (f"INDEX(ARRAYFORMULA(FILTER('{links_tab}'!$B$2:$B,ISNUMBER(MATCH('{links_tab}'!$A$2:$A,"
                 f"FILTER({code_tab}!$A$2:$A,{code_tab}!$B$2:$B&\"\"={bc}&\"\"),0))*('{links_tab}'!$B$2:$B<>\"\"))),1)")
+    ci = f"INDEX(FILTER(ChinaImages!$B$2:$B,ChinaImages!$A$2:$A&\"\"={bc}&\"\",ChinaImages!$B$2:$B<>\"\"),1)"
     ty = f"INDEX(FILTER(TrendyolProducts!$D$2:$D,TrendyolProducts!$B$2:$B&\"\"={bc}&\"\",TrendyolProducts!$D$2:$D<>\"\"),1)"
-    return (f'=IF({bc}="","",IFERROR(IMAGE(IF({u}<>"",{u},IFERROR({via("Tacweed","links n")},'
-            f'IFERROR({via("TacweedAmazon","links a")},{ty}))),1),"— لا صورة"))')
+    return (f'=IF({bc}="","",IFERROR(IMAGE(IF({u}<>"",{u},IFERROR({ci},IFERROR({via("Tacweed","links n")},'
+            f'IFERROR({via("TacweedAmazon","links a")},{ty})))),1),"— لا صورة"))')
 
 def _china_next_action_row(r, gid):
     c = {k: _china_col_letter(i + 1) for i, k in enumerate(CHINA_FLAT_KEYS)}
@@ -2663,9 +2852,20 @@ def _china_delete_order(order_no):
     st.session_state["china_flat_ts"] = 0
 
 
+def get_china_images_map():
+    """باركود موحّد -> رابط صورة (شيت ChinaImages) | normalised barcode -> image URL."""
+    def _b(raw):
+        m = {}
+        for r in (raw or [])[1:]:
+            if len(r) > 1 and str(r[0]).strip() and str(r[1]).strip().startswith("http"):
+                m[_china_norm_code(r[0])] = str(r[1]).strip()
+        return m
+    return _memo_from_sheet(china_img_sheet, "china_img_map", _b)
+
 def get_china_bundle():
     raw = _china_flat_raw()
-    if st.session_state.get("china_bundle_src") is raw and "china_bundle" in st.session_state:
+    if (st.session_state.get("china_bundle_src") is raw and "china_bundle" in st.session_state
+            and st.session_state.get("china_bundle_img_src") is get_cached(china_img_sheet)):
         return st.session_state["china_bundle"]
     ships, conts_list, lines, conflicts = china_flat_to_tables(_china_read_flat(raw))
     conts = {c["container_no"]: c for c in conts_list if c.get("container_no")}
@@ -2674,6 +2874,10 @@ def get_china_bundle():
         ship_by_pair.setdefault((s.get("internal_order_no", ""), s.get("po_no", "")), s)
         ship_by_no.setdefault(s.get("internal_order_no", ""), s)
     enriched = [_china_enrich(l, conts, ship_by_pair, ship_by_no) for l in lines]
+    _cimg = get_china_images_map()
+    for e in enriched:
+        if not e.get("image_url") and e.get("_norm") in _cimg:
+            e["image_url"] = _cimg[e["_norm"]]
     by_code, by_noon_sku = {}, {}
     for e in enriched:
         if e["_norm"]:
@@ -2685,6 +2889,7 @@ def get_china_bundle():
               "by_code": by_code, "by_noon_sku": by_noon_sku, "conflicts": conflicts}
     st.session_state["china_bundle"] = bundle
     st.session_state["china_bundle_src"] = raw
+    st.session_state["china_bundle_img_src"] = get_cached(china_img_sheet)
     return bundle
 
 # ── البيانات المجمّعة والمربوطة (متكاشة) | The joined data bundle (cached) ──
@@ -7120,6 +7325,7 @@ def render_upload_tab():
     else:
         render_warehouse_stock_upload("up")
         render_china_upload("up", get_china_bundle())
+        render_china_images_upload("up")
         _li = load_settings().get("china_last_import", "")
         if _li:
             st.caption(f"🕒 آخر رفع للصين: {_li}")
