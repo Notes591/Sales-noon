@@ -6948,6 +6948,36 @@ def compute_cross_store_analysis(win=30):
         out.sort(key=lambda r: -r["ratio"])
         return out
     swings = {"30": _swings(today - timedelta(days=win)), "7": _swings(today - timedelta(days=7))}
+    # منتجات من غير رابط صورة (نون: links n / المخزون — أمازون: links a / links n — تريندول: links n / ملف تريندول)
+    links_a = get_links_map_asin()
+    ty_img = get_trendyol_bundle().get("img", {})
+    ty_img2 = get_ty_products().get("img", {})
+    def _q30(cnts, k):
+        return sum(v for d, v in cnts.get(k, {}).items() if d in sn)
+    noimg = []
+    for k in set(inv_map) | set(c_noon):
+        if links.get(k) or str((inv_map.get(k) or {}).get("img", "")).startswith("http"):
+            continue
+        q = _q30(c_noon, k)
+        stk = (inv_map.get(k) or {}).get("total_stock", 0) or 0
+        if q or stk:
+            noimg.append({"store": "🟢 نون", "key": (inv_map.get(k) or {}).get("sku", k), "code": noon_map.get(k, ""), "qty": q, "stock": stk, "sheet": "links n"})
+    for k in set(amz_inv_map_asin) | set(c_amz):
+        info = amz_inv_map_asin.get(k) or {}
+        if links_a.get(k) or any(links.get(str(m).upper()) for m in info.get("skus", [])):
+            continue
+        q = _q30(c_amz, k)
+        stk = info.get("stock", 0) or 0
+        if q or stk:
+            noimg.append({"store": "🟠 أمازون", "key": info.get("asin", k), "code": amz_map.get(k, ""), "qty": q, "stock": stk, "sheet": "links a"})
+    for k in c_ty:
+        if links.get(k) or ty_img.get(k) or ty_img2.get(k):
+            continue
+        q = _q30(c_ty, k)
+        if q:
+            noimg.append({"store": "🟣 تريندول", "key": k, "code": noon_map.get(k, ""), "qty": q, "stock": 0, "sheet": "links n"})
+    noimg.sort(key=lambda r: (-r["qty"], -r["stock"]))
+    swings["noimg"] = noimg
     return rows, unm, swings
 
 def amz_map_stock(asin_up):
@@ -7005,20 +7035,40 @@ def render_cross_store_tab():
         ("drop", "📉 هبوط مبيعات الكود (كل المتاجر)"),
         ("price", "💲 فرق سعر كبير بين المتاجر"),
         ("unm", "❓ مبيعات من غير كود (مش مربوطة بالتكويد)"),
+        ("noimg", "🖼️ منتجات من غير رابط صورة (نزّلها Excel وجيب الروابط)"),
         ("swing", "💱 تذبذب السعر داخل نفس المتجر — آخر 30 يوم"),
         ("swing7", "⚡ تذبذب السعر داخل نفس المتجر — الأسبوع ده (آخر 7 أيام)"),
     ]
     sw_pct = st.number_input("أقل فرق % بين أقل وأعلى سعر بيع في نفس المتجر يعتبر تنبيه | Min same-store swing %", min_value=5, max_value=500,
                              value=30, step=5, key="xs_swing")
+    noimg = swings.get("noimg", [])
     swings7 = [w for w in swings["7"] if (w["ratio"] - 1) * 100 >= sw_pct]
     swings = [w for w in swings["30"] if (w["ratio"] - 1) * 100 >= sw_pct]
     cnt = {k: len(v) for k, v in A.items()}
     cnt["unm"] = len(unm)
     cnt["swing"] = len(swings)
     cnt["swing7"] = len(swings7)
+    cnt["noimg"] = len(noimg)
     st.markdown(" &nbsp;|&nbsp; ".join(f"{t.split(' ')[0]} **{cnt[k]}**" for k, t in titles))
     pick = st.radio("التنبيه | Alert", [f"{t} ({cnt[k]})" for k, t in titles], key="xs_pick")
     key = titles[[f"{t} ({cnt[k]})" for k, t in titles].index(pick)][0]
+    if key == "noimg":
+        if not noimg:
+            st.success("✅ كل المنتجات النشطة ليها رابط صورة")
+            return
+        st.caption("منتجات اتباعت في آخر 30 يوم أو ليها مخزون ومالهاش رابط صورة. الإكسيل فيه عمود «Image URL» فاضي تملاه وتلصقه في الشيت المكتوب جنب كل صف "
+                   "(links n لنون وتريندول بالـ SKU/الباركود، links a لأمازون بالـ ASIN).")
+        _pick = st.radio("المتجر | Store", ["الكل", "🟢 نون", "🟠 أمازون", "🟣 تريندول"], horizontal=True, key="xs_noimg_store")
+        _it = [r for r in noimg if _pick == "الكل" or r["store"] == _pick]
+        df = pd.DataFrame([{"SKU / ASIN / Barcode": r["key"], "Image URL": "", "المتجر": r["store"], "الكود": r["code"],
+                            "مبيع 30 يوم": r["qty"], "مخزون": r["stock"], "حطه في شيت": r["sheet"]} for r in _it])
+        dl_btn(df, "missing_images", key="dlbtn_xs_noimg")
+        st.caption(f"{len(_it)} منتج")
+        for r in page_slice(_it, "pg_xs_noimg", 30):
+            st.markdown(f"{r['store']} &nbsp; `{r['key']}`" + (f" &nbsp;|&nbsp; كود `{r['code']}`" if r["code"] else "")
+                        + f" &nbsp;—&nbsp; مبيع 30 يوم **{r['qty']}** | مخزون **{r['stock']}** | شيت `{r['sheet']}`")
+        page_more(_it, "pg_xs_noimg", 30)
+        return
     if key in ("swing", "swing7"):
         _per = "آخر 7 أيام (الأسبوع ده)" if key == "swing7" else "آخر 30 يوم"
         swings = swings7 if key == "swing7" else swings
@@ -7069,7 +7119,7 @@ def render_cross_store_tab():
 
 def _cross_cached():
     sig = (len(get_cached(daily_orders_sheet)), len(get_cached(daily_orders_amazon_sheet)),
-           len(get_trendyol_bundle()["rows"]), len(get_tacweed_map()), len(get_warehouse_stock_map()), datetime.now().date(), "v4")
+           len(get_trendyol_bundle()["rows"]), len(get_tacweed_map()), len(get_warehouse_stock_map()), datetime.now().date(), "v5")
     c = st.session_state.get("_xs_cache")
     if c and c[0] == sig and len(c[1]) == 3:
         return c[1]
