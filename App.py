@@ -4241,12 +4241,55 @@ def parse_excel_date(val):
     except:
         return None
 
+# ══ تسريع: تحويل التواريخ بيتكرر ملايين المرات على نفس القيم — بنحفظ النتيجة ══
+from functools import lru_cache as _lru_cache
+_parse_excel_date_raw = parse_excel_date
+
+@_lru_cache(maxsize=300000)
+def _parse_excel_date_cached(val):
+    return _parse_excel_date_raw(val)
+
+def parse_excel_date(val):
+    try:
+        return _parse_excel_date_cached(val)
+    except TypeError:
+        return _parse_excel_date_raw(val)
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
 def dl_btn(df, prefix, label="⬇️ Excel | Download", key=None):
+    """الجداول الصغيرة: تحميل مباشر. الكبيرة (+300 صف): زرار «جهّز» الأول — عشان بناء ملف Excel كل مرة بيبطّئ الصفحة."""
+    k = key or f"dlbtn_{prefix}"
+    if len(df) > 300:
+        if st.button(f"📥 جهّز Excel ({len(df):,} صف) | Prepare", key=k + "__prep", use_container_width=True):
+            st.session_state[k + "__xl"] = (to_excel(df), f"{prefix}_{file_timestamp()}.xlsx")
+        _xl = st.session_state.get(k + "__xl")
+        if _xl:
+            st.download_button(label, data=_xl[0], file_name=_xl[1], mime=_XLSX_MIME, use_container_width=True, key=k)
+        return
     st.download_button(label, data=to_excel(df),
         file_name=f"{prefix}_{file_timestamp()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        mime=_XLSX_MIME,
         use_container_width=True,
-        key=key or f"dlbtn_{prefix}")
+        key=k)
+
+# ══ عرض القوايم الطويلة على دفعات (الرسم هو اللي بيبطّئ مش الحساب) ══
+def page_slice(rows, key, n=25):
+    return rows[:int(st.session_state.get(key, n))]
+
+def page_more(rows, key, n=25):
+    lim = int(st.session_state.get(key, n))
+    if len(rows) > lim:
+        st.caption(f"معروض {lim} من {len(rows):,} | Showing {lim} of {len(rows):,}")
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            if st.button(f"⬇️ كمان {n} | {n} more", key=key + "_more", use_container_width=True):
+                st.session_state[key] = lim + n
+                st.rerun()
+        with _c2:
+            if st.button("📜 الكل (أبطأ) | All", key=key + "_all", use_container_width=True):
+                st.session_state[key] = len(rows)
+                st.rerun()
 
 # ══ CancelNotifications — حفظ/تحميل/تنظيف ══
 def load_cancel_notifications():
@@ -5495,7 +5538,9 @@ def render_no_sale_list_trendyol(rows, period_label, dl_key):
     c1, c2 = st.columns(2)
     with c1: dl_btn(df, dl_key, key=f"dlbtn_{dl_key}")
     with c2: st.warning(f"⚠️ {len(rows)} منتج بدون مبيعات | products without sales")
-    for r in rows:
+    _pgk = f"pg_ns_{dl_key}"
+    _pg_items = list(rows)
+    for r in page_slice(_pg_items, _pgk):
         ci, cx = st.columns([1, 6])
         with ci:
             show_img(r["img"], 60)
@@ -5505,6 +5550,7 @@ def render_no_sale_list_trendyol(rows, period_label, dl_key):
         st.divider()
 
 
+    page_more(_pg_items, _pgk)
 # ══════════════════════════════════════════════════════════════════════════
 # ══ ربط إعلانات تريندول بالـ Barcode — عن طريق ملف المنتجات (Content ID من رابط المنتج) ══
 # ملف Products من لوحة تريندول: عمود "Trendyol.com Link" فيه رقم المنتج بعد "-p-" (= Content ID في تقرير الإعلانات).
@@ -6799,7 +6845,9 @@ if st.session_state["nav_page"] == "tab9":
                     confirm_clear("clear_inv", inventory_sheet, "المخزون | Inventory")
                     filtered_inv = {k:v for k,v in inv_map.items() if not srch or srch.strip().upper() in k}
                     st.write(f"**SKUs: {len(filtered_inv)}**")
-                    for sku_key,info in filtered_inv.items():
+                    _pgk = f"pg_inv_noon_{abs(hash(srch or ''))}"
+                    _pg_items = list(filtered_inv.items())
+                    for sku_key,info in page_slice(_pg_items, _pgk):
                         c_img,c_info = st.columns([1,6])
                         with c_img: show_img(info["img"],70)
                         with c_info:
@@ -6819,6 +6867,7 @@ if st.session_state["nav_page"] == "tab9":
                             st.caption(f"📅 {info['date']}")
                         st.divider()
 
+                    page_more(_pg_items, _pgk)
             with amazon_stock_subtab:
                 st.subheader("📦 مخزون أمازون | Amazon Stock")
                 st.caption("مصدره شيت StockAmazon (تصدير Amazon Seller Central) — مستقل تمامًا عن مخزون نون فوق، ومجمّع على أساس ASIN (معرّف منتج أمازون الحقيقي) مش MSKU | Sourced from the StockAmazon sheet (Amazon Seller Central export) — fully independent from Noon's stock above, aggregated by ASIN (Amazon's real product identity), not MSKU.")
@@ -6844,7 +6893,9 @@ if st.session_state["nav_page"] == "tab9":
                             or any(srch_up_amz_inv in s.upper() for s in info.get("skus", []))
                         }
                         st.info(f"📦 ASINs: {len(filtered_amz_inv)}")
-                    for asin_up, info in filtered_amz_inv.items():
+                    _pgk = f"pg_inv_amz_{abs(hash(srch_up_amz_inv))}"
+                    _pg_items = list(filtered_amz_inv.items())
+                    for asin_up, info in page_slice(_pg_items, _pgk):
                         c_img_amz_inv, c_info_amz_inv = st.columns([1, 6])
                         mskus_amz_inv = info.get("skus", [])
                         img_amz_inv = links_map_asin_inv.get(asin_up, "") or (
@@ -6864,6 +6915,7 @@ if st.session_state["nav_page"] == "tab9":
                         st.divider()
 
 
+                    page_more(_pg_items, _pgk)
         # ══ TAB 10 — مراجعة المخزون ══
 
 # ══ TAB WH — توقع نفاد مخزون المستودع (على مستوى كود التكويد) ══
@@ -7316,11 +7368,13 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 "الحالة | Status": r["status"],
             } for r in attention_rows_td])
             dl_btn(df_al1, "alert_stockout_risk", key=f"dl_alert_stockout_td_{key_suffix}")
-            for r in attention_rows_td:
+            _pgk_al1 = f"pg_al1_{key_suffix}"
+            for r in page_slice(attention_rows_td, _pgk_al1):
                 _render_alert_sku_row(
                     r,
                     lines=[f"📦 مخزون: {r['stock']:,} — ⏳ نفاد خلال {r['days_to_so']} يوم", r["status"]],
                     badges_html=_extra_context_badges(r, include_schedule=True))
+            page_more(attention_rows_td, _pgk_al1)
         else:
             st.caption("لا توجد أصناف معرضة لنفاد المخزون حالياً")
 
@@ -7331,11 +7385,13 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 "SKU": r["sku"], "المخزون | Stock": r["stock"], "مبيعات الفترة | Period Sales": r["cur"],
             } for r in zero_rows_td])
             dl_btn(df_al2, "alert_no_sales", key=f"dl_alert_nosale_td_{key_suffix}")
-            for r in zero_rows_td:
+            _pgk_al2 = f"pg_al2_{key_suffix}"
+            for r in page_slice(zero_rows_td, _pgk_al2):
                 _render_alert_sku_row(
                     r,
                     lines=[f"📦 مخزون: {r['stock']:,} — لا يوجد مبيعات خلال {analysis_days_td} يوم رغم توفر المخزون"],
                     badges_html=_extra_context_badges(r, include_schedule=False))
+            page_more(zero_rows_td, _pgk_al2)
         else:
             st.caption("كل الأصناف اللي معاها مخزون باعت خلال الفترة المحددة")
 
@@ -7349,7 +7405,8 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 "غير متوفر حالياً؟ | Unavailable now?": "نعم | Yes" if is_sku_unavailable(r["sku_up"]) else "لا | No",
             } for r in decline_rows_td])
             dl_btn(df_al3, "alert_declining", key=f"dl_alert_decline_td_{key_suffix}")
-            for r in decline_rows_td:
+            _pgk_al3 = f"pg_al3_{key_suffix}"
+            for r in page_slice(decline_rows_td, _pgk_al3):
                 drop_pct = (r["prev"] - r["cur"]) / r["prev"] * 100
                 stock_available_dec = r["stock"] > 0
                 if not stock_available_dec:
@@ -7364,6 +7421,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                     r,
                     lines=[f"📉 {r['cur']:,} مقابل {r['prev']:,} (-{drop_pct:.0f}%)", f"📦 مخزون حالي: {r['stock']:,}"],
                     badges_html=(reason + badges))
+            page_more(decline_rows_td, _pgk_al3)
         else:
             st.caption("لا توجد أصناف انخفضت مبيعاتها بنسبة 20%+ حالياً")
 
@@ -7374,12 +7432,14 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 "الارتفاع | Rise %": round((r["cur"] - r["prev"]) / r["prev"] * 100, 1),
             } for r in rise_rows_td])
             dl_btn(df_al4, "alert_rising", key=f"dl_alert_rise_td_{key_suffix}")
-            for r in rise_rows_td:
+            _pgk_al4 = f"pg_al4_{key_suffix}"
+            for r in page_slice(rise_rows_td, _pgk_al4):
                 rise_pct = (r["cur"] - r["prev"]) / r["prev"] * 100
                 _render_alert_sku_row(
                     r,
                     lines=[f"📈 {r['cur']:,} مقابل {r['prev']:,} (+{rise_pct:.0f}%)", f"📦 مخزون حالي: {r['stock']:,}"],
                     badges_html=_extra_context_badges(r, include_schedule=False))
+            page_more(rise_rows_td, _pgk_al4)
         else:
             st.caption("لا توجد أصناف ارتفعت مبيعاتها بنسبة 20%+ حالياً")
 
@@ -7394,7 +7454,8 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                     "السعر | Price": r["price"] if r["price"] is not None else "—",
                 } for r in xdock_low_rows_td])
                 dl_btn(df_al7, "alert_xdock_low", key=f"dl_alert_xdock_td_{key_suffix}")
-                for r in xdock_low_rows_td:
+                _pgk_al7 = f"pg_al7_{key_suffix}"
+                for r in page_slice(xdock_low_rows_td, _pgk_al7):
                     if r["has_other_stock"]:
                         other_badge = f'<span style="color:#4ade80;font-size:12px;">📦 عنده مخزون FBN (Inventory): {r["other_stock"]:,} — أقل إلحاحاً</span>'
                     else:
@@ -7404,6 +7465,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                         lines=[f"🟣 مخزون Xdock: {r['stock_xdock_net']:,} — 📈 مبيع شهري: {r['sales_month']:,}"
                                + (f" — 💵 {r['price']:,.2f} ريال" if r["price"] is not None else "")],
                         badges_html=other_badge)
+                page_more(xdock_low_rows_td, _pgk_al7)
             else:
                 st.caption(f"لا توجد أصناف مخزون Xdock عندها {xdock_threshold_dash} قطعة أو أقل حالياً")
 
@@ -7452,8 +7514,10 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 "الكمية المقترحة | Suggested Qty": r["suggested_qty"],
             } for r in wh_order_now_rows])
             dl_btn(df_wh1, "alert_wh_order_now", key=f"dl_alert_wh_now_td_{key_suffix}")
-            for r in wh_order_now_rows:
+            _pgk_wh1 = f"pg_wh1_{key_suffix}"
+            for r in page_slice(wh_order_now_rows, _pgk_wh1):
                 _render_wh_alert_row(r)
+            page_more(wh_order_now_rows, _pgk_wh1)
         else:
             st.caption("لا توجد أكواد مستودع محتاجة طلب الآن حالياً")
 
@@ -7466,8 +7530,10 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 "الأيام المتبقية لموعد الطلب | Days to Reorder": r["reorder_in"],
             } for r in wh_reorder_soon_rows])
             dl_btn(df_wh2, "alert_wh_reorder_soon", key=f"dl_alert_wh_soon_td_{key_suffix}")
-            for r in wh_reorder_soon_rows:
+            _pgk_wh2 = f"pg_wh2_{key_suffix}"
+            for r in page_slice(wh_reorder_soon_rows, _pgk_wh2):
                 _render_wh_alert_row(r)
+            page_more(wh_reorder_soon_rows, _pgk_wh2)
         else:
             st.caption("لا توجد أكواد مستودع قرب موعد الطلب حالياً")
 
@@ -7676,7 +7742,8 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
             "الحالة | Status": r["status"],
         } for r in attention_rows_td])
         dl_btn(df_att_td, "needs_attention", key=f"dl_attention_td_{key_suffix}")
-        for r in attention_rows_td:
+        _pgk_att = f"pg_att_{key_suffix}"
+        for r in page_slice(attention_rows_td, _pgk_att):
             ci_a, cinfo_a = st.columns([1, 6])
             with ci_a:
                 show_img(r["img"], 70)
@@ -7688,6 +7755,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                     f"⏳ نفاد خلال | Stockout in: **{r['days_to_so']}** يوم")
                 st.markdown(r["status"])
             st.divider()
+        page_more(attention_rows_td, _pgk_att)
     else:
         st.success("✅ لا توجد أصناف محتاجة انتباه حالياً | No items currently need attention")
 
@@ -9498,38 +9566,53 @@ if st.session_state["nav_page"] == "tab14":
                     blocks_t14 = [b for b in blocks_t14 if b["tb"]]
                     blocks_t14.sort(key=lambda b: (-_ty_sales(b["tb"])[0], -_ty_sales(b["tb"])[1]))
 
-                # جدول تحميل
+                # ══ تقسيم لصفحات: نرسم أول N بلوك بس (الرسم هو اللي بيبطّئ الصفحة) وزرار «كمان» يزوّد ══
+                _sig_t14 = (_vw, q_t14)
+                if st.session_state.get("t14_sig") != _sig_t14:
+                    st.session_state["t14_sig"] = _sig_t14
+                    st.session_state["t14_limit"] = 30
+                _lim_t14 = int(st.session_state.get("t14_limit", 30))
+                blocks_all_t14 = blocks_t14
+                blocks_show_t14 = blocks_all_t14[:_lim_t14]
+                # جدول تحميل — بيتبني عند الطلب بس (بدل كل مرة) عشان الصفحة تفتح أسرع
                 if blocks_t14:
-                    _dl_rows = []
-                    for b in blocks_t14:
-                        if b["sku"]:
-                            chs = sku_rows_t14[b["sku"]]
-                            rn, rb = chs.get("FBN"), chs.get("FBB")
-                            base = rn or rb
-                            _dl_rows.append({
-                                "المتجر | Store": "Noon", "تكويد | Code": b["code"], "SKU / ASIN": base["sku"],
-                                **{"FBN " + sales_labels[i]: (rn["day_counts"].get(d, 0) if rn else 0) for i, d in enumerate(sales_dates)},
-                                **{"FBB " + sales_labels[i]: (rb["day_counts"].get(d, 0) if rb else 0) for i, d in enumerate(sales_dates)},
-                                "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
-                        if b["asin"]:
-                            chs = asin_rows_t14[b["asin"]]
-                            rs, rf = chs.get("FSAB"), chs.get("FBA")
-                            base = rs or rf
-                            _dl_rows.append({
-                                "المتجر | Store": "Amazon", "تكويد | Code": b["code"], "SKU / ASIN": f"{b['asin']} ({base['sku']})",
-                                **{"FSAB " + sales_labels[i]: (rs["day_counts"].get(d, 0) if rs else 0) for i, d in enumerate(sales_dates)},
-                                **{"FBA " + sales_labels[i]: (rf["day_counts"].get(d, 0) if rf else 0) for i, d in enumerate(sales_dates)},
-                                "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
-                        if b["tb"]:
-                            chs = ty_rows_t14[b["tb"]]
-                            rt = chs["TY"]
-                            _dl_rows.append({
-                                "المتجر | Store": "Trendyol", "تكويد | Code": b["code"], "SKU / ASIN": rt["sku"],
-                                **{"TY " + sales_labels[i]: rt["day_counts"].get(d, 0) for i, d in enumerate(sales_dates)},
-                                "مخزون | Stock": 0, "مبيع شهري | Monthly Sales": rt["sales_month"]})
-                    df_t14 = pd.DataFrame(_dl_rows).fillna(0)
                     c1, c2 = st.columns(2)
-                    with c1: dl_btn(df_t14, "sales_daily", key="dlbtn_t14")
+                    with c1:
+                        if st.button("📥 جهّز ملف Excel | Prepare Excel", key="t14_dl_prep", use_container_width=True):
+                            _dl_rows = []
+                            for b in blocks_t14:
+                                if b["sku"]:
+                                    chs = sku_rows_t14[b["sku"]]
+                                    rn, rb = chs.get("FBN"), chs.get("FBB")
+                                    base = rn or rb
+                                    _dl_rows.append({
+                                        "المتجر | Store": "Noon", "تكويد | Code": b["code"], "SKU / ASIN": base["sku"],
+                                        **{"FBN " + sales_labels[i]: (rn["day_counts"].get(d, 0) if rn else 0) for i, d in enumerate(sales_dates)},
+                                        **{"FBB " + sales_labels[i]: (rb["day_counts"].get(d, 0) if rb else 0) for i, d in enumerate(sales_dates)},
+                                        "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
+                                if b["asin"]:
+                                    chs = asin_rows_t14[b["asin"]]
+                                    rs, rf = chs.get("FSAB"), chs.get("FBA")
+                                    base = rs or rf
+                                    _dl_rows.append({
+                                        "المتجر | Store": "Amazon", "تكويد | Code": b["code"], "SKU / ASIN": f"{b['asin']} ({base['sku']})",
+                                        **{"FSAB " + sales_labels[i]: (rs["day_counts"].get(d, 0) if rs else 0) for i, d in enumerate(sales_dates)},
+                                        **{"FBA " + sales_labels[i]: (rf["day_counts"].get(d, 0) if rf else 0) for i, d in enumerate(sales_dates)},
+                                        "مخزون | Stock": base["stock"], "مبيع شهري | Monthly Sales": base["sales_month"]})
+                                if b["tb"]:
+                                    chs = ty_rows_t14[b["tb"]]
+                                    rt = chs["TY"]
+                                    _dl_rows.append({
+                                        "المتجر | Store": "Trendyol", "تكويد | Code": b["code"], "SKU / ASIN": rt["sku"],
+                                        **{"TY " + sales_labels[i]: rt["day_counts"].get(d, 0) for i, d in enumerate(sales_dates)},
+                                        "مخزون | Stock": 0, "مبيع شهري | Monthly Sales": rt["sales_month"]})
+                            st.session_state["t14_dl_bytes"] = to_excel(pd.DataFrame(_dl_rows).fillna(0))
+                            st.session_state["t14_dl_name"] = f"sales_daily_{file_timestamp()}.xlsx"
+                        if st.session_state.get("t14_dl_bytes"):
+                            st.download_button("⬇️ تحميل الملف الجاهز | Download", data=st.session_state["t14_dl_bytes"],
+                                               file_name=st.session_state.get("t14_dl_name", "sales_daily.xlsx"),
+                                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                               use_container_width=True, key="dlbtn_t14")
                     with c2: st.info(f"📦 بلوكات: {len(blocks_t14)} | 📅 {sales_display_days} يوم")
 
                 # ══ قائمة SKUs المرحلة من المبيعات (محتاج جدولة فقط) ══
@@ -9552,10 +9635,34 @@ if st.session_state["nav_page"] == "tab14":
                     _ty_fee_v, ty_fee_set_t14 = 0.0, False
                 com_map_ty_t14 = {bc: {"delivery": _ty_fee_v, "commission_pct": pct} for bc, pct in get_trendyol_commission_map().items()}
 
+                def _t14_noon_shown(noon_chs):
+                    """أي قنوات نون بتتعرض للبلوك (FBN/FBB) — نفس القاعدة بالظبط للرسم وللحساب من غير رسم."""
+                    _sn = {k: bool(noon_chs and k in noon_chs) for k in ("FBN", "FBB")}
+                    # نون: القناة اللي مفيهاش مبيع أمس مبتتعرضش لو القناة التانية باعت؛ ولو الاتنين صفر بنعرض FBN (أو FBB لو هي الوحيدة)
+                    if noon_chs and not q_t14:
+                        _yn = {k: (_yv(noon_chs, k) if _sn[k] else 0) for k in ("FBN", "FBB")}
+                        if _yn["FBN"] > 0 or _yn["FBB"] > 0:
+                            _sn = {k: _sn[k] and _yn[k] > 0 for k in ("FBN", "FBB")}
+                        elif _sn["FBN"]:
+                            _sn["FBB"] = False
+                    return _sn
+
+                def _t14_transfer_entry(r):
+                    """لو الـ SKU "محتاج جدولة فقط" بيرجّع بياناته للترحيل (نفس شرط _t14_channel_part من غير رسم)."""
+                    badge_text, _c, sched = schedule_coverage_badge(r["sku"], r["days_to_stockout"], delay_days_t14)
+                    stock_self_ok = (r["effective_avg"] <= 0) or (r["days_to_stockout"] >= coverage_days_t14)
+                    if (not stock_self_ok and badge_text and "محتاج جدولة" in badge_text and not sched
+                            and not get_unavailable_ordered_note(r["sku"]) and not recent_sched_map_t14.get(r["sku_up"])):
+                        return {"sku": r["sku"], "sku_up": r["sku_up"], "stock": r["stock"],
+                                "sales_month": r["sales_month"], "img": r["img"],
+                                "effective_avg": r["effective_avg"], "days_to_stockout": r["days_to_stockout"],
+                                "day_counts": r["day_counts"]}
+                    return None
+
                 render_china_sales_status([k for b in blocks_t14 for k in (b["sku"], b["asin"], b["tb"]) if k])  # 🚢 حالة ربط بيانات الصين
                 st.divider()
                 wh_lookup_t14 = _china_wh_lookup()
-                for b in blocks_t14:
+                for b in blocks_show_t14:
                     noon_chs = sku_rows_t14.get(b["sku"]) if b["sku"] else None
                     amz_chs = asin_rows_t14.get(b["asin"]) if b["asin"] else None
                     ty_chs = ty_rows_t14.get(b["tb"]) if b["tb"] else None
@@ -9688,14 +9795,7 @@ if st.session_state["nav_page"] == "tab14":
                         for _ach in ("FSAB", "FBA"):
                             _shown_a[_ach] = bool(amz_chs and _ach in amz_chs and (q_t14 or _yv(amz_chs, _ach) > 0))
                         # كل قنوات المتاجر جنب بعض في صف واحد: FBN | FBB (نون) | FSAB | FBA (أمازون) | تريندول (محجوز)
-                        _sn = {k: bool(noon_chs and k in noon_chs) for k in ("FBN", "FBB")}
-                        # نون: القناة اللي مفيهاش مبيع أمس مبتتعرضش لو القناة التانية باعت؛ ولو الاتنين صفر بنعرض FBN (أو FBB لو هي الوحيدة)
-                        if noon_chs and not q_t14:
-                            _yn = {k: (_yv(noon_chs, k) if _sn[k] else 0) for k in ("FBN", "FBB")}
-                            if _yn["FBN"] > 0 or _yn["FBB"] > 0:
-                                _sn = {k: _sn[k] and _yn[k] > 0 for k in ("FBN", "FBB")}
-                            elif _sn["FBN"]:
-                                _sn["FBB"] = False
+                        _sn = _t14_noon_shown(noon_chs)
                         _sa = _shown_a
                         if any(_sn.values()) or any(_sa.values()) or r_ty:
                             _lvl = {"FBN": True, "FBB": not _sn["FBN"], "FSAB": True, "FBA": not _sa["FSAB"]}
@@ -9714,8 +9814,30 @@ if st.session_state["nav_page"] == "tab14":
                                         if r_ty: _t14_channel_part(r_ty, "TY", True, part=_pt)
                     st.divider()
                 # حفظ المرحلين في session_state بعد اكتمال العرض
-                if _vw in ("all", "noon"):      # بيتحسب من بلوكات نون بس — فمنكتبش فوقه وإحنا بنعرض أمازون/تريندول
+                if _vw in ("all", "noon") and not q_t14:      # بيتحسب من بلوكات نون بس — فمنكتبش فوقه وإحنا بنعرض أمازون/تريندول أو بحث
+                    for b in blocks_all_t14[len(blocks_show_t14):]:     # البلوكات اللي ما اترسمتش: نحسبها من غير رسم
+                        _nc = sku_rows_t14.get(b["sku"]) if b["sku"] else None
+                        if not _nc:
+                            continue
+                        _snh = _t14_noon_shown(_nc)
+                        for _chh in ("FBN", "FBB"):
+                            if _snh[_chh]:
+                                _te = _t14_transfer_entry(_nc[_chh])
+                                if _te:
+                                    _new_transferred.append(_te)
                     st.session_state["transferred_skus_t14"] = _new_transferred
+                if len(blocks_all_t14) > len(blocks_show_t14):
+                    _rest = len(blocks_all_t14) - len(blocks_show_t14)
+                    st.info(f"معروض {len(blocks_show_t14)} من {len(blocks_all_t14)} بلوك (مرتبين بمبيعات أمس) | Showing {len(blocks_show_t14)} of {len(blocks_all_t14)}")
+                    cm1, cm2 = st.columns(2)
+                    with cm1:
+                        if st.button(f"⬇️ كمان 30 بلوك | 30 more (باقي {_rest})", key="t14_more", use_container_width=True):
+                            st.session_state["t14_limit"] = _lim_t14 + 30
+                            st.rerun()
+                    with cm2:
+                        if st.button(f"📜 اعرض الكل ({_rest} بلوك) — أبطأ | Show all (slower)", key="t14_all", use_container_width=True):
+                            st.session_state["t14_limit"] = len(blocks_all_t14)
+                            st.rerun()
 
 
 if st.session_state["nav_page"] == "tab_dash":
@@ -9825,7 +9947,9 @@ if st.session_state["nav_page"] == "tab16":
                 c1, c2 = st.columns(2)
                 with c1: dl_btn(df_ns, dl_key, key=f"dlbtn_{dl_key}")
                 with c2: st.warning(f"⚠️ {len(rows)} {'SKU' if channel=='noon' else 'ASIN'} بدون مبيعات | {'SKUs' if channel=='noon' else 'ASINs'} without sales")
-                for r in rows:
+                _pgk = f"pg_ns_{dl_key}"
+                _pg_items = list(rows)
+                for r in page_slice(_pg_items, _pgk):
                     c_img, c_info = st.columns([1, 6])
                     with c_img:
                         show_img(r["img"], 60)
@@ -9848,6 +9972,7 @@ if st.session_state["nav_page"] == "tab16":
                             st.markdown(big_note_html(note), unsafe_allow_html=True)
                     st.divider()
 
+                page_more(_pg_items, _pgk)
             channel_tab_noon, channel_tab_amz, channel_tab_ty = st.tabs([
                 "🅽 نون | Noon",
                 "🅰️ أمازون | Amazon",
