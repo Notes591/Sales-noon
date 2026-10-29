@@ -7059,9 +7059,9 @@ def render_cross_store_tab():
 
 def _cross_cached():
     sig = (len(get_cached(daily_orders_sheet)), len(get_cached(daily_orders_amazon_sheet)),
-           len(get_trendyol_bundle()["rows"]), len(get_tacweed_map()), len(get_warehouse_stock_map()), datetime.now().date())
+           len(get_trendyol_bundle()["rows"]), len(get_tacweed_map()), len(get_warehouse_stock_map()), datetime.now().date(), "v3")
     c = st.session_state.get("_xs_cache")
-    if c and c[0] == sig:
+    if c and c[0] == sig and len(c[1]) == 3:
         return c[1]
     res = compute_cross_store_analysis()
     st.session_state["_xs_cache"] = (sig, res)
