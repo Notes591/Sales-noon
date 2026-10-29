@@ -8252,13 +8252,23 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                         key=lambda r: -(r["china"].get("lost") or 0))
     _wh_cn_nodate = sorted([r for r in wh_stockout_rows_dash if (r.get("china") or {}).get("state") == "need_date"],
                            key=lambda r: -r["daily_draw"])
+    _cn_lead = _china_cfg()["china_lead_time_days"]
+    _wh_cn_cov = sorted([r for r in wh_stockout_rows_dash
+                         if r.get("china") and r["china"].get("state") in ("safe", "order_soon", "order_late")
+                         and r["china"].get("dated_qty") and r["days_to_stockout"] is not None and r["days_to_stockout"] <= _cn_lead],
+                        key=lambda r: r["days_to_stockout"])
     for _ttl, _lst, _kk, _empty in (
+            (f"🚢🟢 أكواد قربت تخلص وشحنة الصين مغطياها ({len(_wh_cn_cov):,}) | Running low but China covers", _wh_cn_cov, "cnc",
+             "لا توجد حالات"),
             (f"🚢🔴 أكواد هتخلص قبل وصول شحنة الصين — فجوة بيع ({len(_wh_cn_gap):,}) | China gap", _wh_cn_gap, "cng",
              "مفيش أكواد هتخلص قبل وصول شحنتها"),
             (f"🚢🟠 أكواد مخزونها قرب يخلص وشحنة الصين من غير تاريخ وصول ({len(_wh_cn_nodate):,}) | China undated", _wh_cn_nodate, "cnd",
              "لا توجد حالات")):
         with st.expander(_ttl):
-            if _kk == "cng":
+            if _kk == "cnc":
+                st.caption(f"ℹ️ أكواد مخزون المستودع بيكفيها {_cn_lead} يوم أو أقل، بس الشحنات اللي ليها تاريخ وصول لمخزن الرياض هتوصل قبل ما تخلص "
+                           "ومفيش فجوة بيع. مرتبة بالأقرب للنفاد. المطلوب: متابعة الشحنة بس (ولو اتأخرت هتتحول لتنبيه فجوة).")
+            elif _kk == "cng":
                 st.caption("ℹ️ مرتبة بالأكتر مبيعات معرضة للضياع. المطلوب: سرّع الشحنة مع الصين أو اشحن جوي/بديل، واطلب كمية جديدة.")
             else:
                 st.caption("ℹ️ المطلوب: اطلب من موظفة الصين تكتب تاريخ الوصول لمخزن الرياض في شيت China عشان نقدر نحسب الفجوة.")
