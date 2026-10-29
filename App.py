@@ -1456,29 +1456,6 @@ def _drive_http():
     _c = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
     return _c.authorize(httplib2.Http(timeout=60))
 
-def _drive_folder_id(http):
-    import json as _json, urllib.parse as _up
-    fid = load_settings().get("china_images_folder_id", "")
-    if fid:
-        return fid
-    d = _drive_call(http, "POST", "https://www.googleapis.com/drive/v3/files",
-                    _json.dumps({"name": "ChinaProductImages", "mimeType": "application/vnd.google-apps.folder"}),
-                    {"Content-Type": "application/json"})
-    save_setting("china_images_folder_id", d["id"])
-    return d["id"]
-
-def _drive_upload_jpeg(http, folder, name, data):
-    import json as _json
-    bd = "chinaimgboundary"
-    meta = _json.dumps({"name": name, "parents": [folder]})
-    body = (f"--{bd}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{bd}\r\nContent-Type: image/jpeg\r\n\r\n").encode() \
-        + data + f"\r\n--{bd}--".encode()
-    d = _drive_call(http, "POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", body,
-                    {"Content-Type": f"multipart/related; boundary={bd}"})
-    _drive_call(http, "POST", f"https://www.googleapis.com/drive/v3/files/{d['id']}/permissions",
-                _json.dumps({"role": "reader", "type": "anyone"}), {"Content-Type": "application/json"})
-    return d["id"]
-
 def _shrink_jpeg(raw, side=500):
     from PIL import Image
     im = Image.open(io.BytesIO(raw))
@@ -1494,75 +1471,86 @@ def _shrink_jpeg(raw, side=500):
     im.save(out, "JPEG", quality=85)
     return out.getvalue()
 
+def _drive_list_folder(folder_id):
+    """أسماء وIDs الملفات في مجلد Drive (لازم المجلد يكون متشارك مع إيميل حساب الخدمة أو بـ«أي حد معاه الرابط») | list files in a Drive folder."""
+    import urllib.parse as _up
+    http = _drive_http()
+    out, tok = [], ""
+    while True:
+        q = _up.quote(f"'{folder_id}' in parents and trashed=false")
+        url = (f"https://www.googleapis.com/drive/v3/files?q={q}&pageSize=1000&fields=nextPageToken,files(id,name)"
+               f"&supportsAllDrives=true&includeItemsFromAllDrives=true" + (f"&pageToken={tok}" if tok else ""))
+        d = _drive_call(http, "GET", url)
+        out += d.get("files", [])
+        tok = d.get("nextPageToken", "")
+        if not tok:
+            return out
+
 def render_china_images_upload(key_prefix):
-    """رفع ملف جرد فيه صور المنتجات (بالباركود) -> الصور بتتخزن على Google Drive وروابطها في شيت ChinaImages، وتاب الصين وشيت China بياخدوا الصور منه."""
-    with st.expander("🖼️ رفع صور منتجات الصين (من ملف إكسيل فيه صور) | Upload China product images", expanded=False):
-        st.caption("ارفع ملف الجرد (عمود «رمز الباركود» وعمود «الصورة»). بنطلّع الصورة قدّام كل باركود، نصغّرها، ونرفعها على Google Drive "
-                   "(مجلد ChinaProductImages) ونخزّن الرابط في شيت ChinaImages. تاب شحنات الصين وشيت China بياخدوا الصور من هناك.")
+    """صور منتجات الصين: (1) نطلّع الصور من ملف الجرد ونجهّزها ZIP، (2) انت ترفعها على مجلد Drive بتاعك، (3) نربط المجلد بشيت ChinaImages.
+    حساب الخدمة مالوش مساحة تخزين على Drive، عشان كده الرفع بيتم من عندك | service accounts have no Drive quota, so you upload the ZIP contents yourself."""
+    with st.expander("🖼️ صور منتجات الصين | China product images", expanded=False):
+        st.markdown("**الخطوة 1 — جهّز الصور:** ارفع ملف الجرد (فيه عمود «رمز الباركود» وعمود «الصورة») ونطلّع لك ZIP فيه كل صورة باسم `الباركود.jpg` مصغّرة.")
         upl = st.file_uploader("ملف الجرد (xlsx)", type=["xlsx", "xlsm"], key=f"{key_prefix}_chimg_up")
-        redo = st.checkbox("استبدل الصور الموجودة بنفس الباركود (الافتراضي: الجديد بس)", key=f"{key_prefix}_chimg_redo")
         if upl:
-            try:
-                with st.spinner("جاري استخراج الصور من الملف..."):
-                    pics = extract_excel_images(upl)
-            except Exception as e:
-                st.error(f"❌ تعذر قراءة الملف: {e}")
-                return
-            if not pics:
-                st.warning("مالقيتش صور مرتبطة بباركود في الملف")
-                return
-            have = {_china_norm_code(r[0]): i for i, r in enumerate(get_cached(china_img_sheet)[1:], start=2) if r and str(r[0]).strip()}
-            todo = [(b, d) for b, d in pics if redo or _china_norm_code(b) not in have]
-            st.info(f"🖼️ {len(pics)} صورة في الملف | الجديد/المطلوب رفعه: {len(todo)}")
-            if todo and st.button("⬆️ ارفع الصور | Upload images", key=f"{key_prefix}_chimg_go", type="primary", use_container_width=True):
+            if st.session_state.get("_chimg_name") != (upl.name, upl.size):
                 try:
-                    http = _drive_http()
-                    folder = _drive_folder_id(http)
+                    with st.spinner("جاري استخراج الصور..."):
+                        pics = extract_excel_images(upl)
+                        import zipfile as _zf
+                        zb = io.BytesIO()
+                        with _zf.ZipFile(zb, "w", _zf.ZIP_STORED) as zf:
+                            for bc, raw in pics:
+                                try:
+                                    zf.writestr(f"{bc}.jpg", _shrink_jpeg(raw))
+                                except Exception:
+                                    pass
+                    st.session_state["_chimg_name"] = (upl.name, upl.size)
+                    st.session_state["_chimg_zip"] = (zb.getvalue(), len(pics))
                 except Exception as e:
-                    st.error(f"❌ مقدرتش أتصل بـ Google Drive: {e}")
-                    st.info("غالبًا Google Drive API مش مفعّلة في مشروع Google Cloud بتاع حساب الخدمة. فعّلها من: "
-                            "console.cloud.google.com → APIs & Services → Library → Google Drive API → Enable، وجرّب تاني.")
+                    st.error(f"❌ تعذر قراءة الملف: {e}")
                     return
-                bar = st.progress(0.0)
-                ts = now_str()
-                new_rows, fails, pend = [], [], []
-                def _flush():
-                    if not pend:
-                        return
-                    upd = [r for r in pend if _china_norm_code(r[0]) in have]
-                    add = [r for r in pend if _china_norm_code(r[0]) not in have]
-                    for r in upd:
-                        _ri = have[_china_norm_code(r[0])]
-                        china_img_sheet.update(values=[r], range_name=f"A{_ri}:D{_ri}", value_input_option="RAW")
-                    if add:
-                        china_img_sheet.append_rows(add, value_input_option="RAW")
-                        for r in add:
-                            have[_china_norm_code(r[0])] = -1
-                    pend.clear()
-                for n, (bc, raw) in enumerate(todo, 1):
-                    try:
-                        fid = _drive_upload_jpeg(http, folder, f"{bc}.jpg", _shrink_jpeg(raw))
-                        row = [bc, f"https://drive.google.com/thumbnail?id={fid}&sz=w500", fid, ts]
-                        new_rows.append(row)
-                        pend.append(row)
-                    except Exception as e:
-                        fails.append(f"{bc}: {e}")
-                        if len(fails) >= 3 and not new_rows:
-                            st.error("❌ أول 3 صور فشلوا فوقفت الرفع. السبب:\n\n" + "\n\n".join(fails[:3]))
-                            st.info("لو الرسالة فيها accessNotConfigured أو SERVICE_DISABLED: فعّل Google Drive API في Google Cloud. "
-                                    "لو فيها storageQuotaExceeded: مساحة حساب الخدمة خلصت.")
-                            return
-                    if len(pend) >= 40:
-                        _flush()      # حفظ على دفعات: لو الصفحة اتقفلت نص الطريق الروابط اللي اترفعت متضيعش
-                    bar.progress(n / len(todo))
-                _flush()
-                clear_cache(china_img_sheet)
-                st.session_state.pop("china_bundle", None)
-                st.success(f"✅ اترفعت {len(new_rows)} صورة" + (f" — فشل {len(fails)}" if fails else ""))
-                if fails:
-                    st.error("\n".join(fails[:8]))
+            zdata, zn = st.session_state["_chimg_zip"]
+            if zn:
+                st.success(f"🖼️ {zn} صورة جاهزة")
+                st.download_button("⬇️ نزّل ZIP الصور", zdata, file_name="china_product_images.zip", mime="application/zip",
+                                   key=f"{key_prefix}_chimg_dl", use_container_width=True)
+            else:
+                st.warning("مالقيتش صور مرتبطة بباركود في الملف")
+        st.markdown("**الخطوة 2 — ارفعها على Drive:** اعمل مجلد في Google Drive بتاعك، فك الـ ZIP وارفع الصور جواه (سحب وإفلات). "
+                    "بعدين اضغط مشاركة على المجلد واختار «أي شخص معه الرابط — مشاهد» (عشان الصور تظهر في التطبيق والشيت).")
+        st.markdown("**الخطوة 3 — اربط المجلد:** الصق رابط المجلد أو الـ ID بتاعه.")
+        cur = load_settings().get("china_images_folder_id", "")
+        raw_id = st.text_input("رابط/ID مجلد Drive", value=cur, key=f"{key_prefix}_chimg_folder").strip()
+        m = re.search(r"folders/([A-Za-z0-9_-]+)", raw_id)
+        fid = m.group(1) if m else raw_id
+        if fid and st.button("🔗 اربط الصور من المجلد | Link images", key=f"{key_prefix}_chimg_go", type="primary", use_container_width=True):
+            try:
+                with st.spinner("جاري قراءة المجلد..."):
+                    files = _drive_list_folder(fid)
+            except Exception as e:
+                st.error(f"❌ مقدرتش أقرا المجلد: {e}")
+                st.info("اتأكد إن المجلد متشارك «أي شخص معه الرابط» أو متشارك مع إيميل حساب الخدمة (client_email في الـ secrets).")
+                return
+            ts, rows, seen = now_str(), [], set()
+            for f in files:
+                nm = f["name"].rsplit(".", 1)[0].strip()
+                if nm and nm not in seen and re.search(r"\.(jpe?g|png|webp)$", f["name"], re.I):
+                    seen.add(nm)
+                    rows.append([nm, f"https://drive.google.com/thumbnail?id={f['id']}&sz=w500", f["id"], ts])
+            if not rows:
+                st.warning("المجلد فاضي من الصور (أو الصيغة مش jpg/png).")
+                return
+            if fid != cur:
+                save_setting("china_images_folder_id", fid)
+            safe_delete_all(china_img_sheet)
+            for i in range(0, len(rows), 2000):
+                china_img_sheet.append_rows(rows[i:i + 2000], value_input_option="RAW")
+            clear_cache(china_img_sheet)
+            st.session_state.pop("china_bundle", None)
+            st.success(f"✅ اتربطت {len(rows)} صورة بشيت ChinaImages")
         st.divider()
-        st.caption("لو شيت China فيه معادلة الصور القديمة، اضغط هنا مرة واحدة بعد أول رفع عشان يبدأ ياخد الصور من ChinaImages:")
+        st.caption("بعد أول ربط، اضغط مرة واحدة عشان شيت China يبدأ ياخد الصور من ChinaImages:")
         if st.button("🔄 حدّث معادلة صور شيت China | Refresh image formulas", key=f"{key_prefix}_chimg_formula"):
             with st.spinner("جاري التحديث..."):
                 _china_write_image_formulas(get_china_flat_ws())
