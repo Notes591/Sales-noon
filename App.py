@@ -1209,10 +1209,12 @@ def warehouse_available_badge(sku_up):
         dts = wh_row["days_to_stockout"]
         dts_txt = f"نفاد خلال {dts} يوم" if dts is not None else "لا يوجد سحب مسجل"
         status_short = wh_row["status"].split(" | ")[0]
+        _cn = wh_row.get("china")
+        _cn_txt = f" (+🚢 {_cn['incoming']:,} من الصين)" if _cn else ""
         stockout_html = (
             f' <span class="tacweed-badge" style="background:{wh_row["color"]}22;'
             f'color:{wh_row["color"]};border:1px solid {wh_row["color"]}55;">'
-            f'{status_short} — {dts_txt}</span>'
+            f'{status_short} — {dts_txt}{_cn_txt}</span>'
         )
 
     if qty == "":
@@ -1252,10 +1254,12 @@ def warehouse_available_badge_amazon(asin_up):
         dts = wh_row["days_to_stockout"]
         dts_txt = f"نفاد خلال {dts} يوم" if dts is not None else "لا يوجد سحب مسجل"
         status_short = wh_row["status"].split(" | ")[0]
+        _cn = wh_row.get("china")
+        _cn_txt = f" (+🚢 {_cn['incoming']:,} من الصين)" if _cn else ""
         stockout_html = (
             f' <span class="tacweed-badge" style="background:{wh_row["color"]}22;'
             f'color:{wh_row["color"]};border:1px solid {wh_row["color"]}55;">'
-            f'{status_short} — {dts_txt}</span>'
+            f'{status_short} — {dts_txt}{_cn_txt}</span>'
         )
 
     if qty == "":
@@ -6719,6 +6723,14 @@ def compute_warehouse_stockout_rows():
     # سحب تريندول من نفس المستودع — Barcode = SKU فبيتحسب على نفس SKUs الكود
     multi_counts_ty_wh  = build_daily_orders_counts_trendyol(dates)
 
+    # شحنات الصين القادمة بتتحسب جوه نفس القرار (نفس محرك تاب الصين) عشان الرقمين ميتعارضوش
+    try:
+        _cn_by_code = get_china_bundle()["by_code"]
+        _cn_cfg = _china_cfg()
+    except Exception:
+        _cn_by_code, _cn_cfg = {}, None
+    _today_wh = datetime.now().date()
+
     rows = []
     for code, qty_str in stock_map_wh.items():
         try:
@@ -6750,6 +6762,36 @@ def compute_warehouse_stockout_rows():
         suggested_qty = round(daily_draw * (lead_time + safety_days)) if daily_draw > 0 else 0
         img = next((links_map_wh.get(s) for s in skus if links_map_wh.get(s)), "")
 
+        # ── 🚢 أثر شحنات الصين: الكود اللي ليه شحنات قادمة بيتقيّم بالمخزون + الشحنات المؤرخة ومدة توريد الصين ──
+        china = None
+        _inc = [l for l in _cn_by_code.get(_china_norm_code(code), []) if l["_status"] == "incoming"] if _cn_cfg else []
+        if _inc:
+            _dated, _undated = china_batches_for_lines(_inc)
+            china = {"incoming": sum(l["_qty"] for l in _inc), "dated_qty": sum(b["qty"] for b in _dated),
+                     "undated_qty": sum(u["qty"] for u in _undated),
+                     "next_date": _dated[0]["date"] if _dated else None, "next_qty": _dated[0]["qty"] if _dated else 0,
+                     "state": None}
+            if daily_draw > 0:
+                _dec = china_decide(qty, daily_draw, [(b["date"], b["qty"]) for b in _dated],
+                                    china["undated_qty"], _today_wh, _cn_cfg)
+                china.update(state=_dec["state"], covered=_dec.get("covered"), order_by=_dec.get("order_by"),
+                             gap_days=_dec.get("gap_days", 0), lost=_dec.get("lost", 0),
+                             gap_from=_dec.get("gap_from"), gap_to=_dec.get("gap_to"))
+                _st = _dec["state"]
+                _ob = (_dec["order_by"] - _today_wh).days
+                if _st in ("gap", "order_late"):
+                    status, color = "🚨 اطلب الآن | Order now", "#ef4444"
+                    reorder_in = _ob
+                    suggested_qty = _dec["suggested"]
+                elif _st in ("order_soon", "need_date"):
+                    status, color = "🟠 قرب موعد الطلب | Reorder soon", "#f59e0b"
+                    reorder_in = _ob
+                    suggested_qty = _dec["suggested"]
+                else:
+                    status, color = "🟢 آمن | Safe", "#22c55e"
+                    reorder_in = _ob
+                    suggested_qty = 0
+
         rows.append({
             "code": code, "skus": skus, "asins": asins, "qty": qty,
             "daily_draw": round(daily_draw, 2),
@@ -6758,11 +6800,31 @@ def compute_warehouse_stockout_rows():
             "draw_ty": round(total_sold_ty / window_days, 2) if window_days > 0 else 0,
             "days_to_stockout": round(days_to_stockout) if days_to_stockout is not None else None,
             "reorder_in": round(reorder_in) if reorder_in is not None else None,
-            "status": status, "color": color, "suggested_qty": suggested_qty, "img": img,
+            "status": status, "color": color, "suggested_qty": suggested_qty, "img": img, "china": china,
         })
 
     rows.sort(key=lambda r: (r["days_to_stockout"] if r["days_to_stockout"] is not None else 10**9))
     return rows
+
+def wh_china_note_html(r):
+    """سطر الصين لصف كود المستودع: الكمية القادمة، أقرب وصول، وهل تغطي ولا فيه فجوة | China note for a warehouse row."""
+    c = r.get("china")
+    if not c:
+        return ""
+    F = lambda d: _china_fmt_date(d, datetime.now().date())
+    parts = [f"🚢 <b>من الصين {c['incoming']:,} قطعة</b>"]
+    if c.get("next_date"):
+        parts.append(f"أقرب وصول لمخزن الرياض {c['next_qty']:,} قطعة يوم {F(c['next_date'])}")
+    if c.get("undated_qty"):
+        parts.append(f"{c['undated_qty']:,} قطعة تاريخ وصولها غير مكتوب")
+    st_ = c.get("state")
+    if st_ == "gap":
+        parts.append(f"🔴 فجوة بيع {c['gap_days']} يوم (مبيعات معرضة للضياع ~{c['lost']:,})")
+    elif st_ in ("order_late", "order_soon") and c.get("covered"):
+        parts.append(f"المخزون + الشحنات يغطوا لحد {F(c['covered'])}")
+    elif st_ == "safe" and c.get("covered"):
+        parts.append(f"🟢 المخزون + الشحنات يغطوا لحد {F(c['covered'])}")
+    return '<div dir="rtl" style="font-size:13px;color:#fed7aa;margin:3px 0;">' + " — ".join(parts) + "</div>"
 
 def build_warehouse_stockout_sku_lookup(rows):
     """يرجع dict: sku_up -> صف كود المستودع بتاعه، لاستخدام سريع (O(1)) جوه البادچات
@@ -7180,6 +7242,14 @@ def compute_transferred_from_sales():
 if "transferred_skus_t14" not in st.session_state:
     st.session_state["transferred_skus_t14"] = compute_transferred_from_sales()
 
+try:
+    _wh_cn_raw = _china_flat_raw()
+except Exception:
+    _wh_cn_raw = None
+if st.session_state.get("_wh_china_src") is not _wh_cn_raw:      # ملف الصين اتغيّر → أعد حساب المستودع
+    for _k in ("warehouse_stockout_rows", "warehouse_stockout_sku_lookup", "warehouse_stockout_asin_lookup"):
+        st.session_state.pop(_k, None)
+    st.session_state["_wh_china_src"] = _wh_cn_raw
 if "warehouse_stockout_rows" not in st.session_state:
     st.session_state["warehouse_stockout_rows"] = compute_warehouse_stockout_rows()
     st.session_state["warehouse_stockout_sku_lookup"] = build_warehouse_stockout_sku_lookup(
@@ -7598,7 +7668,7 @@ if st.session_state["nav_page"] == "tab_wh":
                 with sort_cols[0]:
                     status_filter = st.radio(
                         "فلترة حسب الحالة | Filter by status",
-                        ["الكل | All", "🚨 محتاج طلب الآن", "🟠 قرب موعد الطلب", "🟢 آمن"],
+                        ["الكل | All", "🚨 محتاج طلب الآن", "🟠 قرب موعد الطلب", "🟢 آمن", "🚢 فيها شحنات صين"],
                         horizontal=True, key="wh_status_filter")
                 with sort_cols[1]:
                     sort_choice = st.radio(
@@ -7613,7 +7683,10 @@ if st.session_state["nav_page"] == "tab_wh":
                     wh_rows_display.sort(key=lambda r: (r["days_to_stockout"] if r["days_to_stockout"] is not None else 10**9))
 
                 for r in wh_rows_display:
-                    if status_filter != "الكل | All" and not r["status"].startswith(status_filter.split(" ")[0]):
+                    if status_filter == "🚢 فيها شحنات صين":
+                        if not r.get("china"):
+                            continue
+                    elif status_filter != "الكل | All" and not r["status"].startswith(status_filter.split(" ")[0]):
                         continue
                     dts_txt = f"{r['days_to_stockout']} يوم" if r["days_to_stockout"] is not None else "—"
                     c1, c2 = st.columns([1, 5])
@@ -7634,6 +7707,9 @@ if st.session_state["nav_page"] == "tab_wh":
                             st.markdown(f"🗓️ **الأيام المتبقية لموعد الطلب:** {rin_txt}")
                         if r["suggested_qty"] > 0:
                             st.markdown(f"💡 **الكمية المقترحة للطلب:** {r['suggested_qty']:,}")
+                        _cn_html = wh_china_note_html(r)
+                        if _cn_html:
+                            st.markdown(_cn_html, unsafe_allow_html=True)
                         with st.expander(f"📋 الـ SKUs/ASINs التابعة لهذا الكود ({len(r['skus']) + len(r.get('asins', []))})"):
                             st.write("SKU (نون): " + (", ".join(r["skus"]) if r["skus"] else "—"))
                             st.write("ASIN (أمازون): " + (", ".join(r.get("asins", [])) if r.get("asins") else "—"))
@@ -7944,7 +8020,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     with ac6:
         st.markdown(_alert_chip_html("🏭", "#fdf4ff", "#c026d3", "مخزون مستودع محتاج تزويد",
                     f"{len(wh_urgent_rows_dash):,}",
-                    f"{wh_now_dash} اطلب الآن، {wh_soon_dash} قرب موعد الطلب"), unsafe_allow_html=True)
+                    f"{wh_now_dash} اطلب الآن، {wh_soon_dash} قرب موعد الطلب — محسوبة بعد شحنات الصين"), unsafe_allow_html=True)
 
     if channel == "noon":
         ac7 = st.columns(1)[0]
@@ -8123,6 +8199,9 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
                 st.markdown(f"🗓️ **الأيام المتبقية لموعد الطلب:** {rin_txt_wh}")
             if r["suggested_qty"] > 0:
                 st.markdown(f"💡 **الكمية المقترحة للطلب:** {r['suggested_qty']:,}")
+            _cn_html = wh_china_note_html(r)
+            if _cn_html:
+                st.markdown(_cn_html, unsafe_allow_html=True)
             skus_asins_txt = []
             if r["skus"]:
                 skus_asins_txt.append("SKU (نون): " + ", ".join(r["skus"]))
@@ -8167,6 +8246,33 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
             page_more(wh_reorder_soon_rows, _pgk_wh2)
         else:
             st.caption("لا توجد أكواد مستودع قرب موعد الطلب حالياً")
+
+    # ── 🚢 تنبيهات الصين على مستوى كود المستودع (نفس محرك تاب شحنات الصين) ──
+    _wh_cn_gap = sorted([r for r in wh_stockout_rows_dash if (r.get("china") or {}).get("state") == "gap"],
+                        key=lambda r: -(r["china"].get("lost") or 0))
+    _wh_cn_nodate = sorted([r for r in wh_stockout_rows_dash if (r.get("china") or {}).get("state") == "need_date"],
+                           key=lambda r: -r["daily_draw"])
+    for _ttl, _lst, _kk, _empty in (
+            (f"🚢🔴 أكواد هتخلص قبل وصول شحنة الصين — فجوة بيع ({len(_wh_cn_gap):,}) | China gap", _wh_cn_gap, "cng",
+             "مفيش أكواد هتخلص قبل وصول شحنتها"),
+            (f"🚢🟠 أكواد مخزونها قرب يخلص وشحنة الصين من غير تاريخ وصول ({len(_wh_cn_nodate):,}) | China undated", _wh_cn_nodate, "cnd",
+             "لا توجد حالات")):
+        with st.expander(_ttl):
+            if _kk == "cng":
+                st.caption("ℹ️ مرتبة بالأكتر مبيعات معرضة للضياع. المطلوب: سرّع الشحنة مع الصين أو اشحن جوي/بديل، واطلب كمية جديدة.")
+            else:
+                st.caption("ℹ️ المطلوب: اطلب من موظفة الصين تكتب تاريخ الوصول لمخزن الرياض في شيت China عشان نقدر نحسب الفجوة.")
+            if _lst:
+                dl_btn(pd.DataFrame([{
+                    "الكود": r["code"], "المتوفر": r["qty"], "سحب/يوم": r["daily_draw"], "من الصين": r["china"]["incoming"],
+                    "قطع بدون تاريخ": r["china"]["undated_qty"], "أيام الفجوة": r["china"].get("gap_days", 0),
+                    "مبيعات معرضة للضياع": r["china"].get("lost", 0)} for r in _lst]), f"alert_{_kk}", key=f"dl_alert_{_kk}_{key_suffix}")
+                _pgk_cn = f"pg_{_kk}_{key_suffix}"
+                for r in page_slice(_lst, _pgk_cn):
+                    _render_wh_alert_row(r)
+                page_more(_lst, _pgk_cn)
+            else:
+                st.caption(_empty)
 
     st.write("")
 
