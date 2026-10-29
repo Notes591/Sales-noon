@@ -3839,7 +3839,7 @@ def china_build_alerts(bundle, today, cfg):
 
     # ── تنبيهات على مستوى الكود عبر المتاجر الثلاثة (نون + أمازون + تريندول) ──
     try:
-        xrows, _unm = _cross_cached()
+        xrows, _unm, _sw = _cross_cached()
         wh_codes = get_warehouse_stock_map()
         inc_by = {}
         for l in lines:
@@ -6923,7 +6923,27 @@ def compute_cross_store_analysis(win=30):
             if x:
                 unm.append({"store": "🟣 تريندول", "key": k, "qty": x})
     unm.sort(key=lambda r: -r["qty"])
-    return rows, unm
+    # تذبذب السعر داخل نفس المتجر: أقل وأعلى سعر بيع لنفس المنتج خلال آخر 30 يوم | same-store price swings
+    swings = []
+    for store, pmap, kmap in (("🟢 نون", p_noon, noon_map), ("🟠 أمازون", p_amz, amz_map), ("🟣 تريندول", p_ty, noon_map)):
+        for k, byday in pmap.items():
+            pts = []
+            for d, lst in byday.items():
+                for it in lst:
+                    try:
+                        pr = float(str(it[0]).replace(",", "").strip())
+                    except Exception:
+                        continue
+                    if pr > 0:
+                        pts.append((pr, d))
+            if len(pts) < 2:
+                continue
+            lo, hi = min(pts), max(pts)
+            if lo[0] > 0 and hi[0] / lo[0] > 1.0:
+                swings.append({"store": store, "key": k, "code": kmap.get(k, ""), "lo": lo[0], "lo_d": lo[1], "hi": hi[0], "hi_d": hi[1],
+                               "ratio": hi[0] / lo[0], "n": len(pts), "img": links.get(k, "")})
+    swings.sort(key=lambda r: -r["ratio"])
+    return rows, unm, swings
 
 def amz_map_stock(asin_up):
     return (amz_inv_map_asin.get(asin_up, {}) or {}).get("stock", 0) or 0
@@ -6966,7 +6986,7 @@ def build_cross_alerts(rows, min_units=5):
 def render_cross_store_tab():
     st.caption("كل كود = منتج واحد عبر نون وأمازون وتريندول (من تاب التكويد). آخر 30 يوم مقابل الـ30 اللي قبلها. المنتجات اللي من غير كود مش هتظهر هنا إلا في تنبيه «مبيعات من غير كود».")
     with st.spinner("جاري تحليل الأكواد..."):
-        rows, unm = _cross_cached()
+        rows, unm, swings = _cross_cached()
     if not rows:
         st.info("لا توجد أكواد — املأ تاب التكويد أولاً | No codes found")
         return
@@ -6980,12 +7000,36 @@ def render_cross_store_tab():
         ("drop", "📉 هبوط مبيعات الكود (كل المتاجر)"),
         ("price", "💲 فرق سعر كبير بين المتاجر"),
         ("unm", "❓ مبيعات من غير كود (مش مربوطة بالتكويد)"),
+        ("swing", "💱 تذبذب السعر داخل نفس المتجر (سعر غلط؟)"),
     ]
+    sw_pct = st.number_input("أقل فرق % بين أقل وأعلى سعر بيع في نفس المتجر يعتبر تنبيه | Min same-store swing %", min_value=5, max_value=500,
+                             value=30, step=5, key="xs_swing")
+    swings = [w for w in swings if (w["ratio"] - 1) * 100 >= sw_pct]
     cnt = {k: len(v) for k, v in A.items()}
     cnt["unm"] = len(unm)
+    cnt["swing"] = len(swings)
     st.markdown(" &nbsp;|&nbsp; ".join(f"{t.split(' ')[0]} **{cnt[k]}**" for k, t in titles))
     pick = st.radio("التنبيه | Alert", [f"{t} ({cnt[k]})" for k, t in titles], key="xs_pick")
     key = titles[[f"{t} ({cnt[k]})" for k, t in titles].index(pick)][0]
+    if key == "swing":
+        if not swings:
+            st.success("✅ مفيش تذبذب سعر كبير داخل نفس المتجر")
+            return
+        st.caption("بيقارن أقل وأعلى سعر بيع لنفس المنتج في آخر 30 يوم داخل نفس المتجر. فرق كبير ممكن يكون خصم/عرض مقصود أو سعر اتسجل غلط.")
+        df = pd.DataFrame([{"المتجر": w["store"], "SKU/ASIN": w["key"], "الكود": w["code"], "أقل سعر": round(w["lo"], 2),
+                            "يوم أقل سعر": str(w["lo_d"]), "أعلى سعر": round(w["hi"], 2), "يوم أعلى سعر": str(w["hi_d"]),
+                            "الفرق %": round((w["ratio"] - 1) * 100), "عدد المبيعات": w["n"]} for w in swings])
+        dl_btn(df, "price_swings", key="dlbtn_xs_swing")
+        for w in page_slice(swings, "pg_xs_swing", 25):
+            c1, c2 = st.columns([1, 7])
+            with c1:
+                show_img(w["img"], 60)
+            with c2:
+                st.markdown(f"{w['store']} &nbsp; `{w['key']}`" + (f" &nbsp;|&nbsp; كود `{w['code']}`" if w["code"] else ""))
+                st.caption(f"💲 أقل سعر {w['lo']:.2f} ({w['lo_d']}) ← أعلى سعر {w['hi']:.2f} ({w['hi_d']}) — فرق {(w['ratio'] - 1) * 100:.0f}% على {w['n']} عملية بيع")
+            st.divider()
+        page_more(swings, "pg_xs_swing", 25)
+        return
     if key == "unm":
         if not unm:
             st.success("✅ كل المبيعات مربوطة بكود")
