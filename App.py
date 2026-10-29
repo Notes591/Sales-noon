@@ -1515,28 +1515,49 @@ def render_china_images_upload(key_prefix):
             todo = [(b, d) for b, d in pics if redo or _china_norm_code(b) not in have]
             st.info(f"🖼️ {len(pics)} صورة في الملف | الجديد/المطلوب رفعه: {len(todo)}")
             if todo and st.button("⬆️ ارفع الصور | Upload images", key=f"{key_prefix}_chimg_go", type="primary", use_container_width=True):
-                http = _drive_http()
-                folder = _drive_folder_id(http)
+                try:
+                    http = _drive_http()
+                    folder = _drive_folder_id(http)
+                except Exception as e:
+                    st.error(f"❌ مقدرتش أتصل بـ Google Drive: {e}")
+                    st.info("غالبًا Google Drive API مش مفعّلة في مشروع Google Cloud بتاع حساب الخدمة. فعّلها من: "
+                            "console.cloud.google.com → APIs & Services → Library → Google Drive API → Enable، وجرّب تاني.")
+                    return
                 bar = st.progress(0.0)
                 ts = now_str()
-                new_rows, fails = [], []
+                new_rows, fails, pend = [], [], []
+                def _flush():
+                    if not pend:
+                        return
+                    upd = [r for r in pend if _china_norm_code(r[0]) in have]
+                    add = [r for r in pend if _china_norm_code(r[0]) not in have]
+                    for r in upd:
+                        _ri = have[_china_norm_code(r[0])]
+                        china_img_sheet.update(values=[r], range_name=f"A{_ri}:D{_ri}", value_input_option="RAW")
+                    if add:
+                        china_img_sheet.append_rows(add, value_input_option="RAW")
+                        for r in add:
+                            have[_china_norm_code(r[0])] = -1
+                    pend.clear()
                 for n, (bc, raw) in enumerate(todo, 1):
                     try:
                         fid = _drive_upload_jpeg(http, folder, f"{bc}.jpg", _shrink_jpeg(raw))
-                        new_rows.append([bc, f"https://drive.google.com/thumbnail?id={fid}&sz=w500", fid, ts])
+                        row = [bc, f"https://drive.google.com/thumbnail?id={fid}&sz=w500", fid, ts]
+                        new_rows.append(row)
+                        pend.append(row)
                     except Exception as e:
                         fails.append(f"{bc}: {e}")
+                        if len(fails) >= 3 and not new_rows:
+                            st.error("❌ أول 3 صور فشلوا فوقفت الرفع. السبب:\n\n" + "\n\n".join(fails[:3]))
+                            st.info("لو الرسالة فيها accessNotConfigured أو SERVICE_DISABLED: فعّل Google Drive API في Google Cloud. "
+                                    "لو فيها storageQuotaExceeded: مساحة حساب الخدمة خلصت.")
+                            return
+                    if len(pend) >= 40:
+                        _flush()      # حفظ على دفعات: لو الصفحة اتقفلت نص الطريق الروابط اللي اترفعت متضيعش
                     bar.progress(n / len(todo))
-                if new_rows:
-                    upd = [r for r in new_rows if _china_norm_code(r[0]) in have]
-                    add = [r for r in new_rows if _china_norm_code(r[0]) not in have]
-                    for r in upd:
-                        china_img_sheet.update(values=[r], range_name=f"A{have[_china_norm_code(r[0])]}:D{have[_china_norm_code(r[0])]}",
-                                               value_input_option="RAW")
-                    if add:
-                        china_img_sheet.append_rows(add, value_input_option="RAW")
-                    clear_cache(china_img_sheet)
-                    st.session_state.pop("china_bundle", None)
+                _flush()
+                clear_cache(china_img_sheet)
+                st.session_state.pop("china_bundle", None)
                 st.success(f"✅ اترفعت {len(new_rows)} صورة" + (f" — فشل {len(fails)}" if fails else ""))
                 if fails:
                     st.error("\n".join(fails[:8]))
