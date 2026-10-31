@@ -9852,18 +9852,32 @@ def _t14_ty_part(r, part):
             if part == "box" and not ty_fee_set_t14:
                 st.caption("ℹ️ توصيل تريندول محسوب 0 — ضيف trendyol_delivery_fee في Settings")
 
-def _t14_store_chip(store, parts):
-    """شريحة مبيعات متجر واحد (بولد وواضحة): اسم المتجر + كل قناة (أمس / إجمالي الأيام). parts = [(اسم القناة, أمس, إجمالي)]."""
+def _t14_store_chip(store, parts, linked=True):
+    """شريحة مبيعات متجر واحد — بتظهر دايمًا (حتى لو صفر أو غير مربوط). parts = [(اسم القناة بالعربي, أمس, إجمالي الأيام)].
+    التخزين (FBN/FBA) والعادي (FBB/FSAB) واضحين بالاسم | Always-visible per-store sales chip with explicit channel names."""
     _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "أمازون"), "ty": ("#4c1d95", "#a78bfa", "#ede9fe", "تريندول")}[store]
-    segs = "".join(
-        f'<span style="display:inline-flex;align-items:baseline;gap:3px;margin-inline-start:7px;padding-inline-start:7px;'
-        f'border-inline-start:1px solid {_sty[1]}88;white-space:nowrap;">'
-        f'<b style="color:#ffffff;">{nm}</b>'
-        f'<span style="color:{_sty[2]};">أمس</span><bdi style="color:#ffffff;font-weight:800;font-size:13px;">{y}</bdi>'
-        f'<span style="color:{_sty[2]};">|{sales_display_days}أ</span><bdi style="color:#ffffff;font-weight:800;">{t}</bdi></span>'
-        for nm, y, t in parts)
+    if linked:
+        segs = "".join(
+            f'<span style="display:inline-block;margin-inline-start:7px;padding-inline-start:7px;'
+            f'border-inline-start:1px solid {_sty[1]}88;white-space:nowrap;">'
+            f'<b style="color:#ffffff;">{nm}</b> '
+            f'<span style="color:{_sty[2]};">أمس</span> <bdi style="color:#ffffff;font-weight:800;font-size:13px;">{y:g}</bdi>'
+            f' <span style="color:{_sty[2]};">· {sales_display_days} أيام</span> <bdi style="color:#ffffff;font-weight:800;">{t:g}</bdi></span>'
+            for nm, y, t in parts)
+    else:
+        segs = f'<span style="margin-inline-start:7px;color:{_sty[2]};opacity:.7;">— غير مربوط بالكود ده</span>'
     return (f'<span dir="rtl" style="display:inline-block;background:{_sty[0]};border:1px solid {_sty[1]};border-radius:6px;'
-            f'padding:3px 8px;margin:0;font-size:12px;white-space:nowrap;"><b style="color:{_sty[1]};font-size:12px;">{plat_badge({"noon": "noon", "amz": "amazon", "ty": "trendyol"}[store], 14)}{_sty[3]}</b>{segs}</span>')
+            f'padding:3px 8px;margin:0;font-size:12px;line-height:1.7;"><b style="color:{_sty[1]};font-size:12px;">{plat_badge({"noon": "noon", "amz": "amazon", "ty": "trendyol"}[store], 14)}{_sty[3]}</b>{segs}</span>')
+
+def _t14_yday_line(parts):
+    """سطر تحت اسم المتجر: «📅 أمس: N (تخزين … | عادي …)» — بيظهر بس لو فيه مبيعات أمس | Shown only when yesterday > 0."""
+    tot = sum(y for _n, y in parts)
+    if tot <= 0:
+        return
+    detail = " | ".join(f"{n} {y:g}" for n, y in parts if n)
+    st.markdown('<div dir="rtl" style="font-size:13px;font-weight:700;color:#e2e8f0;margin:2px 0;">'
+                f'📅 أمس: {tot:g}' + (f' <span style="font-weight:600;color:#cbd5e1;">({detail})</span>' if detail else '') + '</div>',
+                unsafe_allow_html=True)
 
 def _t14_day_tile(bg, border, num_color, head, date_s, total, noon, fbn, fbb, amz, fsab, fba, ty=0):
     """تايل إجمالي يوم — كل سطر بخط بولد وبترتيب ثابت (المتجر ثم قنواته)."""
@@ -10444,9 +10458,9 @@ if st.session_state["nav_page"] == "tab14":
                         if wh_g and wh_g.get("daily_draw") is not None:
                             st.caption(f"🧮 سحب المستودع اليومي للكود (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} + تريندول {wh_g.get('draw_ty', 0):g} "
                                        f"= {wh_g['daily_draw']:g} قطعة/يوم — شارة النفاد وموعد الطلب محسوبين على المجموع")
-                        _chip_n = _t14_store_chip("noon", [("FBN", y_n, t_n), ("FBB", y_b, t_b)]) if (b["sku"] and _vw in ("all", "noon")) else ""
-                        _chip_a = _t14_store_chip("amz", [("FSAB", y_a, t_a), ("FBA", y_f, t_f)]) if (b["asin"] and _vw in ("all", "amz")) else ""
-                        _chip_t = _t14_store_chip("ty", [("TY", y_t, t_t)]) if (b["tb"] and _vw in ("all", "ty")) else ""
+                        _chip_n = _t14_store_chip("noon", [("تخزين FBN", y_n, t_n), ("عادي FBB", y_b, t_b)], linked=bool(b["sku"])) if _vw in ("all", "noon") else ""
+                        _chip_a = _t14_store_chip("amz", [("تخزين FBA", y_f, t_f), ("عادي FSAB", y_a, t_a)], linked=bool(b["asin"])) if _vw in ("all", "amz") else ""
+                        _chip_t = _t14_store_chip("ty", [("مبيعات", y_t, t_t)], linked=bool(b["tb"])) if _vw in ("all", "ty") else ""
                         _lbl_sold = '<b style="color:#e2e8f0;font-size:13px;">🛒 اتباع منه:</b>'
                         if _vw == "all":
                             # نفس ترتيب وعرض الأعمدة اللي تحت (نون | أمازون | تريندول) — كل شريحة فوق عمودها
@@ -10489,11 +10503,15 @@ if st.session_state["nav_page"] == "tab14":
                         with cn:
                             if _vw in ("all", "noon"):
                                 st.markdown('<span class="wh-badge" style="background:#064e3b;color:#6ee7b7;">' + plat_badge("noon", 16) + 'نون | Noon</span>', unsafe_allow_html=True)
+                                if noon_chs:
+                                    _t14_yday_line([("تخزين FBN", y_n), ("عادي FBB", y_b)])
                                 if not noon_chs:
                                     st.caption("— مفيش SKU نون لهذا الكود | no Noon SKU for this code")
                         with ca:
                             if _vw in ("all", "amz"):
                                 st.markdown('<span class="wh-badge" style="background:#7c2d12;color:#fed7aa;">' + plat_badge("amazon", 16) + 'أمازون | Amazon</span>', unsafe_allow_html=True)
+                                if amz_chs:
+                                    _t14_yday_line([("تخزين FBA", y_f), ("عادي FSAB", y_a)])
                                 if not amz_chs:
                                     if b.get("amz_hint"):
                                         if _asin_sales(b["amz_hint"])[0] > 0:
@@ -10506,6 +10524,8 @@ if st.session_state["nav_page"] == "tab14":
                         with ct:
                             if _vw in ("all", "ty"):
                                 st.markdown('<span class="wh-badge" style="background:#4c1d95;color:#ddd6fe;">' + plat_badge("trendyol", 16) + 'تريندول | Trendyol</span>', unsafe_allow_html=True)
+                                if r_ty:
+                                    _t14_yday_line([("", y_t)])
                                 if not r_ty:
                                     if get_trendyol_bundle()["rows"]:
                                         st.caption("— مفيش مبيعات تريندول أمس | no Trendyol sales yesterday")
