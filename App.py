@@ -7097,6 +7097,21 @@ _GAP_KINDS = {
     "fsab": ("🟠 أمازون عادي FSAB", "amz"),
 }
 
+def _gap_sug(action, dest, whq, avg, cov_days, sched_txt=""):
+    """بيرجع (سطور الاقتراح مرتبة تحت بعض). dest مثلا: 'تخزين نون (FBN)' أو 'تخزين أمازون (FBA)'."""
+    if action == "send":
+        return [f"🚚 يُرسل إلى {dest}", f"المتوفر بالمستودع {whq:,.0f} (يغطي {whq / avg:,.0f} يوم)"]
+    if action == "low_wh":
+        return [f"⛔ لا يُرسل إلى {dest}", f"كمية المستودع {whq:,.0f} قليلة (تكفي {whq / avg:,.0f} يوم فقط من أصل {cov_days})",
+                "يلزم التوريد من المورد الأصلي"]
+    if action == "send_nowh":
+        return [f"⛔ لا يُرسل إلى {dest}", "غير متوفر بالمستودع", "يلزم التوريد من المورد الأصلي"]
+    if action == "pending":
+        return ["⏳ لا حاجة للإرسال الآن", "الجدولة قيد الموافقة — بانتظار الاعتماد"]
+    if action == "scheduled":
+        return ["📅 لا حاجة للإرسال الآن", "الصنف مجدول بالفعل"]
+    return []
+
 def compute_channel_gap(days=30):
     """بيرجع dict: fbn / fbb / fba / fsab -> قائمة صفوف (اللي باع في الفترة بس) مرتبة بالمبيعات.
     action: send (نودّي — متوفر بالمستودع) | send_nowh (محتاج بس مش متوفر بالمستودع) | pending | scheduled | ok."""
@@ -7127,27 +7142,28 @@ def compute_channel_gap(days=30):
             avg = total / days
             cover = (stock / avg) if avg > 0 else 9999
             if sku_up in pend:
-                sched, sched_txt = "pending", "⏳ قيد الموافقة"
+                sched, sched_txt = "pending", "⏳ الجدولة قيد الموافقة — بانتظار الاعتماد"
             else:
                 si = get_latest_schedule_info(sku_up)
                 if si:
                     sched = "scheduled"
-                    sched_txt = f"📅 مجدول (ASN {si['asn']}) {si['date']}"
+                    sched_txt = f"📅 مجدولة (ASN {si['asn']}) بتاريخ {si['date']}"
                 else:
-                    sched, sched_txt = "none", "❌ مفيش جدولة"
+                    sched, sched_txt = "none", "❌ لا توجد جدولة"
             need = cover < cov_days      # المخزون الصغير (حتى قطعة) مش مخزون: بنقيسه بأيام تغطية المبيعات
             if not need:
-                action, sug = "ok", ("مخزون FBN كافٍ")
+                action = "ok"
             elif sched == "pending":
-                action, sug = "pending", "⏳ الجدولة قيد الموافقة — بانتظار الاعتماد"
+                action = "pending"
             elif sched == "scheduled":
-                action, sug = "scheduled", f"{sched_txt} — لا حاجة للإرسال"
+                action = "scheduled"
             elif whq > 0 and whq >= avg * cov_days:
-                action, sug = "send", f"🚚 يُرسل إلى FBN — المتوفر بالمستودع {whq:,.0f} (يغطي {whq / avg:,.0f} يوم)"
+                action = "send"
             elif whq > 0:
-                action, sug = "low_wh", f"⚠️ لا يُرسل — كمية المستودع {whq:,.0f} قليلة (تكفي {whq / avg:,.0f} يوم فقط من أصل {cov_days}) — يلزم توريد"
+                action = "low_wh"
             else:
-                action, sug = "send_nowh", "⛔ لا يُرسل — غير متوفر بالمستودع، يلزم توريد"
+                action = "send_nowh"
+            sug = "  \n".join(_gap_sug(action, "تخزين نون (FBN)", whq, avg, cov_days))
             out[kind].append({
                 "kind": kind, "key": info.get("sku", sku_up), "key_up": sku_up, "code": code,
                 "img": info.get("img", "") or links_n.get(sku_up, ""),
@@ -7171,13 +7187,14 @@ def compute_channel_gap(days=30):
             cover = (stock / avg) if avg > 0 else 9999
             need = cover < cov_days
             if not need:
-                action, sug = "ok", "مخزون أمازون كافٍ"
+                action = "ok"
             elif whq > 0 and whq >= avg * cov_days:
-                action, sug = "send", f"🚚 يُرسل إلى FBA — المتوفر بالمستودع {whq:,.0f} (يغطي {whq / avg:,.0f} يوم)"
+                action = "send"
             elif whq > 0:
-                action, sug = "low_wh", f"⚠️ لا يُرسل — كمية المستودع {whq:,.0f} قليلة (تكفي {whq / avg:,.0f} يوم فقط من أصل {cov_days}) — يلزم توريد"
+                action = "low_wh"
             else:
-                action, sug = "send_nowh", "⛔ مخزون أمازون غير كافٍ وغير متوفر بالمستودع — يلزم توريد"
+                action = "send_nowh"
+            sug = "  \n".join(_gap_sug(action, "تخزين أمازون (FBA)", whq, avg, cov_days))
             out[kind].append({
                 "kind": kind, "key": asin_up, "key_up": asin_up, "code": code,
                 "img": links_a.get(asin_up, ""),
@@ -7225,7 +7242,10 @@ def channel_gap_df(rows, kind):
             d["حالة الجدولة"] = r["sched_txt"]
         d["متوفر بالمستودع"] = r["wh"]
         d["الإجراء"] = _GAP_ACTION_AR.get(r["action"], "")
-        d["الاقتراح"] = r["suggestion"]
+        _l = (r["suggestion"] or "").split("  \n")
+        d["الاقتراح"] = _l[0] if _l else ""
+        d["السبب"] = _l[1] if len(_l) > 1 else ""
+        d["المطلوب"] = _l[2] if len(_l) > 2 else ""
         recs.append(d)
     return pd.DataFrame(recs)
 
@@ -7261,7 +7281,7 @@ def render_channel_gap_view(kind, q=""):
                         f"{'مخزون FBN' if noon else 'مخزون أمازون'} **{r['stock']:g}**" + ((" 🔴 لا يوجد مخزون" if r["stock"] <= 0 else f" 🔴 غير كافٍ (يكفي {r['cover']:.0f} يوم فقط)") if r["no_stock"] else " ✅ كافٍ")
                         + f" &nbsp;|&nbsp; 🏭 المستودع **{r['wh']:,.0f}**")
             if noon:
-                st.caption(f"الجدولة: {r['sched_txt']}")
+                st.markdown(f"**الجدولة:**  \n{r['sched_txt']}")
             if r["suggestion"]:
                 (st.success if r["action"] == "send" else st.warning if r["action"] in ("send_nowh", "low_wh") else st.info)(r["suggestion"])
         st.divider()
@@ -7373,8 +7393,8 @@ def render_cross_store_tab():
                 st.markdown(f"{_GAP_KINDS[r['kind']][0]} &nbsp; `{r['key']}`" + (f" &nbsp;|&nbsp; كود `{r['code']}`" if r["code"] else "")
                             + f" &nbsp;—&nbsp; مبيع 30 يوم **{r['sales']:g}** &nbsp;|&nbsp; 🏭 مستودع **{r['wh']:,.0f}**")
                 if r["sched_txt"]:
-                    st.caption(f"الجدولة: {r['sched_txt']}")
-                st.caption(t)
+                    st.markdown(f"**الجدولة:**  \n{r['sched_txt']}")
+                st.markdown(t)
             st.divider()
         page_more(items, f"pg_xs_{key}", 25)
         return
@@ -8254,7 +8274,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
         if _gap_show:
             with st.expander(f"🚚 تفاصيل فجوات القنوات ({len(_gap_show)}) — التفاصيل والتحميل في تاب المبيعات"):
                 st.dataframe(pd.DataFrame([{"القناة": n, "الكود": r["code"], "SKU/ASIN": r["key"], "مبيعات 30 يوم": r["sales"],
-                                            "المستودع": r["wh"], "الاقتراح": r["suggestion"]} for n, r in _gap_show[:40]]),
+                                            "المستودع": r["wh"], "الاقتراح": " — ".join((r["suggestion"] or "").split("  \n"))} for n, r in _gap_show[:40]]),
                              use_container_width=True, hide_index=True)
     except Exception as _e_gap:
         st.caption(f"تعذر حساب فجوات القنوات: {_e_gap}")
