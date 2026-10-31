@@ -7278,7 +7278,7 @@ def render_channel_gap_view(kind, q=""):
             lk = sku_link_html(r["key"]) if noon else asin_link_html(r["key"])
             st.markdown(f"{lk} &nbsp;|&nbsp; كود `{r['code'] or '—'}`", unsafe_allow_html=True)
             st.markdown(f"📅 أمس **{r['yday']:g}** &nbsp;|&nbsp; 30 يوم **{r['sales']:g}** &nbsp;|&nbsp; "
-                        f"{'مخزون FBN' if noon else 'مخزون أمازون'} **{r['stock']:g}**" + ((" 🔴 لا يوجد مخزون" if r["stock"] <= 0 else f" 🔴 غير كافٍ (يكفي {r['cover']:.0f} يوم فقط)") if r["no_stock"] else " ✅ كافٍ")
+                        f"{'مخزون FBN' if noon else 'مخزون أمازون'} **{r['stock']:g}**" + ((" 🔴 لا يوجد مخزون" if r["stock"] <= 0 else f" 🔴 غير كافٍ (يكفي {r['cover']:.0f} يوم فقط)") if r["no_stock"] else f" ✅ كافٍ (يكفي {r['cover']:.0f} يوم)" if r["cover"] < 9999 else " ✅ كافٍ")
                         + f" &nbsp;|&nbsp; 🏭 المستودع **{r['wh']:,.0f}**")
             if noon:
                 st.markdown(f"**الجدولة:**  \n{r['sched_txt']}")
