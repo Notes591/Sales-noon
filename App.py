@@ -9852,23 +9852,6 @@ def _t14_ty_part(r, part):
             if part == "box" and not ty_fee_set_t14:
                 st.caption("ℹ️ توصيل تريندول محسوب 0 — ضيف trendyol_delivery_fee في Settings")
 
-def _t14_store_chip(store, parts, linked=True, missing="غير مربوط بالكود ده"):
-    """شريحة مبيعات متجر واحد — بتظهر دايمًا (حتى لو صفر أو غير مربوط). parts = [(اسم القناة بالعربي, أمس, إجمالي الأيام)].
-    التخزين (FBN/FBA) والعادي (FBB/FSAB) واضحين بالاسم | Always-visible per-store sales chip with explicit channel names."""
-    _sty = {"noon": ("#064e3b", "#34d399", "#d1fae5", "نون"), "amz": ("#7c2d12", "#fb923c", "#ffedd5", "أمازون"), "ty": ("#4c1d95", "#a78bfa", "#ede9fe", "تريندول")}[store]
-    if linked:
-        segs = "".join(
-            f'<span style="display:inline-block;margin-inline-start:7px;padding-inline-start:7px;'
-            f'border-inline-start:1px solid {_sty[1]}88;white-space:nowrap;">'
-            f'<b style="color:#ffffff;">{nm}</b> '
-            f'<span style="color:{_sty[2]};">أمس</span> <bdi style="color:#ffffff;font-weight:800;font-size:13px;">{y:g}</bdi>'
-            f' <span style="color:{_sty[2]};">· {sales_display_days} أيام</span> <bdi style="color:#ffffff;font-weight:800;">{t:g}</bdi></span>'
-            for nm, y, t in parts)
-    else:
-        segs = f'<span style="margin-inline-start:7px;color:{_sty[2]};opacity:.7;">— {missing}</span>'
-    return (f'<span dir="rtl" style="display:inline-block;background:{_sty[0]};border:1px solid {_sty[1]};border-radius:6px;'
-            f'padding:3px 8px;margin:0;font-size:12px;line-height:1.7;"><b style="color:{_sty[1]};font-size:12px;">{plat_badge({"noon": "noon", "amz": "amazon", "ty": "trendyol"}[store], 14)}{_sty[3]}</b>{segs}</span>')
-
 def _t14_yday_line(parts, store="noon"):
     """سطر تحت اسم المتجر: «📅 أمس: N (تخزين … | عادي …)» — شريحة بخلفية غامقة وكتابة بيضاء (واضحة في الثيم الفاتح والغامق).
     بيظهر بس لو فيه مبيعات أمس | Shown only when yesterday > 0."""
@@ -10461,25 +10444,6 @@ if st.session_state["nav_page"] == "tab14":
                         if wh_g and wh_g.get("daily_draw") is not None:
                             st.caption(f"🧮 سحب المستودع اليومي للكود (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} + تريندول {wh_g.get('draw_ty', 0):g} "
                                        f"= {wh_g['daily_draw']:g} قطعة/يوم — شارة النفاد وموعد الطلب محسوبين على المجموع")
-                        # "مربوط" = فيه SKU/ASIN/Barcode للمتجر ده على الكود (حتى لو مباعش أمس) — نفس شرط الكارت اللي تحت
-                        _chip_n = _t14_store_chip("noon", [("تخزين FBN", y_n, t_n), ("عادي FBB", y_b, t_b)], linked=bool(b["sku"]),
-                                                  missing="مفيش SKU نون على الكود ده") if _vw in ("all", "noon") else ""
-                        _chip_a = _t14_store_chip("amz", [("تخزين FBA", y_f, t_f), ("عادي FSAB", y_a, t_a)],
-                                                  linked=bool(b["asin"] or b.get("amz_hint")),
-                                                  missing="مفيش ASIN أمازون على الكود ده") if _vw in ("all", "amz") else ""
-                        _chip_t = _t14_store_chip("ty", [("مبيعات", y_t, t_t)], linked=bool(b["tb"] or b.get("ty_hint")),
-                                                  missing="مفيش Barcode تريندول على الكود ده") if _vw in ("all", "ty") else ""
-                        _lbl_sold = '<b style="color:#e2e8f0;font-size:13px;">🛒 اتباع منه:</b>'
-                        if _vw == "all":
-                            # نفس ترتيب وعرض الأعمدة اللي تحت (نون | أمازون | تريندول) — كل شريحة فوق عمودها
-                            _sc = st.columns([5, 5, 4])
-                            for _c, _h, _first in zip(_sc, (_chip_n, _chip_a, _chip_t), (True, False, False)):
-                                with _c:
-                                    st.markdown('<div dir="rtl" style="margin:4px 0;">' + (_lbl_sold + " " if _first else "") + _h + '</div>',
-                                                unsafe_allow_html=True)
-                        else:
-                            st.markdown('<div dir="rtl" style="margin:4px 0;">' + _lbl_sold + " " + (_chip_n + _chip_a + _chip_t) + '</div>',
-                                        unsafe_allow_html=True)
                         render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالكود)
 
                     # ══ نون | أمازون | تريندول جنب بعض — كل قسم في صف مستقل عشان الأقسام تتحاذى (السعر جنب السعر) ══
