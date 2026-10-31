@@ -10490,7 +10490,6 @@ if st.session_state["nav_page"] == "tab14":
                                             st.caption("— ASIN هذا الكود ظاهر مع SKU آخر لنفس الكود | shown with another SKU of this code")
                                         else:
                                             st.caption("— مفيش مبيعات أمازون أمس | no Amazon sales yesterday")
-                                        st.markdown(f"**ASIN:** {asin_link_html(b['amz_hint'])}", unsafe_allow_html=True)
                                     else:
                                         st.caption("— مفيش ASIN أمازون مربوط بالكود ده | no Amazon ASIN linked to this code")
                         with ct:
@@ -10501,14 +10500,6 @@ if st.session_state["nav_page"] == "tab14":
                                 if not r_ty:
                                     if get_trendyol_bundle()["rows"]:
                                         st.caption("— مفيش مبيعات تريندول أمس | no Trendyol sales yesterday")
-                                        if b.get("ty_hint"):
-                                            st.markdown(
-                                                f'**Barcode:** <span style="font-family:monospace;font-weight:700;color:#e2e8f0;background:#1e293b;'
-                                                f'border:1px solid #334155;border-radius:6px;padding:2px 10px;user-select:all;-webkit-user-select:all;">{b["ty_hint"]}</span>',
-                                                unsafe_allow_html=True)
-                                            _nm_h = get_ty_products()["name"].get(b["ty_hint"]) or get_trendyol_bundle()["name"].get(b["ty_hint"])
-                                            if _nm_h:
-                                                st.caption(_nm_h[:70])
                                     else:
                                         _t14_trendyol_placeholder()
                         # صف 1: الهوية (SKU / ASIN)
@@ -10516,9 +10507,21 @@ if st.session_state["nav_page"] == "tab14":
                         with cn:
                             if r_sku: _t14_noon_part(r_sku, "ident")
                         with ca:
-                            if r_asin: _t14_amz_part(r_asin, "ident")
+                            if r_asin:
+                                _t14_amz_part(r_asin, "ident")
+                            elif _vw in ("all", "amz") and not amz_chs and b.get("amz_hint"):      # ASIN مربوط بس مباعش أمس — في نفس سطر SKU/Barcode
+                                st.markdown(f"**ASIN:** {asin_link_html(b['amz_hint'])}", unsafe_allow_html=True)
                         with ct:
-                            if r_ty: _t14_ty_part(r_ty, "ident")
+                            if r_ty:
+                                _t14_ty_part(r_ty, "ident")
+                            elif _vw in ("all", "ty") and b.get("ty_hint") and get_trendyol_bundle()["rows"]:   # Barcode مربوط بس مباعش أمس
+                                st.markdown(
+                                    f'**Barcode:** <span style="font-family:monospace;font-weight:700;color:#e2e8f0;background:#1e293b;'
+                                    f'border:1px solid #334155;border-radius:6px;padding:2px 10px;user-select:all;-webkit-user-select:all;">{b["ty_hint"]}</span>',
+                                    unsafe_allow_html=True)
+                                _nm_h = get_ty_products()["name"].get(b["ty_hint"]) or get_trendyol_bundle()["name"].get(b["ty_hint"])
+                                if _nm_h:
+                                    st.caption(_nm_h[:70])
                         # صف 2: صندوق السعر والربح — صف 3: تفاصيل الحساب — صف 4: تفاصيل حكم الإعلان — صف 5: أداء الإعلانات
                         _has_ads_n = bool(r_sku and ads_map_t14.get(r_sku["sku_up"]))
                         _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
