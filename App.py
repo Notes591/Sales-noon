@@ -7158,7 +7158,8 @@ def compute_channel_gap(days=30):
             code = (tac_n.get(sku_up, "") or "").strip()
             whq = _wh(code)
             # FBB: لو اتنقل لـ FBN مخزون FBN هيخدم مبيعات FBN + FBB مع بعض، فالتغطية على المجموع
-            dem = total + (_tot(c_fbn.get(sku_up)) if kind == "fbb" else 0)
+            other = _tot(c_fbn.get(sku_up)) if kind == "fbb" else _tot(c_fbb.get(sku_up))
+            dem = total + other
             avg = dem / days
             cover = (stock / avg) if avg > 0 else 9999
             if sku_up in pend:
@@ -7187,7 +7188,7 @@ def compute_channel_gap(days=30):
             out[kind].append({
                 "kind": kind, "key": info.get("sku", sku_up), "key_up": sku_up, "code": code,
                 "img": info.get("img", "") or links_n.get(sku_up, ""),
-                "sales": total, "dem": dem, "yday": dc.get(yday, 0), "avg": avg,
+                "sales": total, "dem": dem, "other": other, "yday": dc.get(yday, 0), "avg": avg,
                 "stock": stock, "no_stock": need, "cover": cover,
                 "sched": sched, "sched_txt": sched_txt, "wh": whq,
                 "action": action, "suggestion": sug,
@@ -7202,7 +7203,8 @@ def compute_channel_gap(days=30):
             stock = _gap_qty(info.get("stock", 0))
             code = (tac_a.get(asin_up, "") or "").strip()
             whq = _wh(code)
-            dem = total + (_tot(c_fba.get(asin_up)) if kind == "fsab" else 0)    # FSAB: لو اتبعت FBA هيخدم FBA + FSAB
+            other = _tot(c_fba.get(asin_up)) if kind == "fsab" else _tot(c_fsab.get(asin_up))
+            dem = total + other    # التغطية على مبيعات القناتين (المخزون المنقول بيخدمهم)
             avg = dem / days
             cover = (stock / avg) if avg > 0 else 9999
             need = cover < cov_days
@@ -7218,7 +7220,7 @@ def compute_channel_gap(days=30):
             out[kind].append({
                 "kind": kind, "key": asin_up, "key_up": asin_up, "code": code,
                 "img": links_a.get(asin_up, ""),
-                "sales": total, "dem": dem, "yday": dc.get(yday, 0), "avg": avg,
+                "sales": total, "dem": dem, "other": other, "yday": dc.get(yday, 0), "avg": avg,
                 "stock": stock, "no_stock": need, "cover": cover,
                 "sched": "", "sched_txt": "", "wh": whq,
                 "action": action, "suggestion": sug,
@@ -7242,8 +7244,8 @@ def channel_gap_cached():
 def channel_gap_alerts(res=None):
     """التنبيهات: (1) نون FBB لها مبيعات ومخزون FBN غير كافٍ. (2) أمازون لها مبيعات ومخزونها في أمازون غير كافٍ. كل واحد مقسوم send / send_nowh / مجدول / قيد الموافقة."""
     res = res or channel_gap_cached()
-    a = {"fbb_nostock": [r for r in res["fbb"] if r["no_stock"]],
-         "amz_nostock": [r for r in res["fba"] + res["fsab"] if r["no_stock"]]}
+    a = {"fbb_nostock": [r for r in res["fbb"] if r["no_stock"] and r["other"] <= 0],
+         "amz_nostock": [r for r in res["fba"] + [x for x in res["fsab"] if x["other"] <= 0] if r["no_stock"]]}
     _seen, _u = set(), []          # نفس الـ ASIN لو باع FBA وFSAB بيتعد مرة واحدة
     for r in a["amz_nostock"]:
         if r["key_up"] not in _seen:
@@ -7283,8 +7285,10 @@ def render_channel_gap_view(kind, q=""):
         rows = [r for r in rows if q in f"{r['key_up']} {r['code']}".upper()]
     noon = kind in ("fbn", "fbb")
     title = _GAP_KINDS[kind][0]
-    if kind in ("fbb", "fsab"):      # القناة دي بتتعرض بس لو القناة الأصلية (FBN / FBA) مخزونها مش كافي — لو كافي مبيتعرضش
-        rows = [r for r in rows if r["action"] != "ok"]
+    if kind in ("fbb", "fsab"):
+        # لو الصنف بيبيع كمان في FBN / FBA يبقى هيظهر هناك (كافي أو مش كافي) فمبنعرضوش هنا تاني؛
+        # وهنا بيتعرض بس اللي مالوش مبيعات FBN / FBA ومخزونه مش كافي
+        rows = [r for r in rows if r["action"] != "ok" and r["other"] <= 0]
     else:
         only_gap = st.checkbox("🔎 الأصناف ذات المخزون غير الكافي فقط | Only insufficient stock", value=False, key=f"gap_only_{kind}")
         if only_gap:
@@ -7292,7 +7296,7 @@ def render_channel_gap_view(kind, q=""):
     n_send = sum(1 for r in rows if r["action"] == "send")
     n_nowh = sum(1 for r in rows if r["action"] in ("send_nowh", "low_wh"))
     n_pend = sum(1 for r in rows if r["action"] in ("pending", "scheduled"))
-    st.markdown(f"**{title}** — {len(rows)} منتج باع في آخر 30 يوم" + (" ومخزونه في القناة الأصلية غير كافٍ" if kind in ("fbb", "fsab") else "") + f" &nbsp;|&nbsp; 🚚 يُرسل: **{n_send}** &nbsp;|&nbsp; "
+    st.markdown(f"**{title}** — {len(rows)} منتج باع في آخر 30 يوم" + (" ومخزونه غير كافٍ ومالوش مبيعات في " + ("FBN" if kind == "fbb" else "FBA") if kind in ("fbb", "fsab") else "") + f" &nbsp;|&nbsp; 🚚 يُرسل: **{n_send}** &nbsp;|&nbsp; "
                 f"⛔ لا يُرسل (المستودع قليل/غير متوفر): **{n_nowh}** &nbsp;|&nbsp; ⏳ مجدول/قيد الموافقة: **{n_pend}**")
     if not rows:
         st.info("مفيش بيانات للقناة دي في الفترة")
@@ -7301,7 +7305,7 @@ def render_channel_gap_view(kind, q=""):
     if True:      # كل القنوات الأربع (FBN / FBB / FBA / FSAB)
         # ملف «قرب يخلص»: شيت 1 = يُرسل (المستودع يغطي) | شيت 2 = يلزم توريد (المستودع قليل/غير متوفر) — من غير المجدول وقيد الموافقة
         _dest = "FBN" if kind in ("fbn", "fbb") else "FBA"      # FBB بيتنقل لـ FBN، وFSAB بيتبعت لـ FBA
-        _all = res[kind]
+        _all = [r for r in res[kind] if not (kind in ("fbb", "fsab") and r["other"] > 0)]
         _send = [r for r in _all if r["action"] == "send"]
         _supply = [r for r in _all if r["action"] in ("low_wh", "send_nowh")]
         st.caption(f"📑 ملف «قرب يخلص» — 🚚 يُرسل إلى {_dest}: **{len(_send)}** | ⛔ يلزم توريد (غير متوفر/قليل بالمستودع): **{len(_supply)}** "
