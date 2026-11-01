@@ -10811,7 +10811,19 @@ if st.session_state["nav_page"] == "tab14":
                         _has_ads_n = bool(r_sku and ads_map_t14.get(r_sku["sku_up"]))
                         _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
                         _has_ads_t = bool(r_ty and get_ads_by_barcode_trendyol().get(r_ty["sku_up"]))
-                        for _pt in ("box", "calc", "verdict", "ads"):
+                        _has_ads_any = _has_ads_n or _has_ads_a or _has_ads_t
+                        if _vw != "all":
+                            # متجر واحد (عرض كامل): صندوق السعر، وتحته «تفاصيل الحساب | حكم الإعلان | أداء الإعلانات» جنب بعض في صف واحد
+                            if r_sku: _t14_noon_part(r_sku, "box")
+                            elif r_asin: _t14_amz_part(r_asin, "box")
+                            elif r_ty: _t14_ty_part(r_ty, "box")
+                            _pts_row = ["calc"] + (["verdict", "ads"] if _has_ads_any else [])
+                            for _ec, _pt in zip(st.columns(len(_pts_row)), _pts_row):
+                                with _ec:
+                                    if r_sku: _t14_noon_part(r_sku, _pt)
+                                    elif r_asin: _t14_amz_part(r_asin, _pt)
+                                    elif r_ty and (_pt == "calc" or _has_ads_t): _t14_ty_part(r_ty, _pt)
+                        for _pt in (("box", "calc", "verdict", "ads") if _vw == "all" else ()):
                             if _pt in ("verdict", "ads") and not (_has_ads_n or _has_ads_a or _has_ads_t):
                                 continue
                             cn, ca, ct = _cols3()
