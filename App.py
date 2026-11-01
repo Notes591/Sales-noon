@@ -7298,9 +7298,9 @@ def render_channel_gap_view(kind, q=""):
         st.info("مفيش بيانات للقناة دي في الفترة")
         return
     dl_btn(channel_gap_df(rows, kind), f"gap_{kind}", key=f"dlbtn_gap_{kind}")
-    if kind in ("fbn", "fba"):
+    if True:      # كل القنوات الأربع (FBN / FBB / FBA / FSAB)
         # ملف «قرب يخلص»: شيت 1 = يُرسل (المستودع يغطي) | شيت 2 = يلزم توريد (المستودع قليل/غير متوفر) — من غير المجدول وقيد الموافقة
-        _dest = "FBN" if kind == "fbn" else "FBA"
+        _dest = "FBN" if kind in ("fbn", "fbb") else "FBA"      # FBB بيتنقل لـ FBN، وFSAB بيتبعت لـ FBA
         _all = res[kind]
         _send = [r for r in _all if r["action"] == "send"]
         _supply = [r for r in _all if r["action"] in ("low_wh", "send_nowh")]
