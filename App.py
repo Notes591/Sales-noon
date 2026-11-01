@@ -7298,6 +7298,25 @@ def render_channel_gap_view(kind, q=""):
         st.info("مفيش بيانات للقناة دي في الفترة")
         return
     dl_btn(channel_gap_df(rows, kind), f"gap_{kind}", key=f"dlbtn_gap_{kind}")
+    if kind in ("fbn", "fba"):
+        # ملف «قرب يخلص»: شيت 1 = يُرسل (المستودع يغطي) | شيت 2 = يلزم توريد (المستودع قليل/غير متوفر) — من غير المجدول وقيد الموافقة
+        _dest = "FBN" if kind == "fbn" else "FBA"
+        _all = res[kind]
+        _send = [r for r in _all if r["action"] == "send"]
+        _supply = [r for r in _all if r["action"] in ("low_wh", "send_nowh")]
+        st.caption(f"📑 ملف «قرب يخلص» — 🚚 يُرسل إلى {_dest}: **{len(_send)}** | ⛔ يلزم توريد (غير متوفر/قليل بالمستودع): **{len(_supply)}** "
+                   "— (مستبعد منهم المجدول وقيد الموافقة)")
+        _kx = f"gap_low_{kind}"
+        if st.button(f"📥 جهّز ملف «قرب يخلص» ({len(_send) + len(_supply)} صنف) | Prepare", key=_kx + "__prep", use_container_width=True):
+            _buf = io.BytesIO()
+            with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
+                channel_gap_df(_send, kind).to_excel(_w, sheet_name=f"يُرسل إلى {_dest}"[:31], index=False)
+                channel_gap_df(_supply, kind).to_excel(_w, sheet_name="يلزم توريد", index=False)
+            st.session_state[_kx + "__xl"] = (_buf.getvalue(), f"low_stock_{kind}_{file_timestamp()}.xlsx")
+        _xl = st.session_state.get(_kx + "__xl")
+        if _xl:
+            st.download_button("⬇️ تحميل ملف «قرب يخلص» | Download", data=_xl[0], file_name=_xl[1], mime=_XLSX_MIME,
+                               use_container_width=True, key=_kx)
     for r in page_slice(rows, f"pg_gap_{kind}", 30):
         c1, c2 = st.columns([1, 7])
         with c1:
