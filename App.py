@@ -1057,14 +1057,14 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
         + missing_note_t14 + verdict_html_t14 + '</div>',
         unsafe_allow_html=True)
     if part in ("all", "calc"):
-      with st.expander("💳 تفاصيل الحساب | Calculation details"):
+      with st.expander("💳 الحساب"):
         st.markdown(
             f"💳 **الصافي بعد خصم العمولة والتوصيل:** {net_fees_t14:,.2f} ريال  \n"
             f"🧾 **الصافي بعد خصم 15% ضريبة:** {net_tax_t14:,.2f} ريال  \n"
             f"📦 **التكلفة | Cost:** {cost_t14:,.2f} ريال"
             + (f"  \n🏷️ **سعر العرض (معلومة فقط):** {offer_price_t14:,.2f} ريال" if offer_price_t14 is not None else ""))
     if ad_detail_t14 and part in ("all", "verdict"):
-        with st.expander("📊 تفاصيل الحكم على الإعلان | Ad verdict details"):
+        with st.expander("📊 الحكم"):
             st.markdown(ad_detail_t14)
 
 def tacweed_badge(sku_up):
@@ -9775,7 +9775,7 @@ def _t14_sku_part(r):
         r, com_map_t14, live_map_t14, sales_dates,
         ads_entries_t14, total_orders_t14, total_spends_t14)
     if ads_entries_t14:
-        with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ads_entries_t14)} حملة | campaign(s)"):
+        with st.expander(f"📢 إعلانات ({len(ads_entries_t14)})"):
             st.markdown(
                 f"💸 **إجمالي المصروف:** {total_spends_t14:,.2f} ريال &nbsp;|&nbsp; "
                 f"💰 **إجمالي الإيراد:** {total_revenue_t14:,.2f} ريال &nbsp;|&nbsp; "
@@ -9790,6 +9790,14 @@ def _t14_sku_part(r):
                     f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CPS: {ad['cps']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%",
                     unsafe_allow_html=True)
                 st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+
+def _cov_pill(text, color, title=""):
+    """شارة صغيرة (كبسولة) بخط صغير — بدل الصناديق الكبيرة؛ النص الكامل في التلميح (hover)."""
+    import html as _h
+    st.markdown(
+        f'<span title="{_h.escape(title or text, quote=True)}" style="display:inline-block;background:{color};color:#fff;'
+        f'border-radius:999px;padding:2px 10px;margin:2px 3px 2px 0;font-size:11px;font-weight:700;line-height:1.5;">{text}</span>',
+        unsafe_allow_html=True)
 
 def _t14_channel_part(r, ch, with_sku_level, part="all"):
     """مبيعات قناة واحدة (FBN أو FBB) للـ SKU: أمس، الأيام، المخزون، حالة التغطية، الجدولة.
@@ -9960,23 +9968,20 @@ def _t14_channel_part(r, ch, with_sku_level, part="all"):
         # المتناقضة جنب شارة الجدولة الحديثة (البنفسجي) اللي هتتعرض تحت — عشان محدش يتلخبط
         show_normal_cov_badge_t14 = not (recent_sched_t14 and "محتاج جدولة" in cov_badge_text)
         if show_normal_cov_badge_t14:
-            st.markdown(
-                f'<span class="status-badge-lg" style="background:{cov_badge_color};">{cov_badge_text}</span>',
-                unsafe_allow_html=True)
+            _short = cov_badge_text.split(" | ")[0].split(" — ")[0]      # نسخة مختصرة في الكبسولة، والنص الكامل في التلميح
+            if stock_self_ok and r["effective_avg"] > 0 and not sched_t14:
+                _short = f"✅ كافٍ {r['days_to_stockout']} يوم"
+            _cov_pill(_short, cov_badge_color, cov_badge_text)
 
         # ══ مجدولة خلال آخر 4 أيام؟ (لو فعلاً ليها جدولة) — تعرض ASN + الكمية + التاريخ ══
         if recent_sched_t14 and with_sku_level:
-            st.markdown(
-                f'<span class="status-badge-lg" style="background:#7c3aed;">'
-                f'📅 مجدولة خلال آخر 4 أيام | Scheduled in last 4 days — '
-                f'ASN <b>{recent_sched_t14["asn"]}</b> &nbsp;|&nbsp; '
-                f'الكمية | Qty: <b>{recent_sched_t14.get("qty","")}</b> &nbsp;|&nbsp; '
-                f'بتاريخ {recent_sched_t14["date"]} [{recent_sched_t14["source_label"]}]'
-                f'</span>',
-                unsafe_allow_html=True)
+            _cov_pill(f'📅 ASN {recent_sched_t14["asn"]} · {recent_sched_t14.get("qty","")} قطعة · {recent_sched_t14["date"]} [{recent_sched_t14["source_label"]}]',
+                      "#7c3aed",
+                      f'مجدولة خلال آخر 4 أيام — ASN {recent_sched_t14["asn"]} | الكمية {recent_sched_t14.get("qty","")} | بتاريخ {recent_sched_t14["date"]} [{recent_sched_t14["source_label"]}]')
 
         if with_sku_level and r["sku_up"] in pending_approval_skus_t14:
-            st.markdown(pending_approval_badge_html(), unsafe_allow_html=True)
+            _cov_pill("⏳ قيد الموافقة", "#b45309",
+                      "قيد الموافقة — في انتظار اعتماد الجدولة من برنامج الجدولة المكتبي، لا تطلبه أو تجدوله تاني")
 
         # ══ ترحيل لتاب مخزون بدون بيع إذا كانت الحالة "محتاج جدولة" فقط بدون أي جدولة
         #    وبدون تفاصيل أخرى وبدون جدولة حديثة (آخر 4 أيام) — لو ليه جدولة حديثة
@@ -10049,7 +10054,7 @@ def _t14_noon_part(r, part):
     elif part in ("box", "calc", "verdict"):
         render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s, part=part)
     elif part == "ads" and ent:
-        with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ent)} حملة | campaign(s)"):
+        with st.expander(f"📢 إعلانات ({len(ent)})"):
             st.markdown(
                 f"💸 **إجمالي المصروف:** {tot_s:,.2f} ريال &nbsp;|&nbsp; "
                 f"💰 **إجمالي الإيراد:** {tot_r:,.2f} ريال &nbsp;|&nbsp; "
@@ -10083,7 +10088,7 @@ def _t14_amz_part(r, part):
     elif part in ("box", "calc", "verdict"):
         render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s, part=part)
     elif part == "ads" and ent:
-        with st.expander(f"📢 أداء الإعلانات | Ads Performance — {len(ent)} عرض | offer(s)"):
+        with st.expander(f"📢 إعلانات ({len(ent)})"):
             st.markdown(
                 f"💸 **إجمالي المصروف:** {tot_s:,.2f} ريال &nbsp;|&nbsp; "
                 f"💰 **إجمالي الإيراد:** {tot_r:,.2f} ريال &nbsp;|&nbsp; "
@@ -10120,7 +10125,7 @@ def _t14_ty_part(r, part):
         tot_o = sum(a["orders"] for a in ent) if ent else 0.0
         if part == "ads":
             if ent:
-                with st.expander(f"📢 أداء الإعلانات | Ads — {len(ent)} حملة" + ("" if all(a["exact"] for a in ent) else " (فيها توزيع تقريبي)")):
+                with st.expander(f"📢 إعلانات ({len(ent)})" + ("" if all(a["exact"] for a in ent) else " ≈")):
                     st.markdown(f"💸 **المصروف:** {tot_s:,.2f} &nbsp;|&nbsp; 💰 **الإيراد:** {tot_r:,.2f} &nbsp;|&nbsp; 🛒 **طلبات:** {tot_o:,.1f}")
                     for ad in ent:
                         st.markdown(f"**{ad['campaign']}**<br>👁️ {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ {ad['clicks']:,.0f} &nbsp;|&nbsp; 🛒 {ad['orders']:,.1f} "
@@ -10845,7 +10850,7 @@ if st.session_state["nav_page"] == "tab14":
                             _chlist = {"all": ["FBN", "FBB", "FSAB", "FBA"], "noon": ["FBN", "FBB"], "amz": ["FSAB", "FBA"], "ty": []}[_vw]
                             _ty_on = _vw in ("all", "ty")
                             _wid = [2.5] * len(_chlist) + ([4] if _ty_on else [])
-                            for _pt in ("sales", "stock", "cov"):
+                            for _pt in ("cov", "sales", "stock"):
                                 _cols = st.columns(_wid)
                                 for _col, _ch in zip(_cols[:len(_chlist)], _chlist):
                                     with _col:
