@@ -10811,28 +10811,26 @@ if st.session_state["nav_page"] == "tab14":
                         _has_ads_n = bool(r_sku and ads_map_t14.get(r_sku["sku_up"]))
                         _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
                         _has_ads_t = bool(r_ty and get_ads_by_barcode_trendyol().get(r_ty["sku_up"]))
-                        _has_ads_any = _has_ads_n or _has_ads_a or _has_ads_t
-                        if _vw != "all":
-                            # متجر واحد (عرض كامل): صندوق السعر، وتحته «تفاصيل الحساب | حكم الإعلان | أداء الإعلانات» جنب بعض في صف واحد
+                        # صندوق السعر والربح (صف مستقل عشان يتحاذى)، وتحته «تفاصيل الحساب | حكم الإعلان | أداء الإعلانات» جنب بعض جوه عمود كل متجر
+                        cn, ca, ct = _cols3()
+                        with cn:
                             if r_sku: _t14_noon_part(r_sku, "box")
-                            elif r_asin: _t14_amz_part(r_asin, "box")
-                            elif r_ty: _t14_ty_part(r_ty, "box")
-                            _pts_row = ["calc"] + (["verdict", "ads"] if _has_ads_any else [])
-                            for _ec, _pt in zip(st.columns(len(_pts_row)), _pts_row):
+                        with ca:
+                            if r_asin: _t14_amz_part(r_asin, "box")
+                        with ct:
+                            if r_ty: _t14_ty_part(r_ty, "box")
+                        def _exp_row(fn, r, has_ads):
+                            _pl = ["calc"] + (["verdict", "ads"] if has_ads else [])
+                            for _ec, _pt in zip(st.columns(len(_pl)), _pl):
                                 with _ec:
-                                    if r_sku: _t14_noon_part(r_sku, _pt)
-                                    elif r_asin: _t14_amz_part(r_asin, _pt)
-                                    elif r_ty and (_pt == "calc" or _has_ads_t): _t14_ty_part(r_ty, _pt)
-                        for _pt in (("box", "calc", "verdict", "ads") if _vw == "all" else ()):
-                            if _pt in ("verdict", "ads") and not (_has_ads_n or _has_ads_a or _has_ads_t):
-                                continue
-                            cn, ca, ct = _cols3()
-                            with cn:
-                                if r_sku: _t14_noon_part(r_sku, _pt)
-                            with ca:
-                                if r_asin: _t14_amz_part(r_asin, _pt)
-                            with ct:
-                                if r_ty and (_pt in ("box", "calc") or _has_ads_t): _t14_ty_part(r_ty, _pt)
+                                    fn(r, _pt)
+                        cn, ca, ct = _cols3()
+                        with cn:
+                            if r_sku: _exp_row(_t14_noon_part, r_sku, _has_ads_n)
+                        with ca:
+                            if r_asin: _exp_row(_t14_amz_part, r_asin, _has_ads_a)
+                        with ct:
+                            if r_ty: _exp_row(_t14_ty_part, r_ty, _has_ads_t)
                         # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
                         # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
                         _shown_a = {}
