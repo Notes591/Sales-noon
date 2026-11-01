@@ -9791,13 +9791,17 @@ def _t14_sku_part(r):
                     unsafe_allow_html=True)
                 st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
 
+_COV_SINK = [None]      # لو فيها قائمة: الكبسولات بتتجمع فيها وتتعرض كلها في سطر واحد فوق
+
 def _cov_pill(text, color, title=""):
     """شارة صغيرة (كبسولة) بخط صغير — بدل الصناديق الكبيرة؛ النص الكامل في التلميح (hover)."""
     import html as _h
-    st.markdown(
-        f'<span title="{_h.escape(title or text, quote=True)}" style="display:inline-block;background:{color};color:#fff;'
-        f'border-radius:999px;padding:2px 10px;margin:2px 3px 2px 0;font-size:11px;font-weight:700;line-height:1.5;">{text}</span>',
-        unsafe_allow_html=True)
+    _html = (f'<span title="{_h.escape(title or text, quote=True)}" style="display:inline-block;background:{color};color:#fff;'
+             f'border-radius:999px;padding:2px 10px;margin:2px 3px 2px 0;font-size:11px;font-weight:700;line-height:1.5;">{text}</span>')
+    if _COV_SINK[0] is not None:
+        _COV_SINK[0].append(_html)
+    else:
+        st.markdown(_html, unsafe_allow_html=True)
 
 def _t14_channel_part(r, ch, with_sku_level, part="all"):
     """مبيعات قناة واحدة (FBN أو FBB) للـ SKU: أمس، الأيام، المخزون، حالة التغطية، الجدولة.
@@ -10792,15 +10796,34 @@ if st.session_state["nav_page"] == "tab14":
                                         st.caption("— مفيش مبيعات تريندول أمس | no Trendyol sales yesterday")
                                     else:
                                         _t14_trendyol_placeholder()
-                        # صف 1: الهوية (SKU / ASIN)
+                        # قنوات المتجر المعروضة — بنحسبها هنا عشان كبسولات التغطية/الجدولة تطلع فوق جنب الهوية
+                        _shown_a = {_ach: bool(amz_chs and _ach in amz_chs and (q_t14 or _yv(amz_chs, _ach) > 0)) for _ach in ("FSAB", "FBA")}
+                        _sn = _t14_noon_shown(noon_chs)
+                        _sa = _shown_a
+                        _lvl = {"FBN": True, "FBB": not _sn["FBN"], "FSAB": True, "FBA": not _sa["FSAB"]}
+                        def _top_cov(chlist, src, shown):
+                            _sink = []
+                            _COV_SINK[0] = _sink
+                            try:
+                                for _c in chlist:
+                                    if src and shown.get(_c):
+                                        _t14_channel_part(src[_c], _c, _lvl[_c], part="cov")
+                            finally:
+                                _COV_SINK[0] = None
+                            if _sink:
+                                st.markdown("".join(_sink), unsafe_allow_html=True)
+                        # صف 1: الهوية (SKU / ASIN) + كبسولات التغطية والجدولة جنبها
                         cn, ca, ct = _cols3()
                         with cn:
                             if r_sku: _t14_noon_part(r_sku, "ident")
+                            _top_cov(["FBN", "FBB"], noon_chs, _sn)
                         with ca:
                             if r_asin:
                                 _t14_amz_part(r_asin, "ident")
                             elif _vw in ("all", "amz") and not amz_chs and b.get("amz_hint"):      # ASIN مربوط بس مباعش أمس — في نفس سطر SKU/Barcode
                                 st.markdown(f"**ASIN:** {asin_link_html(b['amz_hint'])}", unsafe_allow_html=True)
+                        with ca:
+                            _top_cov(["FSAB", "FBA"], amz_chs, _sa)
                         with ct:
                             if r_ty:
                                 _t14_ty_part(r_ty, "ident")
@@ -10850,7 +10873,7 @@ if st.session_state["nav_page"] == "tab14":
                             _chlist = {"all": ["FBN", "FBB", "FSAB", "FBA"], "noon": ["FBN", "FBB"], "amz": ["FSAB", "FBA"], "ty": []}[_vw]
                             _ty_on = _vw in ("all", "ty")
                             _wid = [2.5] * len(_chlist) + ([4] if _ty_on else [])
-                            for _pt in ("cov", "sales", "stock"):
+                            for _pt in ("sales", "stock"):
                                 _cols = st.columns(_wid)
                                 for _col, _ch in zip(_cols[:len(_chlist)], _chlist):
                                     with _col:
