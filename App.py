@@ -9979,7 +9979,9 @@ def _t14_channel_part(r, ch, with_sku_level, part="all"):
 
         # ══ مجدولة خلال آخر 4 أيام؟ (لو فعلاً ليها جدولة) — تعرض ASN + الكمية + التاريخ ══
         if recent_sched_t14 and with_sku_level:
-            _cov_pill(f'📅 ASN {recent_sched_t14["asn"]} · {recent_sched_t14.get("qty","")} قطعة · {recent_sched_t14["date"]} [{recent_sched_t14["source_label"]}]',
+            _dn = max((datetime.now().date() - recent_sched_t14["parsed"]).days, 0)
+            _ago = {0: "النهارده", 1: "من يوم", 2: "من يومين"}.get(_dn, f"من {_dn} أيام")
+            _cov_pill(f'📅 ASN {recent_sched_t14["asn"]} · {recent_sched_t14.get("qty","")} قطعة · {"كانت " if _dn >= 1 else ""}مجدولة {_ago}',
                       "#7c3aed",
                       f'مجدولة خلال آخر 4 أيام — ASN {recent_sched_t14["asn"]} | الكمية {recent_sched_t14.get("qty","")} | بتاريخ {recent_sched_t14["date"]} [{recent_sched_t14["source_label"]}]')
 
