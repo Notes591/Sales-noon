@@ -10712,6 +10712,9 @@ if st.session_state["nav_page"] == "tab14":
                                 "day_counts": r["day_counts"]}
                     return None
 
+                _t14_bn = [0]
+                st.markdown("<style>[class*='st-key-t14blk_'] [data-testid='stVerticalBlock']{gap:.35rem !important;}"
+                            "[class*='st-key-t14blk_'] [data-testid='stMarkdownContainer'] p{margin-bottom:.1rem;}</style>", unsafe_allow_html=True)
                 render_china_sales_status([k for b in blocks_t14 for k in (b["sku"], b["asin"], b["tb"]) if k])  # 🚢 حالة ربط بيانات الصين
                 st.divider()
                 wh_lookup_t14 = _china_wh_lookup()
@@ -10775,7 +10778,8 @@ if st.session_state["nav_page"] == "tab14":
                             return st.columns([5, 5, 4])
                         _one = st.container()      # متجر واحد: عرض كامل بدل 3 أعمدة
                         return _one, _one, _one
-                    with st.container(border=True):
+                    _t14_bn[0] += 1
+                    with st.container(border=True, key=f"t14blk_{_t14_bn[0]}"):
                         # صف 0: عناوين المتاجر (تريندول مكانه محجوز هنا)
                         cn, ca, ct = _cols3()
                         with cn:
@@ -10851,14 +10855,7 @@ if st.session_state["nav_page"] == "tab14":
                         _has_ads_n = bool(r_sku and ads_map_t14.get(r_sku["sku_up"]))
                         _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
                         _has_ads_t = bool(r_ty and get_ads_by_barcode_trendyol().get(r_ty["sku_up"]))
-                        # صندوق السعر والربح (صف مستقل عشان يتحاذى)، وتحته «تفاصيل الحساب | حكم الإعلان | أداء الإعلانات» جنب بعض جوه عمود كل متجر
-                        cn, ca, ct = _cols3()
-                        with cn:
-                            if r_sku: _t14_noon_part(r_sku, "box")
-                        with ca:
-                            if r_asin: _t14_amz_part(r_asin, "box")
-                        with ct:
-                            if r_ty: _t14_ty_part(r_ty, "box")
+                        # صندوق السعر والربح وتحته «الحساب | الحكم | إعلانات» جنب بعض — في صف واحد لكل متجر (من غير فراغ بينهم)
                         def _exp_row(fn, r, has_ads):
                             _pl = ["calc"] + (["verdict", "ads"] if has_ads else [])
                             for _ec, _pt in zip(st.columns(len(_pl)), _pl):
@@ -10866,11 +10863,14 @@ if st.session_state["nav_page"] == "tab14":
                                     fn(r, _pt)
                         cn, ca, ct = _cols3()
                         with cn:
-                            if r_sku: _exp_row(_t14_noon_part, r_sku, _has_ads_n)
+                            if r_sku:
+                                _t14_noon_part(r_sku, "box"); _exp_row(_t14_noon_part, r_sku, _has_ads_n)
                         with ca:
-                            if r_asin: _exp_row(_t14_amz_part, r_asin, _has_ads_a)
+                            if r_asin:
+                                _t14_amz_part(r_asin, "box"); _exp_row(_t14_amz_part, r_asin, _has_ads_a)
                         with ct:
-                            if r_ty: _exp_row(_t14_ty_part, r_ty, _has_ads_t)
+                            if r_ty:
+                                _t14_ty_part(r_ty, "box"); _exp_row(_t14_ty_part, r_ty, _has_ads_t)
                         # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
                         # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
                         _shown_a = {}
