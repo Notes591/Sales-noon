@@ -1046,15 +1046,25 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
     _row = ('<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;'
             'font-size:13px;color:#e2e8f0;padding:3px 0;"><span>{k}</span><b dir="ltr">{v}</b></div>')
     if part in ("all", "box"):
+      # نسخة مضغوطة: سعر | توصيل | عمولة في سطر واحد (كبسولات صغيرة) + صافي الربح وحكم الإعلان في سطر تاني
+      _chip_b = ('<span style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:1px 8px;'
+                 'font-size:12px;color:#e2e8f0;white-space:nowrap;">{k} <b dir="ltr">{v}</b></span>')
+      _pill_v = ""
+      if ad_verdict_t14:
+          _vc2 = ("#16a34a", "#4ade80") if ad_ok_t14 else ("#dc2626", "#f87171")
+          _pill_v = (f'<span style="border:1px solid {_vc2[0]};color:{_vc2[1]};border-radius:999px;padding:1px 9px;'
+                     f'font-size:11px;font-weight:800;white-space:nowrap;">{ad_verdict_t14}</span>')
       st.markdown(
-        '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:8px 14px;margin:6px 0;">'
-        + _row.format(k=f"💵 {price_label_t14}", v=f"{latest_price_t14:,.2f} ريال")
-        + _row.format(k="🚚 توصيل", v=f'{com_info_t14["delivery"]:,.0f}')
-        + _row.format(k="🏷️ عمولة", v=f'{com_info_t14["commission_pct"]:,.0f}%')
-        + f'<div style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;display:flex;justify-content:space-between;'
-          f'align-items:center;gap:8px;color:{profit_color_t14};font-size:14px;font-weight:800;">'
-          f'<span>🧮 صافي الربح بعد التكلفة</span><span dir="ltr">{net_profit_t14:,.2f} ريال</span></div>'
-        + missing_note_t14 + verdict_html_t14 + '</div>',
+        '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:5px 10px;margin:4px 0;">'
+        '<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;">'
+        + _chip_b.format(k=f"💵 {price_label_t14}", v=f"{latest_price_t14:,.2f}")
+        + _chip_b.format(k="🚚", v=f'{com_info_t14["delivery"]:,.0f}')
+        + _chip_b.format(k="🏷️", v=f'{com_info_t14["commission_pct"]:,.0f}%')
+        + '</div>'
+        + f'<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;margin-top:4px;'
+          f'color:{profit_color_t14};font-size:13px;font-weight:800;">'
+          f'<span>🧮 صافي الربح <span dir="ltr">{net_profit_t14:,.2f}</span> ريال</span>{_pill_v}</div>'
+        + missing_note_t14 + '</div>',
         unsafe_allow_html=True)
     if part in ("all", "calc"):
       with st.expander("💳 الحساب"):
