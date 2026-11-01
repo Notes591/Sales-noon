@@ -7786,11 +7786,182 @@ def render_inventory_upload():
         except Exception as e:
             st.error(f"❌ {e}")
 
+# ══════════════════════════════════════════════
+# فحص SKUs محددة: الصق أو ارفع Excel → حالة الجدولة + المبيعات + المخزون + المستودع + الاقتراح (نون FBN/FBB وأمازون FBA/FSAB)
+# ══════════════════════════════════════════════
+def parse_check_tokens(text):
+    """يطلّع الأكواد من نص لاصق (حتى لو واتساب بتواريخ وأسماء) — بيشيل سطور [الوقت] الاسم: ويفضل الكود بس."""
+    text = re.sub(r"\[[^\]\n]*\][^:\n]*:", " ", text or "")
+    seen, out = set(), []
+    for t in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-]{5,}", text):
+        u = t.upper()
+        if u not in seen:
+            seen.add(u); out.append(u)
+    return out
+
+def _file_to_text(f):
+    name = (f.name or "").lower()
+    if name.endswith(".csv"):
+        df = pd.read_csv(f, header=None, dtype=str, keep_default_na=False)
+        return "\n".join(df.astype(str).values.ravel())
+    sheets_ = pd.read_excel(f, sheet_name=None, header=None, dtype=str)
+    return "\n".join("\n".join(d.fillna("").astype(str).values.ravel()) for d in sheets_.values())
+
+def _ago_txt(n):
+    return {0: "مجدولة النهارده", 1: "كانت مجدولة من يوم", 2: "كانت مجدولة من يومين"}.get(n, f"كانت مجدولة من {n} أيام")
+
+def check_skus(tokens, days=30):
+    """بيرجع (noon_rows, amazon_rows, notfound). نفس منطق عروض FBN/FBB/FBA/FSAB بس على مدخلات محددة."""
+    days = max(int(days), 1)
+    today = datetime.now().date()
+    dates = [today - timedelta(days=i) for i in range(1, days + 1)]
+    cov_days = int(load_settings().get("schedule_coverage_days", "15") or 15)
+    c_fbn, c_fbb = build_daily_orders_counts_fbn(dates), build_daily_orders_counts_fbb(dates)
+    c_fba, c_fsab = build_daily_orders_counts_amazon_fba_asin(dates), build_daily_orders_counts_amazon_normal_asin(dates)
+    wh = get_warehouse_stock_map(); tac_n, tac_a = get_tacweed_map(), get_tacweed_amazon_map()
+    rev_a = get_tacweed_amazon_reverse_map(); pend = get_pending_approval_skus(); recent = get_recent_schedule_rows(days_back=90)
+    known = set(inv_map) | set(tac_n) | set(c_fbn) | set(c_fbb) | pend
+    def _tot(dcs):
+        return sum(dcs.values()) if dcs else 0
+    def _need(avg, stock):
+        return max(int(-(-(avg * cov_days - stock) // 1)), 0)
+    noon_rows, amz_rows, notfound, seen_n, seen_a = [], [], [], set(), set()
+
+    def add_asin(asin_up, tok):
+        if (tok, asin_up) in seen_a:
+            return
+        seen_a.add((tok, asin_up))
+        info = amz_inv_map_asin.get(asin_up) or {}
+        stock = float(info.get("stock", 0) or 0)
+        fba, fsab = _tot(c_fba.get(asin_up)), _tot(c_fsab.get(asin_up))
+        dem = fba + fsab; avg = dem / days
+        cover = stock / avg if avg > 0 else 9999
+        code = (tac_a.get(asin_up, "") or "").strip(); whq = _gap_qty(wh.get(code, "")) if code else 0.0
+        need = dem > 0 and cover < cov_days
+        if dem == 0:
+            action, lines = "nosales", [f"لا توجد مبيعات في آخر {days} يوم"]
+        elif not need:
+            action, lines = "ok", ["مخزون أمازون كافٍ"]
+        else:
+            action = "send" if (whq > 0 and whq >= avg * cov_days) else ("low_wh" if whq > 0 else "send_nowh")
+            lines = _gap_sug(action, "تخزين أمازون (FBA)", whq, avg, cov_days)
+        nq = _need(avg, stock) if dem > 0 else 0
+        amz_rows.append({"المدخل": tok, "ASIN": asin_up, "الكود": code, "مبيعات FBA": fba, "مبيعات FSAB": fsab,
+                         "متوسط يومي": round(avg, 2), "مخزون أمازون": stock, "يكفي (يوم)": round(cover) if cover < 9999 else "",
+                         "متوفر بالمستودع": whq, f"الكمية المطلوبة لتغطية {cov_days} يوم": nq,
+                         "الكمية المقترح إرسالها": nq if action == "send" else 0,
+                         "الكمية المطلوب توريدها": max(nq - int(whq), 0) if action in ("low_wh", "send_nowh") else 0,
+                         "الاقتراح": lines[0] if lines else "", "السبب": lines[1] if len(lines) > 1 else "", "المطلوب": lines[2] if len(lines) > 2 else ""})
+
+    for tok in tokens:
+        t = tok.upper()
+        if re.fullmatch(r"B0[A-Z0-9]{8}", t):
+            if t in amz_inv_map_asin or t in tac_a or t in c_fba or t in c_fsab:
+                add_asin(t, tok)
+            else:
+                notfound.append({"المدخل": tok, "السبب": "ASIN غير موجود في مخزون/تكويد/مبيعات أمازون"})
+            continue
+        has_suffix = bool(re.search(r"-\d+$", t))
+        cands = [t, re.sub(r"-\d+$", "", t)] if has_suffix else ([t + "-1", t] if re.fullmatch(r"Z[A-Z0-9]+Z", t) else [t, t + "-1"])
+        sku_up = next((c for c in cands if c in known), None)
+        found = sku_up is not None
+        if not found:
+            sku_up = cands[0]
+        if (tok, sku_up) in seen_n:
+            continue
+        seen_n.add((tok, sku_up))
+        info = inv_map.get(sku_up) or {}
+        stock = float(info.get("total_stock", 0) or 0)
+        fbn, fbb = _tot(c_fbn.get(sku_up)), _tot(c_fbb.get(sku_up))
+        dem = fbn + fbb; avg = dem / days
+        cover = stock / avg if avg > 0 else 9999
+        code = (tac_n.get(sku_up, "") or "").strip(); whq = _gap_qty(wh.get(code, "")) if code else 0.0
+        # الجدولة
+        si = get_latest_schedule_info(sku_up); rc = recent.get(sku_up)
+        if sku_up in pend:
+            sched, sched_txt = "pending", "⏳ قيد الموافقة"
+        elif si or rc:
+            e = si or rc
+            ref = (si or {}).get("parsed") or (rc or {}).get("parsed")
+            ref = ref.date() if hasattr(ref, "date") else ref
+            n = (today - ref).days if ref else None
+            when = (_ago_txt(n) if (n is not None and n >= 0) else f"مجدولة بتاريخ {e.get('date', '')}") if ref else f"مجدولة بتاريخ {e.get('date', '')}"
+            tag = " [منتهية]" if (not si and rc and rc.get("source") == "Expired") else ""
+            sched = "scheduled" if si else "expired"
+            sched_txt = f"📅 ASN {e.get('asn', '')} · {e.get('qty', '')} قطعة · {when}{tag}"
+        else:
+            sched, sched_txt = "none", "❌ لا توجد جدولة"
+        need = dem > 0 and cover < cov_days
+        if not found and not info and dem == 0 and not code:
+            notfound.append({"المدخل": tok, "السبب": "SKU غير موجود في المخزون/التكويد/المبيعات (جربت مع -1 وبدونها)"}); 
+            continue
+        if dem == 0:
+            action, lines = "nosales", [f"لا توجد مبيعات في آخر {days} يوم"]
+        elif not need:
+            action, lines = "ok", ["مخزون FBN كافٍ"]
+        elif sched == "pending":
+            action, lines = "pending", _gap_sug("pending", "", whq, avg, cov_days)
+        elif sched == "scheduled":
+            action, lines = "scheduled", _gap_sug("scheduled", "", whq, avg, cov_days)
+        else:
+            action = "send" if (whq > 0 and whq >= avg * cov_days) else ("low_wh" if whq > 0 else "send_nowh")
+            lines = _gap_sug(action, "تخزين نون (FBN)", whq, avg, cov_days)
+        nq = _need(avg, stock) if dem > 0 else 0
+        noon_rows.append({"المدخل": tok, "SKU": sku_up, "الكود": code, "مبيعات FBN": fbn, "مبيعات FBB": fbb,
+                          "متوسط يومي": round(avg, 2), "مخزون FBN": stock, "يكفي (يوم)": round(cover) if cover < 9999 else "",
+                          "حالة الجدولة": sched_txt, "متوفر بالمستودع": whq,
+                          f"الكمية المطلوبة لتغطية {cov_days} يوم": nq,
+                          "الكمية المقترح إرسالها": nq if action == "send" else 0,
+                          "الكمية المطلوب توريدها": max(nq - int(whq), 0) if action in ("low_wh", "send_nowh") else 0,
+                          "الاقتراح": lines[0] if lines else "", "السبب": lines[1] if len(lines) > 1 else "", "المطلوب": lines[2] if len(lines) > 2 else ""})
+        for a in rev_a.get(code, []) if code else []:      # ASINs أمازون لنفس الكود (FBA / FSAB)
+            add_asin(a, tok)
+    return noon_rows, amz_rows, notfound
+
+def render_sku_check_tab():
+    st.subheader("🔎 فحص SKUs محددة | Check specific SKUs")
+    st.caption("الصق الأكواد (حتى لو منسوخة من واتساب) أو ارفع ملف Excel/CSV. لو الـ SKU بصيغة Z…Z بنضيف له -1 تلقائي، وممكن تبعته كامل. "
+               "بيطلع: الجدولة (قيد الموافقة / مجدول / كانت مجدولة من N أيام)، مبيعات FBN وFBB، المخزون، المستودع، والكمية المقترحة — وأمازون FBA وFSAB لنفس الكود.")
+    txt = st.text_area("الصق الأكواد هنا | Paste SKUs", height=170, key="skuchk_txt", placeholder="Z82C7E3332A832BBA3075Z\nN12520014A\nZF0D2CB93BA8D8247F487Z-1")
+    upl = st.file_uploader("أو ارفع ملف Excel / CSV | Or upload", type=["xlsx", "xls", "csv"], key="skuchk_file")
+    if st.button("🔍 افحص | Check", key="skuchk_go", type="primary", use_container_width=True):
+        body = txt or ""
+        if upl is not None:
+            try:
+                body += "\n" + _file_to_text(upl)
+            except Exception as e:
+                st.error(f"❌ تعذر قراءة الملف: {e}")
+        toks = parse_check_tokens(body)
+        if not toks:
+            st.warning("مفيش أكواد في المدخلات")
+        else:
+            with st.spinner(f"جاري فحص {len(toks)} كود..."):
+                nr, ar, nf = check_skus(toks)
+            _buf = io.BytesIO()
+            with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
+                pd.DataFrame(nr).to_excel(_w, sheet_name="نون", index=False)
+                pd.DataFrame(ar).to_excel(_w, sheet_name="أمازون", index=False)
+                if nf:
+                    pd.DataFrame(nf).to_excel(_w, sheet_name="غير موجود", index=False)
+            st.session_state["skuchk_res"] = (nr, ar, nf, _buf.getvalue(), f"sku_check_{file_timestamp()}.xlsx", len(toks))
+    res_ = st.session_state.get("skuchk_res")
+    if res_:
+        nr, ar, nf, xl, fn, n_in = res_
+        st.success(f"✅ {n_in} كود مدخل — نون: {len(nr)} | أمازون: {len(ar)} | غير موجود: {len(nf)}")
+        st.download_button("⬇️ تحميل Excel | Download", data=xl, file_name=fn, mime=_XLSX_MIME, use_container_width=True, key="skuchk_dl")
+        t1, t2, t3 = st.tabs([f"🟢 نون ({len(nr)})", f"🟠 أمازون ({len(ar)})", f"❓ غير موجود ({len(nf)})"])
+        with t1:
+            st.dataframe(pd.DataFrame(nr), use_container_width=True, hide_index=True)
+        with t2:
+            st.dataframe(pd.DataFrame(ar), use_container_width=True, hide_index=True)
+        with t3:
+            st.dataframe(pd.DataFrame(nf), use_container_width=True, hide_index=True)
+
 def render_upload_tab():
     """كل رفع الملفات في مكان واحد — نون مع بعض، أمازون مع بعض، تريندول مع بعض (+ عام: مخزون المستودع والصين)."""
     st.header("📤 رفع ملف | Upload Files")
     st.caption("كل رفع الملفات هنا: نون مع بعض، أمازون مع بعض، تريندول مع بعض | All file uploads live here, grouped by platform")
-    _grp = st.radio("القسم | Section", ["🅽 نون | Noon", "📦 أمازون | Amazon", "🟣 تريندول | Trendyol", "🏭 عام (مستودع + صين) | General"],
+    _grp = st.radio("القسم | Section", ["🅽 نون | Noon", "📦 أمازون | Amazon", "🟣 تريندول | Trendyol", "🏭 عام (مستودع + صين) | General", "🔎 فحص SKUs | Check SKUs"],
                     horizontal=True, key="up_group", label_visibility="collapsed")
     if _grp.startswith("🅽"):
         render_tacweed_upload("up")
@@ -7804,6 +7975,8 @@ def render_upload_tab():
         render_trendyol_upload("up")
         render_trendyol_ads_upload("up")
         render_trendyol_products_upload("up")
+    elif _grp.startswith("🔎"):
+        render_sku_check_tab()
     else:
         render_warehouse_stock_upload("up")
         render_china_upload("up", get_china_bundle())
