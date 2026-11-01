@@ -7189,6 +7189,7 @@ def compute_channel_gap(days=30):
                 "kind": kind, "key": info.get("sku", sku_up), "key_up": sku_up, "code": code,
                 "img": info.get("img", "") or links_n.get(sku_up, ""),
                 "sales": total, "dem": dem, "other": other, "yday": dc.get(yday, 0), "avg": avg,
+                "cov_days": cov_days, "need_qty": max(int(-(-(avg * cov_days - stock) // 1)), 0),
                 "stock": stock, "no_stock": need, "cover": cover,
                 "sched": sched, "sched_txt": sched_txt, "wh": whq,
                 "action": action, "suggestion": sug,
@@ -7221,6 +7222,7 @@ def compute_channel_gap(days=30):
                 "kind": kind, "key": asin_up, "key_up": asin_up, "code": code,
                 "img": links_a.get(asin_up, ""),
                 "sales": total, "dem": dem, "other": other, "yday": dc.get(yday, 0), "avg": avg,
+                "cov_days": cov_days, "need_qty": max(int(-(-(avg * cov_days - stock) // 1)), 0),
                 "stock": stock, "no_stock": need, "cover": cover,
                 "sched": "", "sched_txt": "", "wh": whq,
                 "action": action, "suggestion": sug,
@@ -7269,6 +7271,10 @@ def channel_gap_df(rows, kind):
         if noon:
             d["حالة الجدولة"] = r["sched_txt"]
         d["متوفر بالمستودع"] = r["wh"]
+        _nq = r["need_qty"]
+        d[f"الكمية المطلوبة لتغطية {r['cov_days']} يوم"] = _nq
+        d["الكمية المقترح إرسالها"] = _nq if r["action"] == "send" else 0
+        d["الكمية المطلوب توريدها"] = max(_nq - int(r["wh"]), 0) if r["action"] in ("low_wh", "send_nowh") else 0
         d["الإجراء"] = _GAP_ACTION_AR.get(r["action"], "")
         _l = (r["suggestion"] or "").split("  \n")
         d["الاقتراح"] = _l[0] if _l else ""
