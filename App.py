@@ -3351,17 +3351,20 @@ def _china_wrap(inner):
     return ("<div dir='rtl' style='background:#1e293b;border:1px solid #334155;border-radius:10px;padding:10px 14px;margin:2px 0;"
             f"color:#e2e8f0;font-size:14px;line-height:1.9;'>{_CN_CSS}{inner}</div>")
 
-def _china_render_card(inc, today, row=None, sku_up=""):
+def _china_render_card(inc, today, row=None, sku_up="", cols=None):
     """الكارت اتقسم لعناوين قابلة للفتح (كلها مقفولة): «🚢 من الصين N قطعة» بتفتح التفصيل (منها كذا في المصنع وكذا في البحر
     + كل مجموعة وتاريخ إتاحتها)، و«📦 المخزون وموعد الطلب» بتفتح مخزون المستودع والتنبيه — والحالة ظاهرة في العنوان."""
     p = _china_card_parts(inc, today, row, sku_up)
-    with st.expander(p["title"], expanded=False):
+    import contextlib
+    _c0 = cols[0] if cols else contextlib.nullcontext()
+    _c1 = cols[1] if cols else contextlib.nullcontext()
+    with _c0, st.expander(p["title"], expanded=False):
         body = (f"<div style='font-size:15px;font-weight:800;color:#fed7aa;'>{p['sub']}</div>" if p["sub"] else "")
         body += "".join(f"<div class='cn-li'>{i}</div>" for i in p["items"])
         st.markdown(_china_wrap(body), unsafe_allow_html=True)
     if p["dec_items"] or p["alert"]:
         lbl = "📦 المخزون وموعد الطلب" + (f" — {p['dec_label']}" if p["dec_label"] else "")
-        with st.expander(lbl, expanded=False):
+        with _c1, st.expander(lbl, expanded=False):
             st.markdown(_china_wrap("".join(f"<div class='cn-li'>{i}</div>" for i in p["dec_items"]) + p["alert"]),
                         unsafe_allow_html=True)
 
@@ -3375,8 +3378,9 @@ def render_china_for_sku(sku_up, row=None):
             return
         today = datetime.now().date()
         inc = [l for l in lines if l["_status"] == "incoming"]
+        _cc = st.columns(3)        # العناوين التلاتة جنب بعض عشان نوفّر مساحة الصفحة
         if inc:
-            _china_render_card(inc, today, row, sku_up)
+            _china_render_card(inc, today, row, sku_up, cols=_cc)
         recv = sum(l["_qty"] for l in lines if l["_status"] == "received")
         canc = sum(l["_qty"] for l in lines if l["_status"] == "cancelled")
         extra = ""
@@ -3384,7 +3388,7 @@ def render_china_for_sku(sku_up, row=None):
             extra += f" | وصل المستودع: {recv:,}"
         if canc:
             extra += f" | ملغي: {canc:,}"
-        with st.expander(f"🚢 تفاصيل شحنات الصين | China shipments — {len(lines)} سطر{extra}"):
+        with _cc[2], st.expander(f"🚢 تفاصيل شحنات الصين | China shipments — {len(lines)} سطر{extra}"):
             st.markdown(_china_lines_table_html(lines), unsafe_allow_html=True)
             for l in lines:
                 st.markdown(_china_stepper_html(l["_idx"], l["_status"] == "cancelled"), unsafe_allow_html=True)
@@ -9912,8 +9916,9 @@ def _t14_channel_part(r, ch, with_sku_level, part="all"):
                 )
             else:
                 day_parts.append(f'<span style="color:{color};font-size:11px;">{lbl_short}: <b>{cnt}</b>{minmax_d}</span>')
-        if day_parts:
-            st.markdown("<br>".join(day_parts), unsafe_allow_html=True)
+        if day_parts:      # أول أمس وما قبله: في شريط مقفول يتفتح بالضغط (توفير مساحة)
+            with st.expander(f"📅 أول أمس وما قبله ({len(day_parts)} يوم)", expanded=False):
+                st.markdown("<br>".join(day_parts), unsafe_allow_html=True)
 
     if part in ("all", "stock"):
         # مخزون + مبيع شهري
