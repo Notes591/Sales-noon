@@ -41,6 +41,7 @@ from calc import (
     CHINA_STAGE_AR, CHINA_STATUS, CHINA_STATUS_LEGACY, CONTRACT_COLS,
     CT_ORD_AR, CT_WINDOW_DAYS, FAMILY_HOME_GROUP, FAMILY_LABELS,
     OLD_SCHED_COLS, TABS_CONFIG, TY_ADS_HEADERS, TY_EXCLUDED_STATUSES,
+    CT_SHEET_NAME, ct_read_tracking, ct_sync_plan,
     _AR_MONTHS, _CF_CONT_ONLY, _CF_CONT_RENAME, _CF_LINE,
     _CF_SHARED, _CF_SHIP_DATA, _CF_SHIP_ONLY, _CHINA_LABELS,
     _CS_ALIAS, _CS_LABEL, _CS_LOOKUP, _CS_RANK,
@@ -1626,11 +1627,55 @@ def _china_write_flat(ws, flat_rows):
 
 
 
+@st.cache_resource
+def _ct_state():
+    """حالة مزامنة Container tracking على مستوى السيرفر كله (آخر تشغيل + نتيجته + الشيت المفتوح)."""
+    return {"ts": 0, "ws": None, "last": None}
+
+
+def china_sync_tracking(force=False):
+    """بيقرأ شيت Container tracking (جوجل شيت منفصل بنفس الـ service account) وبيملا/يحدّث شيت China من أي مرجع مكتوب
+    (رقم حاوية / بوليصة / شحنة STxxxxx). بيشتغل تلقائي كل 5 دقايق على الأكتر أو بالزرار — وعمره ما بيرمي خطأ للتطبيق."""
+    s = _ct_state()
+    if not force and time.time() - s["ts"] < 300:
+        return s["last"]
+    s["ts"] = time.time()
+    res = {"time": time.strftime("%Y-%m-%d %H:%M"), "rows": 0, "cells": 0, "notes": [], "error": ""}
+    try:
+        if s["ws"] is None:
+            s["ws"] = client.open(CT_SHEET_NAME).sheet1
+        recs = ct_read_tracking(safe_get_all_values(s["ws"]))
+        if not recs:
+            res["error"] = "ما لقيتش في Container tracking صفوف فيها رقم حاوية أو شحنة (أو عناوين الأعمدة مش مفهومة)."
+        else:
+            ws = get_china_flat_ws()
+            plan = ct_sync_plan(safe_get_all_values(ws), recs)
+            res["notes"], res["rows"], res["cells"] = plan["notes"], plan["rows"], len(plan["updates"])
+            ups = [{"range": f"{_china_col_letter(CHINA_FLAT_KEYS.index(k) + 1)}{r}", "values": [[_china_cell(v)]]} for r, k, v in plan["updates"]]
+            for i in range(0, len(ups), 400):
+                ws.batch_update(ups[i:i + 400], value_input_option="USER_ENTERED")
+            if ups:
+                clear_cache(ws)
+    except gspread.exceptions.SpreadsheetNotFound:
+        s["ws"] = None
+        try:
+            mail = st.secrets["gcp_service_account"].get("client_email", "")
+        except Exception:
+            mail = ""
+        res["error"] = f"مش لاقي جوجل شيت اسمه «{CT_SHEET_NAME}» — اعمله Share (Editor أو Viewer) للإيميل: {mail}"
+    except Exception as e:
+        s["ws"] = None
+        res["error"] = f"{type(e).__name__}: {e}"
+    s["last"] = res
+    return res
+
+
 def _china_flat_raw(force=False):
     """الخام من الشيت — بيتجدّد تلقائي كل دقيقتين (عشان تعديلات الموظف تبان) أو بالزرار."""
     ws = get_china_flat_ws()
     ts = st.session_state.get("china_flat_ts", 0)
     if force or time.time() - ts > 300:
+        china_sync_tracking()                      # الأول نملا China من Container tracking، وبعدين نقرأ
         raw = get_cached(ws, force=True)
         st.session_state["china_flat_ts"] = time.time()
         return raw
@@ -2457,6 +2502,25 @@ def render_china_tab():
             st.rerun()
     with _cb3:
         st.caption("التعديل بيتم في الشيت مباشرة، والتطبيق بيقرأه تلقائي (كل دقيقتين أو بزرار التحديث) | Edit in the sheet; the app re-reads it automatically")
+    _ctr = _ct_state().get("last")
+    with st.expander("🔗 مزامنة Container tracking" + (f" — آخر مرة {_ctr['time']}" if _ctr else ""),
+                     expanded=bool(_ctr and (_ctr["error"] or _ctr["notes"]))):
+        st.caption(f"اكتب في China أي مرجع (رقم الحاوية، رقم البوليصة، أو رقم الشحنة STxxxxx) والباقي بيتملا من جوجل شيت «{CT_SHEET_NAME}» "
+                   "(الختم، البوليصة، التواريخ، السفينة، الوصول الفعلي، الاستلام، والحالة بتتقدم للأمام). بيشتغل تلقائي كل 5 دقايق أو بالزرار. "
+                   "قيم التتبع بتكتب فوق قيم China — فعدّل في Container tracking مش في China.")
+        if st.button("🔄 زامن الآن | Sync now", key="ct_sync_now"):
+            china_sync_tracking(force=True)
+            st.session_state["china_flat_ts"] = 0
+            st.session_state.pop("china_bundle", None)
+            st.session_state.pop("china_bundle_src", None)
+            st.rerun()
+        if _ctr:
+            if _ctr["error"]:
+                st.warning("⚠️ " + _ctr["error"])
+            else:
+                st.success(f"✅ اتحدّث {_ctr['rows']} صف ({_ctr['cells']} خلية) في آخر مزامنة")
+            for _n in _ctr["notes"]:
+                st.caption(_n)
     with st.expander("📖 دليل تعبئة الشيت للموظفة | Staff guide", expanded=False):
         st.code(CHINA_STAFF_GUIDE, language=None)
         st.markdown("**اختياري — سكريبت Google Apps Script** بيوحّد بيانات الحاوية على كل صفوفها وبيختم آخر تحديث تلقائي:")

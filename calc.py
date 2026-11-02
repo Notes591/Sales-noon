@@ -4249,3 +4249,200 @@ def _file_to_text(f):
         return "\n".join(df.astype(str).values.ravel())
     sheets_ = pd.read_excel(f, sheet_name=None, header=None, dtype=str)
     return "\n".join("\n".join(d.fillna("").astype(str).values.ravel()) for d in sheets_.values())
+
+
+# ══ Container tracking → China | مزامنة شيت Container tracking مع شيت China ══
+# شيت Container tracking (جوجل شيت منفصل) هو مصدر بيانات الحاوية: اكتب أي مرجع في China (رقم الحاوية / رقم الشحنة STxxxxx / رقم البوليصة)
+# والباقي بيتملا منه. كل حاجة هنا دوال نقية (بتاخد الصفوف الخام وترجّع قايمة تعديلات) — القراءة والكتابة في stock_requests.
+CT_SHEET_NAME = "Container tracking"
+_CT_HEAD_LINES = {     # حقل -> أسطر العنوان المقبولة (بدون نقطة آخر السطر، حروف كبيرة)
+    "loading": {"LOADING DATE", "تاريخ التحميل"}, "invoice": {"INVOICE NO", "رقم الفاتورة"}, "origin": {"ADD", "عنوان"},
+    "container": {"CONTAINER NO", "رقم الحاوية"}, "seal": {"SEAL NO", "رقم الختم"}, "bl": {"D/R NO", "رقم بوليصة الشحن"},
+    "sailing": {"SAILING DATE", "تاريخ الإبحار"}, "transfer_loc": {"TRANSFER PORT LOCATION", "موقع ميناء النقل"},
+    "transfer_date": {"DATE OF TRANSFER PORT", "تاريخ العبور"}, "dest": {"DESTINATION", "مقصد"},
+    "eta": {"ARRIVAL DATE", "تاريخ الوصول"}, "ship": {"اسم السفينة"}, "url": {"QUERY WEBSITE", "موقع الاستعلام"},
+    "actual": {"ACTUAL ARRIVAL DATE", "تاريخ الوصول الفعلي"}, "status": {"الحالة"}, "received": {"تاريخ الاستلام في المستودع"},
+}
+# حقل في China <- حقل في Container tracking
+CT_FIELD_MAP = [("shipment_id", "invoice"), ("container_no", "container"), ("seal_no", "seal"), ("bl_no", "bl"),
+                ("actual_load_date", "loading"), ("actual_etd", "sailing"), ("destination_port", "dest"), ("eta_port", "eta"),
+                ("vessel_name", "vessel"), ("voyage_no", "voyage"), ("tracking_url", "url"), ("last_known_location", "transfer_loc"),
+                ("port_arrival_actual", "actual"), ("warehouse_arrival_actual", "received"), ("origin_location", "origin")]
+_CT_IDENTITY = {"shipment_id", "container_no"}      # بتتملا لو فاضية بس — ولو مختلفة بنبلّغ عن تعارض
+_CT_FILL_ONLY = {"origin_location"}                 # بتتملا لو فاضية بس
+_CT_DATE_KEYS = {"actual_load_date", "actual_etd", "eta_port", "port_arrival_actual", "warehouse_arrival_actual"}
+_CT_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫", "0123456789.")
+
+
+def ct_norm_ref(v):
+    """مرجع (رقم حاوية/شحنة/بوليصة) للمقارنة: حروف كبيرة وبدون مسافات."""
+    return re.sub(r"\s+", "", str(v or "")).upper()
+
+
+def ct_parse_date(v, year=None, anchor=None):
+    """تاريخ من شيت التتبع -> yyyy-mm-dd أو ''. بيقبل 2026/06/27 و 5٫10 / 5.10 (شهر.يوم من غير سنة — السنة من year،
+    ولو طلع قبل anchor بأكتر من 60 يوم نزوّده سنة) وأرقام التاريخ بتاعة الإكسيل. أي حاجة غلط (زي 5٫80) = ''."""
+    if v is None or isinstance(v, bool):
+        return ""
+    if isinstance(v, (int, float)):
+        if 20000 < v < 80000:
+            return (datetime(1899, 12, 30) + timedelta(days=int(v))).strftime("%Y-%m-%d")
+        return ""
+    s = str(v).strip().translate(_CT_DIGITS)
+    if not s:
+        return ""
+    m = re.match(r"^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?:\D.*)?$", s)
+    try:
+        if m:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).strftime("%Y-%m-%d")
+        m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s)
+        if m and year:
+            d = datetime(int(year), int(m.group(1)), int(m.group(2)))
+            if anchor:
+                a = datetime.strptime(anchor, "%Y-%m-%d")
+                if d < a - timedelta(days=60):
+                    d = datetime(int(year) + 1, d.month, d.day)
+            return d.strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+    return ""
+
+
+def _ct_head_map(raw):
+    """(index صف العناوين, {حقل: index عمود}) — بيدوّر على الصف اللي فيه «CONTAINER NO»."""
+    for hi, row in enumerate(raw[:12]):
+        pos = {}
+        for j, cell in enumerate(row):
+            lines = {re.sub(r"\.$", "", ln.strip().upper()) for ln in str(cell).replace("\r", "\n").split("\n") if ln.strip()}
+            if "ship" not in pos and "اسم السفينة" in lines:
+                pos["ship"] = j
+                continue
+            for f, names in _CT_HEAD_LINES.items():
+                if f not in pos and f != "ship" and lines & names:
+                    pos[f] = j
+                    break
+        if "container" in pos and "invoice" in pos:
+            return hi, pos
+    return None, {}
+
+
+def ct_read_tracking(raw, today=None):
+    """الصفوف الخام من Container tracking -> قايمة سجلات بمفاتيح China (فيها _status_text و _warn). صف بدون حاوية ولا شحنة بيتجاهل."""
+    today = today or datetime.now()
+    hi, pos = _ct_head_map(raw or [])
+    if hi is None:
+        return []
+    g = lambda row, f: (str(row[pos[f]]).strip() if f in pos and pos[f] < len(row) else "")
+    out = []
+    for i, row in enumerate(raw[hi + 1:], start=hi + 2):
+        cno, inv = ct_norm_ref(g(row, "container")), ct_norm_ref(g(row, "invoice"))
+        if not cno and not inv:
+            continue
+        m = re.match(r"^ST(\d{2})", inv)
+        year = 2000 + int(m.group(1)) if m else today.year
+        warn = []
+        load = ct_parse_date(g(row, "loading"), year)
+        if g(row, "loading") and not load:
+            warn.append(f"تاريخ التحميل «{g(row, 'loading')}» مش مفهوم")
+        anchor = load or None
+        sail = ct_parse_date(g(row, "sailing"), year, anchor)
+        anchor = anchor or sail or None
+        eta = ct_parse_date(g(row, "eta"), year, anchor)
+        for f, val in (("sailing", sail), ("eta", eta)):
+            if g(row, f) and not val:
+                warn.append(f"«{g(row, f)}» مش تاريخ مفهوم")
+        ship, voy = g(row, "ship"), ""
+        toks = ship.split()
+        if len(toks) > 1 and re.fullmatch(r"[A-Z]{0,3}\d{2,5}[A-Z]?", toks[-1].upper()):
+            voy, ship = toks[-1].upper(), " ".join(toks[:-1])
+        rec = {"shipment_id": inv, "container_no": cno, "seal_no": g(row, "seal"), "bl_no": ct_norm_ref(g(row, "bl")),
+               "actual_load_date": load, "actual_etd": sail, "destination_port": g(row, "dest").upper(), "eta_port": eta,
+               "vessel_name": ship, "voyage_no": voy, "tracking_url": g(row, "url"), "last_known_location": g(row, "transfer_loc"),
+               "port_arrival_actual": ct_parse_date(g(row, "actual"), year), "warehouse_arrival_actual": ct_parse_date(g(row, "received"), year),
+               "origin_location": g(row, "origin"), "_status_text": g(row, "status"), "_warn": warn, "_row": i}
+        out.append(rec)
+    return out
+
+
+def ct_sync_plan(china_raw, tracking_recs):
+    """بيقارن شيت China (الخام) بسجلات التتبع ويرجّع {"updates": [(رقم الصف في الشيت, مفتاح العمود, القيمة)], "notes": [...], "rows": عدد الصفوف المتأثرة}.
+    الأولوية للمرجع: رقم الحاوية ثم رقم البوليصة ثم رقم الشحنة. لو المرجع بيطلّع أكتر من حاوية: بنملا بس الحقول اللي متفقة عليها.
+    قيمة التتبع بتكتب فوق قيمة China (ما عدا رقم الشحنة/الحاوية/المنشأ: بتتملا لو فاضية بس). الحالة بتتقدم للأمام بس."""
+    hi = None
+    for i, r in enumerate((china_raw or [])[:8]):
+        low = {str(c).strip() for c in r}
+        if "container_no" in low and "internal_order_no" in low:
+            hi = i
+            break
+    if hi is None or not tracking_recs:
+        return {"updates": [], "notes": [], "rows": 0}
+    pos = {str(c).strip(): j for j, c in enumerate(china_raw[hi]) if str(c).strip() in CHINA_FLAT_KEYS}
+    by_c, by_bl, by_inv = {}, {}, {}
+    for t in tracking_recs:
+        if t["container_no"]:
+            by_c.setdefault(t["container_no"], []).append(t)
+        if t["bl_no"]:
+            by_bl.setdefault(t["bl_no"], []).append(t)
+        if t["shipment_id"]:
+            by_inv.setdefault(t["shipment_id"], []).append(t)
+    updates, notes, rows_changed, seen_notes = [], [], 0, set()
+    note = lambda msg: (msg not in seen_notes) and (seen_notes.add(msg) or notes.append(msg))
+    for t in tracking_recs:
+        for w in t["_warn"]:
+            note(f"⚠️ سطر {t['_row']} في Container tracking ({t['container_no'] or t['shipment_id']}): {w} — اتسابت فاضية")
+    for i in range(hi + 1, len(china_raw)):
+        row = china_raw[i]
+        cur = {k: (str(row[j]).strip() if j < len(row) else "") for k, j in pos.items()}
+        if not any(cur.get(k) for k in CHINA_FLAT_INPUT_KEYS) or _china_is_label_row(cur):
+            continue
+        cno, bl, sid = ct_norm_ref(cur.get("container_no")), ct_norm_ref(cur.get("bl_no")), ct_norm_ref(cur.get("shipment_id"))
+        recs = by_c.get(cno) if cno else None
+        if not recs and bl:
+            recs = by_bl.get(bl)
+        if not recs and sid:
+            recs = by_inv.get(sid)
+        if not recs:
+            continue
+        if len(recs) == 1:
+            vals = {k: recs[0].get(k, "") for k, _ in CT_FIELD_MAP}
+            status_txt = recs[0]["_status_text"]
+        else:
+            vals = {}
+            for k, _ in CT_FIELD_MAP:
+                s = {r.get(k, "") for r in recs}
+                vals[k] = next(iter(s)) if len(s) == 1 else ""
+            ss_ = {r["_status_text"] for r in recs}
+            status_txt = next(iter(ss_)) if len(ss_) == 1 else ""
+            if not cno:
+                note(f"ℹ️ {sid or bl}: عليها {len(recs)} حاويات ({'، '.join(r['container_no'] for r in recs)}) — اكتب رقم الحاوية في China عشان تتملا باقي بياناتها")
+        new, ch = dict(cur), {}
+        for k, _src in CT_FIELD_MAP:
+            tv = vals.get(k, "")
+            if not tv:
+                continue
+            cv = cur.get(k, "")
+            if k in _CT_DATE_KEYS:
+                cmp_ = ct_parse_date(cv, int(tv[:4]))
+                same = (cmp_ == tv)
+            else:
+                same = ct_norm_ref(cv) == ct_norm_ref(tv) if k in _CT_IDENTITY or k in ("seal_no", "bl_no") else cv.strip().upper() == tv.strip().upper()
+            if same:
+                continue
+            if k in _CT_IDENTITY and cv:
+                note(f"⚠️ صف {i + 1} في China: {k} = «{cv}» بينما Container tracking فيه «{tv}» — ما اتغيّرش")
+                continue
+            if k in _CT_FILL_ONLY and cv:
+                continue
+            ch[k] = tv
+            new[k] = tv
+        code = china_row_status(new)
+        floor = _cs_floor(new, code)
+        if "مستلم" in status_txt and (not code or _cs_prog(code) >= 0) and _cs_prog("Delivered to Warehouse") > _cs_prog(floor):
+            floor = "Delivered to Warehouse"
+        if floor and floor != code and _cs_prog(floor) > _cs_prog(code):
+            ch["status"] = china_status_label(floor)
+        if ch:
+            rows_changed += 1
+            for k, v in ch.items():
+                updates.append((i + 1, k, v))
+    return {"updates": updates, "notes": notes, "rows": rows_changed}
