@@ -1420,13 +1420,25 @@ CHINA_FLAT_MAX_ROWS = 3000
 
 
 
+def _china_retry(fn, *args, **kwargs):
+    """بيعيد محاولة الكتابة في جوجل شيت لو اتعدّت حدّ الطلبات (429) — عشان تحديث شيت China مايقفش في النص."""
+    for attempt in range(7):
+        try:
+            return fn(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            if attempt < 6 and ("429" in str(e) or "quota" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e)):
+                time.sleep(10 * (attempt + 1))
+            else:
+                raise
+
+
 def _china_write_image_formulas(ws):
     """معادلات الصف الواحد (مش ARRAYFORMULA): صورة المنتج + «المطلوب دلوقتي» (رابط للخلية)."""
     for key, mk in (("product_image", lambda r: _china_image_formula(r)), ("next_action", lambda r: _china_next_action_row(r, ws.id))):
         ic = _china_col_letter(CHINA_FLAT_KEYS.index(key) + 1)
         for r0 in range(4, CHINA_FLAT_MAX_ROWS + 1, 250):          # على دفعات عشان حجم الطلب يفضل صغير
             r1 = min(r0 + 249, CHINA_FLAT_MAX_ROWS)
-            ws.update(values=[[mk(r)] for r in range(r0, r1 + 1)], range_name=f"{ic}{r0}:{ic}{r1}", value_input_option="USER_ENTERED")
+            _china_retry(ws.update, values=[[mk(r)] for r in range(r0, r1 + 1)], range_name=f"{ic}{r0}:{ic}{r1}", value_input_option="USER_ENTERED")
 
 def _china_format_flat(ws):
     """بيكتب العناوين والمعادلات وينسّق الشيت (ألوان/تثبيت/قوايم/تلوين ذكي) — مرة واحدة عند الإنشاء الأول."""
@@ -1437,10 +1449,10 @@ def _china_format_flat(ws):
             band[i] = _CHINA_GROUP_STYLE[g][0]
         labels.append(lab)
     auto = _china_auto_formulas()
-    ws.update(values=[band, CHINA_FLAT_KEYS, labels], range_name="A1", value_input_option="USER_ENTERED")
+    _china_retry(ws.update, values=[band, CHINA_FLAT_KEYS, labels], range_name="A1", value_input_option="USER_ENTERED")
     _china_write_image_formulas(ws)
     for k, f in auto.items():
-        ws.update(values=[[f]], range_name=f"{_china_col_letter(CHINA_FLAT_KEYS.index(k) + 1)}4", value_input_option="USER_ENTERED")
+        _china_retry(ws.update, values=[[f]], range_name=f"{_china_col_letter(CHINA_FLAT_KEYS.index(k) + 1)}4", value_input_option="USER_ENTERED")
     rg = lambda r0, r1, c0, c1: {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1, "startColumnIndex": c0, "endColumnIndex": c1}
     M = CHINA_FLAT_MAX_ROWS
     reqs = []
@@ -1517,7 +1529,7 @@ def _china_format_flat(ws):
     cf("next_action", f'=LEFT(${c["next_action"]}4,1)="⚠"', "FFEB9C", "9C5700", True)
     cf("row_state", f'=${c["row_state"]}4="MISSING"', "F8CBAD", "9C0006", True)
     cf("row_state", f'=${c["row_state"]}4="OK"', "C6EFCE")
-    ss.batch_update({"requests": reqs})
+    _china_retry(ss.batch_update, {"requests": reqs})
 
 
 @st.cache_resource
@@ -1625,12 +1637,12 @@ def _china_write_flat(ws, flat_rows):
     if ws.row_count < n + CHINA_FLAT_HDR_ROWS + 50:
         ws.add_rows(n + CHINA_FLAT_HDR_ROWS + 200 - ws.row_count)
     segs = _china_input_segments()
-    ws.batch_clear([f"{_china_col_letter(s[0][0] + 1)}4:{_china_col_letter(s[-1][0] + 1)}{max(ws.row_count, 4)}" for s in segs])
+    _china_retry(ws.batch_clear, [f"{_china_col_letter(s[0][0] + 1)}4:{_china_col_letter(s[-1][0] + 1)}{max(ws.row_count, 4)}" for s in segs])
     for i in range(0, n, 800):
         part = flat_rows[i:i + 800]
         for s in segs:
             chunk = [[_china_cell(r.get(k, "")) for _, k in s] for r in part]
-            ws.update(values=chunk, range_name=f"{_china_col_letter(s[0][0] + 1)}{4 + i}", value_input_option="USER_ENTERED")
+            _china_retry(ws.update, values=chunk, range_name=f"{_china_col_letter(s[0][0] + 1)}{4 + i}", value_input_option="USER_ENTERED")
     clear_cache(ws)
 
 
