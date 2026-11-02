@@ -42,7 +42,7 @@ from calc import (
     CT_ORD_AR, CT_WINDOW_DAYS, FAMILY_HOME_GROUP, FAMILY_LABELS,
     OLD_SCHED_COLS, TABS_CONFIG, TY_ADS_HEADERS, TY_EXCLUDED_STATUSES,
     CT_SHEET_NAME, ct_read_tracking, ct_sync_plan,
-    china_incoming_badge_text,
+    china_incoming_badge_text, skus_asins_links_html,
     _AR_MONTHS, _CF_CONT_ONLY, _CF_CONT_RENAME, _CF_LINE,
     _CF_SHARED, _CF_SHIP_DATA, _CF_SHIP_ONLY, _CHINA_LABELS,
     _CS_ALIAS, _CS_LABEL, _CS_LOOKUP, _CS_RANK,
@@ -4834,8 +4834,7 @@ if st.session_state["nav_page"] == "tab_wh":
                         if _cn_html:
                             st.markdown(_cn_html, unsafe_allow_html=True)
                         with st.expander(f"📋 الـ SKUs/ASINs التابعة لهذا الكود ({len(r['skus']) + len(r.get('asins', []))})"):
-                            st.write("SKU (نون): " + (", ".join(r["skus"]) if r["skus"] else "—"))
-                            st.write("ASIN (أمازون): " + (", ".join(r.get("asins", [])) if r.get("asins") else "—"))
+                            st.markdown(skus_asins_links_html(r["skus"], r.get("asins")), unsafe_allow_html=True)
                     st.divider()
 
         # ══ TAB 14 — المبيعات ══
@@ -5350,12 +5349,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
             _cn_html = wh_china_note_html(r)
             if _cn_html:
                 st.markdown(_cn_html, unsafe_allow_html=True)
-            skus_asins_txt = []
-            if r["skus"]:
-                skus_asins_txt.append("SKU (نون): " + ", ".join(r["skus"]))
-            if r.get("asins"):
-                skus_asins_txt.append("ASIN (أمازون): " + ", ".join(r["asins"]))
-            st.caption(" | ".join(skus_asins_txt) if skus_asins_txt else "—")
+            st.markdown(skus_asins_links_html(r["skus"], r.get("asins")), unsafe_allow_html=True)
         st.divider()
 
     wh_order_now_rows = sorted(

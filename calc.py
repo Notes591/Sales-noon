@@ -3977,6 +3977,22 @@ def sku_link_html(sku: str, extra_style: str = ""):
         f'style="text-decoration:none;font-size:14px;" title="فتح صفحة المنتج على نون | Open on noon.com">🔗</a>'
     )
 
+def skus_asins_links_html(skus, asins=None):
+    """سطر الـ SKUs/ASINs التابعة للكود: كل SKU نون لينك بيفتح صفحة المنتج على نون في تاب جديد، وكل ASIN لينك أمازون."""
+    from html import escape
+    parts = []
+    if skus:
+        parts.append("SKU (نون): " + ", ".join(
+            f'<a href="{build_noon_link(x)}" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:none;">{escape(str(x))}</a>'
+            for x in skus if build_noon_link(x)))
+    if asins:
+        parts.append("ASIN (أمازون): " + ", ".join(
+            f'<a href="{build_amazon_asin_link(x)}" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:none;">{escape(str(x))}</a>'
+            for x in asins if build_amazon_asin_link(x)))
+    if not parts:
+        return "—"
+    return '<div style="font-size:0.85rem;color:#9ca3af;line-height:1.8;word-break:break-all;">' + " &nbsp;|&nbsp; ".join(parts) + "</div>"
+
 def build_amazon_asin_link(asin: str):
     if not asin:
         return None
