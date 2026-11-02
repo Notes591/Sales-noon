@@ -4834,7 +4834,7 @@ if st.session_state["nav_page"] == "tab_wh":
                         if _cn_html:
                             st.markdown(_cn_html, unsafe_allow_html=True)
                         with st.expander(f"📋 الـ SKUs/ASINs التابعة لهذا الكود ({len(r['skus']) + len(r.get('asins', []))})"):
-                            st.markdown(skus_asins_links_html(r["skus"], r.get("asins")), unsafe_allow_html=True)
+                            st.markdown(skus_asins_links_html(r["skus"], r.get("asins"), r.get("sku_sales"), r.get("asin_sales"), r.get("sales_days")), unsafe_allow_html=True)
                     st.divider()
 
         # ══ TAB 14 — المبيعات ══
@@ -5349,7 +5349,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
             _cn_html = wh_china_note_html(r)
             if _cn_html:
                 st.markdown(_cn_html, unsafe_allow_html=True)
-            st.markdown(skus_asins_links_html(r["skus"], r.get("asins")), unsafe_allow_html=True)
+            st.markdown(skus_asins_links_html(r["skus"], r.get("asins"), r.get("sku_sales"), r.get("asin_sales"), r.get("sales_days")), unsafe_allow_html=True)
         st.divider()
 
     wh_order_now_rows = sorted(

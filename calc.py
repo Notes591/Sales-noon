@@ -3272,6 +3272,9 @@ def compute_warehouse_stockout_rows(env):
             "days_to_stockout": round(days_to_stockout) if days_to_stockout is not None else None,
             "reorder_in": round(reorder_in) if reorder_in is not None else None,
             "status": status, "color": color, "suggested_qty": suggested_qty, "img": img, "china": china,
+            "sku_sales": {x: sum(multi_counts_wh.get(x, {}).values()) for x in skus},
+            "asin_sales": {x: sum(multi_counts_amz_wh.get(x, {}).values()) for x in asins},
+            "sales_days": window_days,
         })
 
     rows.sort(key=lambda r: (r["days_to_stockout"] if r["days_to_stockout"] is not None else 10**9))
@@ -3977,21 +3980,28 @@ def sku_link_html(sku: str, extra_style: str = ""):
         f'style="text-decoration:none;font-size:14px;" title="فتح صفحة المنتج على نون | Open on noon.com">🔗</a>'
     )
 
-def skus_asins_links_html(skus, asins=None):
-    """سطر الـ SKUs/ASINs التابعة للكود: كل SKU نون لينك بيفتح صفحة المنتج على نون في تاب جديد، وكل ASIN لينك أمازون."""
+def skus_asins_links_html(skus, asins=None, sku_sales=None, asin_sales=None, days=None):
+    """سطر الـ SKUs/ASINs التابعة للكود: كل SKU نون لينك بيفتح صفحة المنتج على نون في تاب جديد، وكل ASIN لينك أمازون.
+    اللي عليه مبيعات بيتقدّم ويتلوّن بلون واضح وجنبه عدد القطع المباعة في آخر `days` يوم؛ والباقي بيفضل موجود بلون هادي بعدهم."""
     from html import escape
-    parts = []
-    if skus:
-        parts.append("SKU (نون): " + ", ".join(
-            f'<a href="{build_noon_link(x)}" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:none;">{escape(str(x))}</a>'
-            for x in skus if build_noon_link(x)))
-    if asins:
-        parts.append("ASIN (أمازون): " + ", ".join(
-            f'<a href="{build_amazon_asin_link(x)}" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:none;">{escape(str(x))}</a>'
-            for x in asins if build_amazon_asin_link(x)))
+    def part(label, items, linker, sales):
+        items = [x for x in (items or []) if linker(x)]
+        if not items:
+            return ""
+        sales = sales or {}
+        hot = sorted([x for x in items if sales.get(x, 0) > 0], key=lambda x: -sales[x])
+        cold = [x for x in items if sales.get(x, 0) <= 0]
+        def a(x, is_hot):
+            st_ = ("color:#4ade80;font-weight:700;" if is_hot else "color:#64748b;") + "text-decoration:none;"
+            n = f'<span style="color:#86efac;">×{sales[x]:g}</span>' if is_hot else ""
+            return f'<a href="{linker(x)}" target="_blank" rel="noopener" style="{st_}">{escape(str(x))}</a>{n}'
+        hint = f" (الأخضر عليه مبيعات{' آخر ' + str(days) + ' يوم' if days else ''}، والرقم = القطع)" if hot else ""
+        return label + hint + ": " + ", ".join([a(x, True) for x in hot] + [a(x, False) for x in cold])
+    parts = [p for p in (part("SKU (نون)", skus, build_noon_link, sku_sales),
+                         part("ASIN (أمازون)", asins, build_amazon_asin_link, asin_sales)) if p]
     if not parts:
         return "—"
-    return '<div style="font-size:0.85rem;color:#9ca3af;line-height:1.8;word-break:break-all;">' + " &nbsp;|&nbsp; ".join(parts) + "</div>"
+    return '<div style="font-size:0.85rem;color:#9ca3af;line-height:1.9;word-break:break-all;">' + "<br>".join(parts) + "</div>"
 
 def build_amazon_asin_link(asin: str):
     if not asin:
