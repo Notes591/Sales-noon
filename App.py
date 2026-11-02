@@ -1626,7 +1626,36 @@ def get_china_flat_ws():
     else:
         _done["ok"] = True
     st.session_state["china_flat_ws"] = ws
+    if not _done.get("seed_checked"):
+        _done["seed_checked"] = True
+        china_seed_once(ws)
     return ws
+
+
+CHINA_SEED_FILE = "China_initial.xlsx"       # الملف اللي جنب App.py — بيتستورد مرة واحدة بس
+
+def china_seed_once(ws):
+    """أول مرة بس: لو شيت China فاضي ولسه ما اتعملش seed، بيستورد ملف China_initial.xlsx (لو موجود جنب App.py).
+    بعد كده بيتسجّل علم china_seeded في شيت Settings فمايتكررش أبدًا (حتى لو الشيت اتفضّى بعد كده).
+    لو الشيت فيه بيانات أصلًا بيتسجّل العلم من غير ما يلمس حاجة."""
+    import os
+    try:
+        if load_settings().get("china_seeded"):
+            return
+        if _china_read_flat(get_cached(ws, force=True)):
+            save_setting("china_seeded", "existing-data")
+            return
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CHINA_SEED_FILE)
+        if not os.path.exists(path):
+            return                              # الملف لسه مترفعش على GitHub — هنحاول تاني مع أول تشغيل جاي
+        with open(path, "rb") as f:
+            parsed = _china_parse_workbook(f.read())
+        r = _china_do_import(parsed, True, f"{CHINA_SEED_FILE} (أول مرة)")
+        save_setting("china_seeded", now_str())
+        st.session_state["china_flash"] = (f"✅ أول مرة: اتضاف محتوى {CHINA_SEED_FILE} لشيت China — {r['SHIPMENTS']} شحنة، "
+                                           f"{r['SKU_LINES']} منتج، {r['CONTAINERS']} حاوية ({r['rows']} صف).")
+    except Exception as e:
+        st.warning(f"⚠️ استيراد {CHINA_SEED_FILE} أول مرة فشل: {e}")
 
 
 
