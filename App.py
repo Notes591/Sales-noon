@@ -42,6 +42,7 @@ from calc import (
     CT_ORD_AR, CT_WINDOW_DAYS, FAMILY_HOME_GROUP, FAMILY_LABELS,
     OLD_SCHED_COLS, TABS_CONFIG, TY_ADS_HEADERS, TY_EXCLUDED_STATUSES,
     CT_SHEET_NAME, ct_read_tracking, ct_sync_plan,
+    china_incoming_badge_text,
     _AR_MONTHS, _CF_CONT_ONLY, _CF_CONT_RENAME, _CF_LINE,
     _CF_SHARED, _CF_SHIP_DATA, _CF_SHIP_ONLY, _CHINA_LABELS,
     _CS_ALIAS, _CS_LABEL, _CS_LOOKUP, _CS_RANK,
@@ -823,7 +824,7 @@ def warehouse_available_badge(sku_up):
         dts_txt = f"نفاد خلال {dts} يوم" if dts is not None else "لا يوجد سحب مسجل"
         status_short = wh_row["status"].split(" | ")[0]
         _cn = wh_row.get("china")
-        _cn_txt = f" (+🚢 {_cn['incoming']:,} من الصين)" if _cn else ""
+        _cn_txt = china_incoming_badge_text(_cn, datetime.now().date())
         stockout_html = (
             f' <span class="tacweed-badge" style="background:{wh_row["color"]}22;'
             f'color:{wh_row["color"]};border:1px solid {wh_row["color"]}55;">'
@@ -868,7 +869,7 @@ def warehouse_available_badge_amazon(asin_up):
         dts_txt = f"نفاد خلال {dts} يوم" if dts is not None else "لا يوجد سحب مسجل"
         status_short = wh_row["status"].split(" | ")[0]
         _cn = wh_row.get("china")
-        _cn_txt = f" (+🚢 {_cn['incoming']:,} من الصين)" if _cn else ""
+        _cn_txt = china_incoming_badge_text(_cn, datetime.now().date())
         stockout_html = (
             f' <span class="tacweed-badge" style="background:{wh_row["color"]}22;'
             f'color:{wh_row["color"]};border:1px solid {wh_row["color"]}55;">'
@@ -1405,6 +1406,221 @@ function onEdit(e) {
   }
 }"""
 
+
+
+CHINA_SYNC_SCRIPT = r"""// ═══ مزامنة Container tracking → China (داخل الجوجل شيت نفسه) ═══
+// التركيب (مرة واحدة): Extensions ▸ Apps Script ▸ ملف جديد (+) ▸ الصق الكود ده ▸ Save ▸ اختار الدالة ctSetup من القايمة ▸ Run ▸ وافق على الصلاحيات.
+// بعدها: أي مرجع تكتبه في China (رقم الحاوية / البوليصة / الشحنة) بيتملا الباقي بعد ثواني، وكمان بيشتغل لوحده كل 5 دقايق.
+// الكود ده بيكمّل مزامنة التطبيق ومش بيعارضها (نفس القواعد ونفس الأعمدة).
+var CT_NAME = "Container tracking";
+var CT_CHINA_TAB = "China";
+var CT_STATUS = [["Factory Confirmed", "تأكيد المصنع | Factory confirmed"], ["In Production", "قيد الإنتاج | In production"],
+  ["Production Completed", "اكتمل الإنتاج | Production completed"], ["Ready to Ship", "جاهز للشحن | Ready to ship"],
+  ["Allocated to Container", "حاوية متجهزة | Container prepared"], ["Loaded", "تم التحميل | Loaded"],
+  ["Shipped / In Transit", "في البحر | In transit"], ["Arrived at Port", "وصلت الميناء | At port"],
+  ["Customs Clearance", "تحت التخليص | In customs"], ["Cleared", "تم التخليص | Customs cleared"],
+  ["Delivered to Warehouse", "وصلت المستودع | Delivered to warehouse"], ["On Hold", "موقوف | On hold"], ["Cancelled", "ملغي | Cancelled"]];
+var CT_ALIAS = {"order confirmed": "Factory Confirmed", "warehouse received": "Delivered to Warehouse", "booked": "Allocated to Container"};
+var CT_HEAD = {
+  loading: ["LOADING DATE", "تاريخ التحميل"], invoice: ["INVOICE NO", "رقم الفاتورة"], origin: ["ADD", "عنوان"],
+  container: ["CONTAINER NO", "رقم الحاوية"], seal: ["SEAL NO", "رقم الختم"], bl: ["D/R NO", "رقم بوليصة الشحن"],
+  sailing: ["SAILING DATE", "تاريخ الإبحار"], transfer_loc: ["TRANSFER PORT LOCATION", "موقع ميناء النقل"],
+  transfer_date: ["DATE OF TRANSFER PORT", "تاريخ العبور"], dest: ["DESTINATION", "مقصد"], eta: ["ARRIVAL DATE", "تاريخ الوصول"],
+  url: ["QUERY WEBSITE", "موقع الاستعلام"], actual: ["ACTUAL ARRIVAL DATE", "تاريخ الوصول الفعلي"], status: ["الحالة"],
+  received: ["تاريخ الاستلام في المستودع"]};
+var CT_MAP = [["shipment_id", "invoice"], ["container_no", "container"], ["seal_no", "seal"], ["bl_no", "bl"], ["actual_load_date", "loading"],
+  ["actual_etd", "sailing"], ["destination_port", "dest"], ["eta_port", "eta"], ["vessel_name", "vessel"], ["voyage_no", "voyage"],
+  ["tracking_url", "url"], ["last_known_location", "transfer_loc"], ["port_arrival_actual", "actual"],
+  ["warehouse_arrival_actual", "received"], ["origin_location", "origin"]];
+var CT_IDENT = {shipment_id: 1, container_no: 1}, CT_FILL_ONLY = {origin_location: 1};
+var CT_DATES = {actual_load_date: 1, actual_etd: 1, eta_port: 1, port_arrival_actual: 1, warehouse_arrival_actual: 1};
+var CT_FORMULA = {next_action: 1, line_amount: 1, days_to_eta: 1, delay_days: 1, row_state: 1, product_image: 1};
+var CT_AR = "٠١٢٣٤٥٦٧٨٩";
+
+function ctNorm(v) { return String(v == null ? "" : v).replace(/\s+/g, "").toUpperCase(); }
+function ctTrim(v) { return String(v == null ? "" : v).trim(); }
+function ctDigits(s) { return String(s).replace(/[٠-٩]/g, function (d) { return CT_AR.indexOf(d); }).replace(/٫/g, "."); }
+function ctPad(n) { return (n < 10 ? "0" : "") + n; }
+function ctMk(y, m, d) {
+  var t = new Date(y, m - 1, d);
+  if (t.getFullYear() !== y || t.getMonth() !== m - 1 || t.getDate() !== d) return "";
+  return y + "-" + ctPad(m) + "-" + ctPad(d);
+}
+function ctParseDate(v, year, anchor) {
+  var s = ctDigits(ctTrim(v));
+  if (!s) return "";
+  var m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:\D.*)?$/);
+  if (m) return ctMk(+m[1], +m[2], +m[3]);
+  m = s.match(/^(\d{1,2})[.\/\-](\d{1,2})$/);
+  if (m && year) {
+    var day = +m[2];
+    if (day >= 40 && day <= 90 && day % 10 === 0) day = day / 10;     // 5٫8 بتتعرض 5٫80 (خلية بخانتين عشريتين) = 8 مايو
+    var r = ctMk(+year, +m[1], day);
+    if (r && anchor) {
+      var a = new Date(anchor + "T00:00:00"), d = new Date(r + "T00:00:00");
+      if (d < new Date(a.getTime() - 60 * 86400000)) r = ctMk(+year + 1, +m[1], day);
+    }
+    return r;
+  }
+  return "";
+}
+function ctLookup(txt) {
+  var k = ctTrim(txt).toLowerCase();
+  for (var i = 0; i < CT_STATUS.length; i++) {
+    var c = CT_STATUS[i][0], l = CT_STATUS[i][1], parts = l.split("|");
+    var ks = [c, l, parts[0], parts[parts.length - 1]];
+    for (var j = 0; j < ks.length; j++) if (ks[j].trim().toLowerCase() === k) return c;
+  }
+  return CT_ALIAS[k] || "";
+}
+function ctProg(code) {
+  for (var i = 0; i < CT_STATUS.length; i++) if (CT_STATUS[i][0] === code) return i <= 10 ? i : -1;
+  return -1;
+}
+function ctLabel(code) { for (var i = 0; i < CT_STATUS.length; i++) if (CT_STATUS[i][0] === code) return CT_STATUS[i][1]; return ""; }
+function ctFloor(r, code) {
+  if (code && ctProg(code) < 0) return code;
+  var im = "";
+  if (r.warehouse_arrival_actual) im = "Delivered to Warehouse";
+  else if (r.port_arrival_actual) im = "Arrived at Port";
+  else if (r.actual_etd) im = "Shipped / In Transit";
+  else if (r.actual_load_date) im = "Loaded";
+  else if (r.container_no) im = "Allocated to Container";
+  return ctProg(im) > ctProg(code) ? im : code;
+}
+
+function ctHeadMap(raw) {
+  for (var hi = 0; hi < Math.min(12, raw.length); hi++) {
+    var pos = {};
+    for (var j = 0; j < raw[hi].length; j++) {
+      var lines = String(raw[hi][j]).replace(/\r/g, "\n").split("\n").map(function (x) { return x.trim().toUpperCase().replace(/\.$/, ""); }).filter(String);
+      if (pos.ship === undefined && lines.indexOf("اسم السفينة") >= 0) { pos.ship = j; continue; }
+      for (var f in CT_HEAD) {
+        if (pos[f] !== undefined) continue;
+        var hit = CT_HEAD[f].some(function (n) { return lines.indexOf(n) >= 0; });
+        if (hit) { pos[f] = j; break; }
+      }
+    }
+    if (pos.container !== undefined && pos.invoice !== undefined) return {hi: hi, pos: pos};
+  }
+  return null;
+}
+function ctReadTracking(raw, nowYear) {
+  var h = ctHeadMap(raw), out = [];
+  if (!h) return out;
+  var g = function (row, f) { return h.pos[f] !== undefined && h.pos[f] < row.length ? ctTrim(row[h.pos[f]]) : ""; };
+  for (var i = h.hi + 1; i < raw.length; i++) {
+    var row = raw[i], cno = ctNorm(g(row, "container")), inv = ctNorm(g(row, "invoice"));
+    if (!cno && !inv) continue;
+    var m = inv.match(/^ST(\d{2})/), year = m ? 2000 + parseInt(m[1], 10) : nowYear;
+    var load = ctParseDate(g(row, "loading"), year), anchor = load || null;
+    var sail = ctParseDate(g(row, "sailing"), year, anchor); anchor = anchor || sail || null;
+    var eta = ctParseDate(g(row, "eta"), year, anchor);
+    var ship = g(row, "ship"), voy = "", toks = ship.split(/\s+/).filter(String);
+    if (toks.length > 1 && /^[A-Z]{0,3}\d{2,5}[A-Z]?$/.test(toks[toks.length - 1].toUpperCase())) {
+      voy = toks[toks.length - 1].toUpperCase(); ship = toks.slice(0, -1).join(" ");
+    }
+    out.push({shipment_id: inv, container_no: cno, seal_no: g(row, "seal"), bl_no: ctNorm(g(row, "bl")), actual_load_date: load, actual_etd: sail,
+      destination_port: g(row, "dest").toUpperCase(), eta_port: eta, vessel_name: ship, voyage_no: voy, tracking_url: g(row, "url"),
+      last_known_location: g(row, "transfer_loc"), port_arrival_actual: ctParseDate(g(row, "actual"), year),
+      warehouse_arrival_actual: ctParseDate(g(row, "received"), year), origin_location: g(row, "origin"), _status: g(row, "status")});
+  }
+  return out;
+}
+
+// china = getDisplayValues() لشيت China كله، tracking = recs من ctReadTracking. بيرجّع [{row, key, value}] (row من 1).
+function ctPlan(china, recs) {
+  var hi = -1, keysRow = [];
+  for (var i = 0; i < Math.min(8, china.length); i++) {
+    var low = china[i].map(ctTrim);
+    if (low.indexOf("container_no") >= 0 && low.indexOf("internal_order_no") >= 0) { hi = i; keysRow = low; break; }
+  }
+  if (hi < 0 || !recs.length) return {updates: [], pos: {}};
+  var pos = {};
+  keysRow.forEach(function (k, j) { if (k && pos[k] === undefined) pos[k] = j; });
+  var byC = {}, byBl = {}, byInv = {};
+  recs.forEach(function (t) {
+    if (t.container_no) (byC[t.container_no] = byC[t.container_no] || []).push(t);
+    if (t.bl_no) (byBl[t.bl_no] = byBl[t.bl_no] || []).push(t);
+    if (t.shipment_id) (byInv[t.shipment_id] = byInv[t.shipment_id] || []).push(t);
+  });
+  var inputKeys = Object.keys(pos).filter(function (k) { return !CT_FORMULA[k]; }), updates = [];
+  for (var r = hi + 2; r < china.length; r++) {                    // hi+1 = صف العناوين العربي
+    var row = china[r], cur = {};
+    Object.keys(pos).forEach(function (k) { cur[k] = pos[k] < row.length ? ctTrim(row[pos[k]]) : ""; });
+    if (!inputKeys.some(function (k) { return cur[k]; })) continue;
+    var cno = ctNorm(cur.container_no), bl = ctNorm(cur.bl_no), sid = ctNorm(cur.shipment_id);
+    var recsFor = cno ? byC[cno] : null;
+    if (!recsFor && bl) recsFor = byBl[bl];
+    if (!recsFor && sid) recsFor = byInv[sid];
+    if (!recsFor) continue;
+    var vals = {}, st = "";
+    if (recsFor.length === 1) {
+      CT_MAP.forEach(function (p) { vals[p[0]] = recsFor[0][p[0]] || ""; });
+      st = recsFor[0]._status;
+    } else {
+      CT_MAP.forEach(function (p) {
+        var set = {}; recsFor.forEach(function (x) { set[x[p[0]] || ""] = 1; });
+        var ks = Object.keys(set); vals[p[0]] = ks.length === 1 ? ks[0] : "";
+      });
+      var ss = {}; recsFor.forEach(function (x) { ss[x._status] = 1; });
+      var sk = Object.keys(ss); st = sk.length === 1 ? sk[0] : "";
+    }
+    var nw = {}, ch = {};
+    Object.keys(cur).forEach(function (k) { nw[k] = cur[k]; });
+    CT_MAP.forEach(function (p) {
+      var k = p[0], tv = vals[k], cv = cur[k] || "";
+      if (!tv || pos[k] === undefined) return;
+      var same;
+      if (CT_DATES[k]) same = ctParseDate(cv, parseInt(tv.slice(0, 4), 10)) === tv;
+      else if (CT_IDENT[k] || k === "seal_no" || k === "bl_no") same = ctNorm(cv) === ctNorm(tv);
+      else same = cv.trim().toUpperCase() === tv.trim().toUpperCase();
+      if (same) return;
+      if (CT_IDENT[k] && cv) return;
+      if (CT_FILL_ONLY[k] && cv) return;
+      ch[k] = tv; nw[k] = tv;
+    });
+    var code = ctLookup(nw.status || ""), floor = ctFloor(nw, code);
+    if (st.indexOf("مستلم") >= 0 && (!code || ctProg(code) >= 0) && ctProg("Delivered to Warehouse") > ctProg(floor)) floor = "Delivered to Warehouse";
+    if (floor && floor !== code && ctProg(floor) > ctProg(code) && pos.status !== undefined) ch.status = ctLabel(floor);
+    Object.keys(ch).forEach(function (k) { updates.push({row: r + 1, key: k, value: ch[k]}); });
+  }
+  return {updates: updates, pos: pos};
+}
+
+function ctSyncAll() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return;
+  try {
+    var files = DriveApp.getFilesByName(CT_NAME);
+    if (!files.hasNext()) { Logger.log("مش لاقي جوجل شيت اسمه " + CT_NAME); return; }
+    var trk = SpreadsheetApp.open(files.next()).getSheets()[0].getDataRange().getDisplayValues();
+    var sh = SpreadsheetApp.getActive().getSheetByName(CT_CHINA_TAB);
+    if (!sh) { Logger.log("مفيش تاب اسمه " + CT_CHINA_TAB); return; }
+    var plan = ctPlan(sh.getDataRange().getDisplayValues(), ctReadTracking(trk, new Date().getFullYear()));
+    plan.updates.forEach(function (u) { sh.getRange(u.row, plan.pos[u.key] + 1).setValue(u.value); });
+    SpreadsheetApp.flush();
+    Logger.log("اتحدّث " + plan.updates.length + " خلية");
+  } finally { lock.releaseLock(); }
+}
+function ctOnEdit(e) {                                              // installable trigger: لما تكتب مرجع في China
+  try {
+    var sh = e.range.getSheet();
+    if (sh.getName() !== CT_CHINA_TAB || e.range.getRow() < 4) return;
+    var key = String(sh.getRange(2, e.range.getColumn()).getValue()).trim();
+    if (["container_no", "bl_no", "shipment_id"].indexOf(key) >= 0) ctSyncAll();
+  } catch (err) { Logger.log(err); }
+}
+function ctSetup() {                                                // شغّلها مرة واحدة بس
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var f = t.getHandlerFunction();
+    if (f === "ctSyncAll" || f === "ctOnEdit") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("ctSyncAll").timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger("ctOnEdit").forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create();
+  ctSyncAll();
+}
+"""
 
 
 _CHINA_GROUP_STYLE = {   # (عنوان المجموعة, لون الشريط, لون العناوين)
@@ -2572,6 +2788,12 @@ def render_china_tab():
                 st.success(f"✅ اتحدّث {_ctr['rows']} صف ({_ctr['cells']} خلية) في آخر مزامنة")
             for _n in _ctr["notes"]:
                 st.caption(_n)
+    with st.expander("⚡ تحديث فوري جوه الجوجل شيت (Apps Script — تركيب مرة واحدة)", expanded=False):
+        st.markdown("بدل ما تستنى فتح التطبيق: الكود ده بيملا China من Container tracking **بعد ثواني من كتابة المرجع**، وكمان لوحده كل 5 دقايق.  \n"
+                    "**التركيب:** ① في شيت China: Extensions ▸ Apps Script ② ملف جديد (+) ▸ Script ③ الصق الكود وSave "
+                    "④ اختار الدالة **ctSetup** من القايمة فوق ▸ Run ▸ وافق على الصلاحيات (بيحتاج يقرأ Container tracking من Drive). "
+                    "لو عندك السكريبت القديم (onEdit) سيبه — الأسماء مختلفة ومش بيتعارضوا.")
+        st.code(CHINA_SYNC_SCRIPT, language="javascript")
     with st.expander("📖 دليل تعبئة الشيت للموظفة | Staff guide", expanded=False):
         st.code(CHINA_STAFF_GUIDE, language=None)
         st.markdown("**اختياري — سكريبت Google Apps Script** بيوحّد بيانات الحاوية على كل صفوفها وبيختم آخر تحديث تلقائي:")
