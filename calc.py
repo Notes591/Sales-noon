@@ -4375,7 +4375,7 @@ def ct_sync_plan(china_raw, tracking_recs):
             hi = i
             break
     if hi is None or not tracking_recs:
-        return {"updates": [], "notes": [], "rows": 0}
+        return {"updates": [], "notes": [], "rows": 0, "pos": {}}
     pos = {str(c).strip(): j for j, c in enumerate(china_raw[hi]) if str(c).strip() in CHINA_FLAT_KEYS}
     by_c, by_bl, by_inv = {}, {}, {}
     for t in tracking_recs:
@@ -4445,4 +4445,4 @@ def ct_sync_plan(china_raw, tracking_recs):
             rows_changed += 1
             for k, v in ch.items():
                 updates.append((i + 1, k, v))
-    return {"updates": updates, "notes": notes, "rows": rows_changed}
+    return {"updates": updates, "notes": notes, "rows": rows_changed, "pos": pos}

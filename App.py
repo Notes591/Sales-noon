@@ -1578,12 +1578,21 @@ def get_china_flat_ws():
     elif _china_layout_outdated(ws):
         try:
             old_rows = _china_read_flat(ws.get_all_values())
+            try:                                   # بقايا محاولة تحديث سابقة وقفت في النص — الشيت الأصلي لسه سليم فنمسحها ونبدأ من جديد
+                ss.del_worksheet(ss.worksheet("China_new_tmp"))
+            except gspread.exceptions.WorksheetNotFound:
+                pass
             tmp = ss.add_worksheet(title="China_new_tmp", rows=str(CHINA_FLAT_MAX_ROWS), cols=str(len(CHINA_FLAT_KEYS)))
             _china_format_flat(tmp)
             if old_rows:
                 _china_write_flat(tmp, old_rows)
-            ws.update_title(f"China_backup_{time.strftime('%Y%m%d_%H%M')}")
-            tmp.update_title(CHINA_FLAT_TAB)
+            _bk = f"China_backup_{time.strftime('%Y%m%d_%H%M')}"
+            ws.update_title(_bk)
+            try:
+                tmp.update_title(CHINA_FLAT_TAB)
+            except Exception:
+                ws.update_title(CHINA_FLAT_TAB)    # لو التسمية فشلت نرجّع الأصلي مكانه عشان ما نفقدش شيت China
+                raise
             ws = tmp
             st.session_state["china_flash"] = (f"✅ اتحدّث ترتيب أعمدة شيت China (رقم الشحنة ورقم الحاوية بعد الصورة وبقوا في الجزء المتثبت) ونقل {len(old_rows)} صف. "
                                                "النسخة القديمة اتحفظت كتاب باسم China_backup_… ومسموح تمسحها بعد ما تتأكد.")
@@ -1651,7 +1660,8 @@ def china_sync_tracking(force=False):
             ws = get_china_flat_ws()
             plan = ct_sync_plan(safe_get_all_values(ws), recs)
             res["notes"], res["rows"], res["cells"] = plan["notes"], plan["rows"], len(plan["updates"])
-            ups = [{"range": f"{_china_col_letter(CHINA_FLAT_KEYS.index(k) + 1)}{r}", "values": [[_china_cell(v)]]} for r, k, v in plan["updates"]]
+            pos = plan["pos"]      # مكان العمود من صف العناوين الفعلي في الشيت (مش من الترتيب المتوقع) — آمن حتى لو الشيت لسه بالترتيب القديم
+            ups = [{"range": f"{_china_col_letter(pos[k] + 1)}{r}", "values": [[_china_cell(v)]]} for r, k, v in plan["updates"] if k in pos]
             for i in range(0, len(ups), 400):
                 ws.batch_update(ups[i:i + 400], value_input_option="USER_ENTERED")
             if ups:
