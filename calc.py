@@ -1761,6 +1761,25 @@ def china_code_decisions(env, bundle, today, cfg):
                      "incoming": sum(l["_qty"] for l in inc), "undated": dec.get("undated", 0)})
     return rows, no_stock
 
+def china_incoming_badge_text(cn, today):
+    """نص الكمية القادمة من الصين جنب شارة النفاد: الكمية + تاريخ وصولها لمخزن الرياض (من «ETA الوجهة النهائية» في شيت China)."""
+    if not cn:
+        return ""
+    inc, und = cn.get("incoming", 0), cn.get("undated_qty", 0)
+    nd, nq = cn.get("next_date"), cn.get("next_qty", 0)
+    t = f" (+🚢 {inc:,} من الصين"
+    if nd:
+        d = _china_fmt_date(nd, today)
+        if nq >= inc:
+            t += f" — توصل الرياض {d}"
+        else:
+            t += f" — أقرب {nq:,} توصل الرياض {d}"
+            if und:
+                t += f" و{und:,} بدون تاريخ"
+    elif und:
+        t += " — تاريخ وصولها للرياض غير مكتوب"
+    return t + ")"
+
 def _china_alert(sev, icon, title, action, rows):
     return {"sev": sev, "icon": icon, "title": title, "action": action, "rows": rows}
 
@@ -4297,7 +4316,10 @@ def ct_parse_date(v, year=None, anchor=None):
             return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).strftime("%Y-%m-%d")
         m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s)
         if m and year:
-            d = datetime(int(year), int(m.group(1)), int(m.group(2)))
+            day = int(m.group(2))
+            if day in (40, 50, 60, 70, 80, 90):      # 5٫8 بتتعرض 5٫80 (خلية بخانتين عشريتين) = 8 مايو، مش يوم 80
+                day //= 10
+            d = datetime(int(year), int(m.group(1)), day)
             if anchor:
                 a = datetime.strptime(anchor, "%Y-%m-%d")
                 if d < a - timedelta(days=60):
