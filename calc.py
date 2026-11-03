@@ -4780,12 +4780,11 @@ def noon_track_rivals_html(e, our_price=None, max_show=6):
                + (f" (الفرق عن سعرنا{gap_html(lo['price'])})" if mine else ""))
         out.append(chip.format(b="#334155", c="#cbd5e1", t=txt))
     # باقي معلومات الصفحة
-    if _nt_num(p.get("نسبة الخصم %")):
-        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🏷️ خصم {_nt_fmt(p.get('نسبة الخصم %'), 1)}%"))
+    who = "منتجنا" if p.get("إحنا البوكس") == "نعم" else f"{_nt_h(p.get('صاحب البوكس') or 'البوكس')} (صاحب البوكس)"
     if p.get("التوصيل"):
-        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🚚 {_nt_h(p['التوصيل'])}"))
+        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🚚 توصيل {who}: {_nt_h(p['التوصيل'])}"))
     if p.get("ترتيب/شارات"):
-        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🏅 {_nt_h(p['ترتيب/شارات'])}"))
+        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🏅 شارة {who}: {_nt_h(p['ترتيب/شارات'])}"))
     if p.get("الرابط"):
         out.append(chip.format(b="#475569", c="#60a5fa",
                                t=f'<a href="{_nt_h(p["الرابط"])}" target="_blank" style="color:#60a5fa;">🔗 المنتج على noon.com</a>'))
@@ -4794,4 +4793,5 @@ def noon_track_rivals_html(e, our_price=None, max_show=6):
         stale = _nt_stale(stamp)
         out.append(chip.format(b="#fbbf24" if stale else "#334155", c="#fbbf24" if stale else "#94a3b8",
                                t=f"🕒 {_nt_h(stamp)}" + (" — قديم" if stale else "")))
+    out.append(chip.format(b="#334155", c="#64748b", t="calc v3-top"))
     return "".join(out)
