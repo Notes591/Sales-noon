@@ -7676,15 +7676,16 @@ if st.session_state["nav_page"] == "tab14":
                         cn, ca, ct = _cols3()
                         with cn:
                             if r_sku:
-                                _t14_noon_part(r_sku, "box")
-                                _exp_row(_t14_noon_part, r_sku, _has_ads_n,
-                                         extra=(["comp"] if noon_track_entry(r_sku["sku_up"]) else []))
+                                _t14_noon_part(r_sku, "box"); _exp_row(_t14_noon_part, r_sku, _has_ads_n)
                         with ca:
                             if r_asin:
                                 _t14_amz_part(r_asin, "box"); _exp_row(_t14_amz_part, r_asin, _has_ads_a)
                         with ct:
                             if r_ty:
                                 _t14_ty_part(r_ty, "box"); _exp_row(_t14_ty_part, r_ty, _has_ads_t)
+                        # سلايدر المنافسين والتقييمات: بعرض الكارت كله (مش جوه عمود ضيق)
+                        if r_sku:
+                            render_noon_track(r_sku["sku_up"])
                         # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
                         # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
                         _shown_a = {}
