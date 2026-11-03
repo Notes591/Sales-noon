@@ -4703,17 +4703,19 @@ def noon_track_html(e, our_price=None):
 
 
 def noon_track_rivals(e, our_price=None):
-    """البوكس + باقي البائعين والمنافسين (غير متاجرنا) بأسعارهم، الأقل سعرًا الأول."""
+    """البوكس + باقي البائعين والمنافسين (غير متاجرنا) بأسعارهم وتقييمهم، الأقل سعرًا الأول."""
     p = e["p"]
     mine = _nt_num(p.get("سعرنا")) or (float(our_price) if our_price else None)
     box, others = None, []
     for o in e["offers"]:
         pr = _nt_num(o.get("السعر النهائي"))
         ours = o.get("متجرنا") == "نعم"
+        rt, rc = _nt_num(o.get("تقييم البائع")), _nt_num(o.get("عدد تقييمات البائع"))
         if o.get("صاحب البوكس") == "نعم":
             box = {"seller": o.get("البائع"), "price": pr, "fbn": o.get("FBN") == "نعم", "ours": ours}
         elif not ours and pr:
-            others.append({"seller": o.get("البائع"), "price": pr, "fbn": o.get("FBN") == "نعم", "comp": False})
+            others.append({"seller": o.get("البائع"), "price": pr, "fbn": o.get("FBN") == "نعم",
+                           "comp": False, "rating": rt, "rcount": rc})
     if box is None and p.get("صاحب البوكس"):
         box = {"seller": p.get("صاحب البوكس"), "price": _nt_num(p.get("سعر البوكس")),
                "fbn": p.get("البوكس FBN") == "نعم", "ours": p.get("إحنا البوكس") == "نعم"}
@@ -4721,12 +4723,14 @@ def noon_track_rivals(e, our_price=None):
         pr = _nt_num(c.get("سعر المنافس"))
         if pr:
             others.append({"seller": c.get("بائع المنافس") or c.get("SKU المنافس"), "price": pr,
-                           "fbn": c.get("FBN") == "نعم", "comp": True})
+                           "fbn": c.get("FBN") == "نعم", "comp": True,
+                           "rating": _nt_num(c.get("التقييم")), "rcount": _nt_num(c.get("عدد التقييمات"))})
     others.sort(key=lambda x: x["price"])
     return {"mine": mine, "box": box, "others": others}
 
-def noon_track_rivals_html(e, our_price=None, max_show=5):
-    """كبسولات جنب صورة المنتج: البوكس + سعر كل منافس وفرقه عن سعرنا + سطر تحليل صغير."""
+def noon_track_rivals_html(e, our_price=None, max_show=6):
+    """كل معلومات المنافسة في كبسولات جنب صورة المنتج (من غير سلايدر)."""
+    p = e["p"]
     r = noon_track_rivals(e, our_price)
     mine = r["mine"]
     chip = ('<span style="background:#0f172a;border:1px solid {b};border-radius:6px;padding:1px 8px;'
@@ -4734,7 +4738,22 @@ def noon_track_rivals_html(e, our_price=None, max_show=5):
     def gap_html(price):
         g, col = _nt_gap(price, mine)
         return f" <span style='color:{col};font-weight:700;'>{g}</span>" if g else ""
+    def stars(rt, rc):
+        if not rt:
+            return ""
+        return f" ⭐{rt:g}" + (f" ({rc:,.0f})" if rc else "")
     out = []
+    status = p.get("الحالة", "")
+    if status and status != "تم":
+        out.append(chip.format(b="#ca8a04", c="#fde68a", t=f"⚠️ {_nt_h(status)}"))
+    # تقييم منتجنا + سعرنا
+    rating, rc = _nt_num(p.get("التقييم")), _nt_num(p.get("عدد التقييمات"))
+    if rating:
+        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"⭐ <b dir='ltr'>{rating:g}</b>" + (f" ({rc:,.0f} تقييم)" if rc else "")))
+    if mine:
+        rk = f" · ترتيبنا {_nt_h(p.get('ترتيبنا'))} من {_nt_h(p.get('عدد البائعين'))}" if p.get("ترتيبنا") else ""
+        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"💵 سعرنا <b dir='ltr'>{_nt_fmt(mine)}</b>{rk}"))
+    # البوكس
     box = r["box"]
     if box and box["price"] is not None:
         if box["ours"]:
@@ -4744,15 +4763,35 @@ def noon_track_rivals_html(e, our_price=None, max_show=5):
             out.append(chip.format(b="#ca8a04", c="#fde68a",
                                    t=f"🏆 البوكس: {_nt_h(box['seller'])} <b dir='ltr'>{_nt_fmt(box['price'])}</b>{fbn}"
                                      + gap_html(box["price"])))
+    # كل منافس بسعره وفرقه (الأقل سعرًا الأول)
     oth = r["others"]
     for c in oth[:max_show]:
         tag = " (منتج منافس)" if c["comp"] else ""
+        fbn = " · FBN" if c["fbn"] else ""
         out.append(chip.format(b="#475569", c="#e2e8f0",
-                               t=f"⚔️ {_nt_h(c['seller'])} <b dir='ltr'>{_nt_fmt(c['price'])}</b>{tag}" + gap_html(c["price"])))
+                               t=f"⚔️ {_nt_h(c['seller'])} <b dir='ltr'>{_nt_fmt(c['price'])}</b>{fbn}{tag}"
+                                 + stars(c["rating"], c["rcount"]) + gap_html(c["price"])))
     if len(oth) > max_show:
-        out.append(chip.format(b="#475569", c="#cbd5e1", t=f"+{len(oth) - max_show} بائع كمان"))
+        out.append(chip.format(b="#475569", c="#cbd5e1", t=f"+{len(oth) - max_show} منافس كمان"))
+    # ملخص واضح
     if oth:
         lo = oth[0]
-        txt = f"📊 {len(oth)} منافس — أقل سعر <b dir='ltr'>{_nt_fmt(lo['price'])}</b>" + gap_html(lo["price"])
+        txt = (f"📊 عدد المنافسين: <b>{len(oth)}</b> · أقل سعر عندهم: <b dir='ltr'>{_nt_fmt(lo['price'])}</b>"
+               + (f" (الفرق عن سعرنا{gap_html(lo['price'])})" if mine else ""))
         out.append(chip.format(b="#334155", c="#cbd5e1", t=txt))
+    # باقي معلومات الصفحة
+    if _nt_num(p.get("نسبة الخصم %")):
+        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🏷️ خصم {_nt_fmt(p.get('نسبة الخصم %'), 1)}%"))
+    if p.get("التوصيل"):
+        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🚚 {_nt_h(p['التوصيل'])}"))
+    if p.get("ترتيب/شارات"):
+        out.append(chip.format(b="#475569", c="#e2e8f0", t=f"🏅 {_nt_h(p['ترتيب/شارات'])}"))
+    if p.get("الرابط"):
+        out.append(chip.format(b="#475569", c="#60a5fa",
+                               t=f'<a href="{_nt_h(p["الرابط"])}" target="_blank" style="color:#60a5fa;">🔗 المنتج على noon.com</a>'))
+    stamp = p.get("آخر تحديث", "")
+    if stamp:
+        stale = _nt_stale(stamp)
+        out.append(chip.format(b="#fbbf24" if stale else "#334155", c="#fbbf24" if stale else "#94a3b8",
+                               t=f"🕒 {_nt_h(stamp)}" + (" — قديم" if stale else "")))
     return "".join(out)

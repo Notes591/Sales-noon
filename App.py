@@ -7702,9 +7702,6 @@ if st.session_state["nav_page"] == "tab14":
                         with ct:
                             if r_ty:
                                 _t14_ty_part(r_ty, "box"); _exp_row(_t14_ty_part, r_ty, _has_ads_t)
-                        # سلايدر المنافسين والتقييمات: بعرض الكارت كله (مش جوه عمود ضيق)
-                        if r_sku:
-                            render_noon_track(r_sku["sku_up"], (live_map_t14.get(r_sku["sku_up"]) or {}).get("price"))
                         # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
                         # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
                         _shown_a = {}
