@@ -6894,15 +6894,21 @@ def noon_track_entry(sku_up):
         return None
 
 def render_noon_rivals(sku_up, our_price=None):
-    """كبسولات جنب صورة المنتج: صاحب البوكس + المنافسين الأرخص مننا."""
+    """كبسولات جنب صورة المنتج: صاحب البوكس + المنافسين الأرخص مننا (ولو مفيش، بتقول السبب)."""
     try:
-        e = noon_track_entry(sku_up)
-        if e:
-            h = calc.noon_track_rivals_html(e, our_price)
-            if h:
-                st.markdown(h, unsafe_allow_html=True)
+        all_tr = get_noon_track()
+        e = all_tr.get(calc.noon_track_key(sku_up))
+        if not e:
+            if all_tr:      # البوت اشتغل بس الـ SKU ده مسحبش (مش في تاب NoonTrack_SKUs وقت التشغيل أو فشل سحبه)
+                st.caption("🔎 المنافسين: الـ SKU ده لسه مسحبش — يتسحب في تشغيلة البوت الجاية")
+            return
+        h = calc.noon_track_rivals_html(e, our_price)
+        if h:
+            st.markdown(h, unsafe_allow_html=True)
+        else:
+            st.caption("🔎 المنافسين: " + (e["p"].get("الحالة") or "مفيش بائعين على المنتج") + " — مفيش بوكس أو أسعار نقارن بيها")
     except AttributeError:      # calc.py قديم على GitHub
-        pass
+        st.caption("⚠️ ارفع calc.py الجديد مع App.py علشان تظهر كبسولات المنافسين")
 
 def render_noon_track(sku_up):
     """سلايدر المنافسين والتقييمات تحت SKU نون (لو البوت جاب بياناته)."""
