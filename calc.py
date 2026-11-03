@@ -4702,6 +4702,27 @@ def noon_track_html(e, our_price=None):
     return "".join(parts)
 
 
+_NT_OURS = set()
+
+def set_noon_our_names(names):
+    """أسماء/أكواد متاجرنا على نون (من إعدادات التطبيق + اللي البوت علّمها 'متجرنا') — بتتشال من المنافسين."""
+    global _NT_OURS
+    _NT_OURS = {str(n).strip().lower() for n in (names or []) if str(n).strip()}
+
+def noon_learn_our_names(track):
+    """أسماء البائعين اللي البوت علّمهم 'متجرنا = نعم' في أي عرض."""
+    out = set()
+    for e in track.values():
+        for o in e["offers"]:
+            if o.get("متجرنا") == "نعم":
+                for k in ("البائع", "كود البائع"):
+                    if o.get(k):
+                        out.add(str(o[k]).strip())
+    return out
+
+def _nt_is_ours_name(*vals):
+    return any(str(v).strip().lower() in _NT_OURS for v in vals if v)
+
 def noon_track_rivals(e, our_price=None):
     """البوكس + باقي البائعين والمنافسين (غير متاجرنا) بأسعارهم وتقييمهم، الأقل سعرًا الأول."""
     p = e["p"]
@@ -4709,7 +4730,7 @@ def noon_track_rivals(e, our_price=None):
     box, others = None, []
     for o in e["offers"]:
         pr = _nt_num(o.get("السعر النهائي"))
-        ours = o.get("متجرنا") == "نعم"
+        ours = o.get("متجرنا") == "نعم" or _nt_is_ours_name(o.get("البائع"), o.get("كود البائع"))
         rt, rc = _nt_num(o.get("تقييم البائع")), _nt_num(o.get("عدد تقييمات البائع"))
         if o.get("صاحب البوكس") == "نعم":
             box = {"seller": o.get("البائع"), "price": pr, "fbn": o.get("FBN") == "نعم", "ours": ours}
@@ -4718,10 +4739,11 @@ def noon_track_rivals(e, our_price=None):
                            "comp": False, "rating": rt, "rcount": rc})
     if box is None and p.get("صاحب البوكس"):
         box = {"seller": p.get("صاحب البوكس"), "price": _nt_num(p.get("سعر البوكس")),
-               "fbn": p.get("البوكس FBN") == "نعم", "ours": p.get("إحنا البوكس") == "نعم"}
+               "fbn": p.get("البوكس FBN") == "نعم",
+               "ours": p.get("إحنا البوكس") == "نعم" or _nt_is_ours_name(p.get("صاحب البوكس"), p.get("كود صاحب البوكس"))}
     for c in e["comps"]:
         pr = _nt_num(c.get("سعر المنافس"))
-        if pr:
+        if pr and not _nt_is_ours_name(c.get("بائع المنافس"), c.get("كود بائع المنافس")):
             others.append({"seller": c.get("بائع المنافس") or c.get("SKU المنافس"), "price": pr,
                            "fbn": c.get("FBN") == "نعم", "comp": True,
                            "rating": _nt_num(c.get("التقييم")), "rcount": _nt_num(c.get("عدد التقييمات"))})

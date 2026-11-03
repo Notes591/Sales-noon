@@ -4840,6 +4840,42 @@ if st.session_state["nav_page"] == "tab_wh":
         # ══ TAB 14 — المبيعات ══
     # ══ TAB DASHBOARD — داشبورد تحليلات المبيعات (تاب جديدة منفصلة) ══
     # ══ TAB DASHBOARD — داشبورد تحليلات المبيعات (تاب جديدة منفصلة) ══
+def apply_noon_our_names(track):
+    """بيسجّل أسماء متاجرنا (إعداد + اللي البوت علّمه) عشان متظهرش كمنافسين."""
+    try:
+        txt = load_settings().get("noon_our_store_names", "") or ""
+        names = [x for x in re.split(r"[,،;\n]+", txt) if x.strip()]
+        calc.set_noon_our_names(names + list(calc.noon_learn_our_names(track or {})))
+    except AttributeError:
+        pass
+
+def render_noon_price_alerts():
+    """🚨 تنبيهات الأسعار في داشبورد المبيعات: اسكيوهات نون فيها منافس أرخص مننا + Excel."""
+    nt = get_noon_track()
+    if not nt:
+        return
+    apply_noon_our_names(nt)
+    with st.expander("⚙️ أسماء متاجرنا على نون (عشان متظهرش كمنافسين)", expanded=False):
+        cur = load_settings().get("noon_our_store_names", "") or ""
+        new = st.text_input("الأسماء زي ما بتظهر على noon.com، مفصولة بفاصلة", value=cur, key="nt_our_names_in",
+                            placeholder="Five-Star1, ...")
+        if st.button("💾 حفظ", key="nt_our_names_save") and new.strip() != cur.strip():
+            save_setting("noon_our_store_names", new.strip())
+            st.rerun()
+    try:
+        price = {k: (v or {}).get("price") for k, v in get_live_map().items()}
+        rows = calc.noon_price_alerts(nt, list(nt.keys()), price)
+    except AttributeError:
+        st.warning("⚠️ ارفع calc.py الجديد عشان تظهر تنبيهات الأسعار")
+        return
+    with st.expander(f"🚨 تنبيهات الأسعار — منافس أرخص مننا ({len(rows)})", expanded=bool(rows)):
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df.drop(columns=["الرابط"]), use_container_width=True, hide_index=True)
+            dl_btn(df, "noon_price_alerts", key="dl_noon_alerts")
+        else:
+            st.success("✅ مفيش منافس أرخص مننا")
+
 def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suffix, channel="noon"):
     """يعرض كل محتوى داشبورد المبيعات (KPIs + تنبيهات سريعة + تحليل إعلانات + رسوم
     بيانية + أعلى/أبطأ الأصناف + تحليل SKU فردي) — بيتفعّل 6 مرات: 3 لنون
@@ -5618,6 +5654,9 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
             st.line_chart(sku_chart_df_td)
 
     st.divider()
+
+    if channel == "noon" and key_suffix == "all":
+        render_noon_price_alerts()
 
     # ── أصناف تحتاج انتباه (مع صور) | Needs-attention (with images) ──
     # القائمة اتحسبت فوق قبل شريط التنبيهات السريعة (attention_rows_td) — هنا بس بنعرضها بالتفصيل
@@ -7239,6 +7278,7 @@ if st.session_state["nav_page"] == "tab14":
                        "One block per Noon SKU (sorted by yesterday's sales) with Noon | Amazon | Trendyol side by side")
 
             _nt_all = get_noon_track()
+            apply_noon_our_names(_nt_all)
             _nt_c1, _nt_c2 = st.columns([1, 3])
             with _nt_c1:
                 if st.button("🔄 تحديث بيانات المنافسين", key="nt_refresh_btn", use_container_width=True):
@@ -7318,21 +7358,6 @@ if st.session_state["nav_page"] == "tab14":
                 for r in rows_fbb_t14:
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBB"] = r
                 publish_noon_track_skus(list(sku_rows_t14.keys()))
-                # ══ 🚨 تنبيهات: منافس أرخص مننا (للاسكيوهات الظاهرة هنا) + Excel ══
-                try:
-                    _al_price = {k: (v or {}).get("price") for k, v in get_live_map().items()}
-                    _al_rows = calc.noon_price_alerts(_nt_all, list(sku_rows_t14.keys()), _al_price) if _nt_all else []
-                except AttributeError:
-                    _al_rows = []
-                    st.warning("⚠️ ارفع calc.py الجديد عشان تظهر تنبيهات الأسعار")
-                if _nt_all:
-                    with st.expander(f"🚨 تنبيهات الأسعار — منافس أرخص مننا ({len(_al_rows)})", expanded=bool(_al_rows)):
-                        if _al_rows:
-                            _al_df = pd.DataFrame(_al_rows)
-                            st.dataframe(_al_df.drop(columns=["الرابط"]), use_container_width=True, hide_index=True)
-                            dl_btn(_al_df, "noon_price_alerts", key="dl_noon_alerts")
-                        else:
-                            st.success("✅ مفيش منافس أرخص مننا على اسكيوهات المبيعات دي")
                 ty_rows_t14 = {r["sku_up"]: {"TY": r} for r in rows_ty_t14}
                 asin_rows_t14 = {}
                 for r in rows_fsab_t14:
