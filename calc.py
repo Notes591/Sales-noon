@@ -4583,7 +4583,8 @@ def noon_track_html(e):
             'font-size:12px;color:#e2e8f0;white-space:nowrap;display:inline-block;margin:2px 2px;">{}</span>')
     th = 'style="padding:3px 8px;text-align:right;color:#94a3b8;font-weight:600;border-bottom:1px solid #334155;white-space:nowrap;"'
     td = 'style="padding:3px 8px;text-align:right;color:#e2e8f0;border-bottom:1px solid #1e293b;white-space:nowrap;"'
-    parts = ['<div dir="rtl" style="font-size:12.5px;">']
+    parts = ['<div dir="rtl" style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:8px 10px;'
+             'font-size:12.5px;color:#e2e8f0;">']
 
     status = p.get("الحالة", "")
     if status and status != "تم":
@@ -4624,7 +4625,7 @@ def noon_track_html(e):
     if e["offers"]:
         parts.append('<div style="margin-top:8px;font-weight:700;color:#cbd5e1;">🛒 البائعين على المنتج</div>'
                      '<div style="overflow-x:auto;"><table style="border-collapse:collapse;width:100%;font-size:12.5px;">'
-                     f'<tr><th {th}>#</th><th {th}>البائع</th><th {th}>السعر</th><th {th}>قبل الخصم</th>'
+                     f'<tr><th {th}>#</th><th {th}>البائع</th><th {th}>السعر</th>'
                      f'<th {th}>FBN</th><th {th}>مخزون</th><th {th}>تقييم البائع</th></tr>')
         for o in e["offers"][:12]:
             ours = o.get("متجرنا") == "نعم"
@@ -4635,7 +4636,6 @@ def noon_track_html(e):
             srt = (f"⭐ {sr:g}" + (f" ({src:,.0f})" if src else "")) if sr else "—"
             parts.append(f'<tr style="{bg}"><td {td}>{_nt_h(o.get("ترتيب نون"))}</td><td {td}>{nm}</td>'
                          f'<td {td} dir="ltr">{_nt_fmt(o.get("السعر النهائي"))}</td>'
-                         f'<td {td} dir="ltr">{_nt_fmt(o.get("السعر قبل الخصم"))}</td>'
                          f'<td {td}>{"✔" if o.get("FBN") == "نعم" else "—"}</td>'
                          f'<td {td}>{_nt_h(o.get("المخزون")) or "—"}</td><td {td}>{srt}</td></tr>')
         parts.append("</table></div>")
@@ -4671,3 +4671,56 @@ def noon_track_html(e):
                      f'🕒 آخر تحديث من البوت: {_nt_h(stamp)}{" — قديم، شغّل البوت" if stale else ""}</div>')
     parts.append("</div>")
     return "".join(parts)
+
+
+def noon_track_rivals(e, our_price=None):
+    """البوكس + البائعين/المنافسين الأرخص منا. our_price = سعرنا الاحتياطي لو متجرنا مش على صفحة المنتج."""
+    p = e["p"]
+    mine = _nt_num(p.get("سعرنا")) or (float(our_price) if our_price else None)
+    box = None
+    for o in e["offers"]:
+        if o.get("صاحب البوكس") == "نعم":
+            box = {"seller": o.get("البائع"), "price": _nt_num(o.get("السعر النهائي")),
+                   "fbn": o.get("FBN") == "نعم", "ours": o.get("متجرنا") == "نعم"}
+            break
+    if box is None and p.get("صاحب البوكس"):
+        box = {"seller": p.get("صاحب البوكس"), "price": _nt_num(p.get("سعر البوكس")),
+               "fbn": p.get("البوكس FBN") == "نعم", "ours": p.get("إحنا البوكس") == "نعم"}
+    cheaper = []
+    if mine:
+        for o in e["offers"]:
+            pr = _nt_num(o.get("السعر النهائي"))
+            if o.get("متجرنا") != "نعم" and o.get("صاحب البوكس") != "نعم" and pr and pr < mine:
+                cheaper.append({"seller": o.get("البائع"), "price": pr, "fbn": o.get("FBN") == "نعم", "comp": False})
+    for c in e["comps"]:
+        pr = _nt_num(c.get("سعر المنافس"))
+        if c.get("أرخص من مين") == "المنافس أرخص" and pr:
+            cheaper.append({"seller": c.get("بائع المنافس") or c.get("SKU المنافس"), "price": pr,
+                            "fbn": c.get("FBN") == "نعم", "comp": True})
+    cheaper.sort(key=lambda x: x["price"])
+    return {"mine": mine, "box": box, "cheaper": cheaper}
+
+def noon_track_rivals_html(e, our_price=None, max_show=4):
+    """كبسولات صغيرة جنب صورة المنتج: صاحب البوكس + المنافسين الأرخص مننا (بسعرهم)."""
+    r = noon_track_rivals(e, our_price)
+    chip = ('<span style="background:#0f172a;border:1px solid {b};border-radius:6px;padding:1px 8px;'
+            'font-size:12px;color:{c};white-space:nowrap;display:inline-block;margin:2px 3px 2px 0;">{t}</span>')
+    out = []
+    box = r["box"]
+    if box and box["price"] is not None:
+        fbn = " · FBN" if box["fbn"] else ""
+        if box["ours"]:
+            out.append(chip.format(b="#16a34a", c="#4ade80", t=f"🏆 إحنا البوكس <b dir='ltr'>{_nt_fmt(box['price'])}</b>"))
+        else:
+            out.append(chip.format(b="#ca8a04", c="#fde68a",
+                                   t=f"🏆 البوكس: {_nt_h(box['seller'])} <b dir='ltr'>{_nt_fmt(box['price'])}</b>{fbn}"))
+    ch = r["cheaper"]
+    for c in ch[:max_show]:
+        tag = " (منتج منافس)" if c["comp"] else ""
+        out.append(chip.format(b="#dc2626", c="#fca5a5",
+                               t=f"🔻 {_nt_h(c['seller'])} <b dir='ltr'>{_nt_fmt(c['price'])}</b>{tag}"))
+    if len(ch) > max_show:
+        out.append(chip.format(b="#475569", c="#cbd5e1", t=f"+{len(ch) - max_show} أرخص كمان"))
+    if r["mine"] and not ch and box and not box["ours"] and box["price"] is not None and box["price"] >= r["mine"]:
+        out.append(chip.format(b="#16a34a", c="#4ade80", t="✅ مفيش أرخص مننا"))
+    return "".join(out)

@@ -6893,6 +6893,17 @@ def noon_track_entry(sku_up):
     except AttributeError:      # calc.py قديم على GitHub — ارفع calc.py مع App.py
         return None
 
+def render_noon_rivals(sku_up, our_price=None):
+    """كبسولات جنب صورة المنتج: صاحب البوكس + المنافسين الأرخص مننا."""
+    try:
+        e = noon_track_entry(sku_up)
+        if e:
+            h = calc.noon_track_rivals_html(e, our_price)
+            if h:
+                st.markdown(h, unsafe_allow_html=True)
+    except AttributeError:      # calc.py قديم على GitHub
+        pass
+
 def render_noon_track(sku_up):
     """سلايدر المنافسين والتقييمات تحت SKU نون (لو البوت جاب بياناته)."""
     e = noon_track_entry(sku_up)
@@ -7566,6 +7577,8 @@ if st.session_state["nav_page"] == "tab14":
                             st.caption(f"🧮 سحب المستودع اليومي للكود (آخر 30 يوم): نون {wh_g.get('draw_noon', 0):g} + أمازون {wh_g.get('draw_amz', 0):g} + تريندول {wh_g.get('draw_ty', 0):g} "
                                        f"= {wh_g['daily_draw']:g} قطعة/يوم — شارة النفاد وموعد الطلب محسوبين على المجموع")
                         render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالكود)
+                        if noon_chs and b["sku"]:
+                            render_noon_rivals(b["sku"], (live_map_t14.get(b["sku"].upper()) or {}).get("price"))
 
                     # ══ نون | أمازون | تريندول جنب بعض — كل قسم في صف مستقل عشان الأقسام تتحاذى (السعر جنب السعر) ══
                     r_sku = r_asin = r_ty = None
