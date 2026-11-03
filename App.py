@@ -6837,6 +6837,64 @@ def _t14_channel_part(r, ch, with_sku_level, part="all"):
 def _t14_build_rows_amz(*args, **kwargs):
     return calc._t14_build_rows_amz(_ENV, *args, **kwargs)
 
+# ══ متابعة المنافسين (من بوت noon_tracker) | Noon competitor tracking ══
+# التابات NoonTrack_* بيعملها البوت المكتبي أول مرة يشتغل؛ هنا بنقراها (لو موجودة) في طلب واحد
+# ونحتفظ بيها 10 دقايق في الجلسة عشان مانستهلكش الـ quota.
+NOON_TRACK_TTL = 600
+
+def get_noon_track(force=False):
+    c = st.session_state.get("_noon_track")
+    if c and not force and time.time() - c[0] < NOON_TRACK_TTL:
+        return c[1]
+    data = {}
+    try:
+        have = {w.title for w in ss.worksheets()}
+        if calc.NOON_TRACK_TABS[0] in have:
+            names = [t for t in calc.NOON_TRACK_TABS if t in have]
+            res = ss.values_batch_get(["'" + t + "'" for t in names])
+            rows = {t: (vr.get("values", []) or []) for t, vr in zip(names, res.get("valueRanges", []))}
+            data = calc.build_noon_track(rows.get(calc.NOON_TRACK_TABS[0]), rows.get(calc.NOON_TRACK_TABS[1]),
+                                         rows.get(calc.NOON_TRACK_TABS[2]))
+    except Exception:
+        data = c[1] if c else {}
+    st.session_state["_noon_track"] = (time.time(), data)
+    return data
+
+NT_SKUS_TAB = "NoonTrack_SKUs"
+
+def publish_noon_track_skus(skus):
+    """بيكتب في تاب NoonTrack_SKUs (بيتعمل أول مرة) اسكيوهات نون الظاهرة في تاب المبيعات (بدون -1)،
+    والبوت المكتبي بيسحب المنافسين لنفس القايمة دي بس. بيتكتب لما القايمة تتغير أو كل ساعة على الأكتر."""
+    keys = sorted({calc.noon_track_key(x) for x in skus if x})
+    if not keys:
+        return
+    sig = hash(tuple(keys))
+    last = st.session_state.get("_nt_sku_pub")
+    if last and last[0] == sig and time.time() - last[1] < 3600:
+        return
+    st.session_state["_nt_sku_pub"] = (sig, time.time())    # حتى لو فشل، منعيدش المحاولة في كل ضغطة
+    try:
+        try:
+            ws = ss.worksheet(NT_SKUS_TAB)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = ss.add_worksheet(title=NT_SKUS_TAB, rows=str(len(keys) + 50), cols="2")
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        ws.clear()
+        ws.append_rows([["SKU", "آخر تحديث"]] + [[k, stamp] for k in keys], value_input_option="RAW")
+    except Exception:
+        pass
+
+def noon_track_entry(sku_up):
+    return get_noon_track().get(calc.noon_track_key(sku_up))
+
+def render_noon_track(sku_up):
+    """سلايدر المنافسين والتقييمات تحت SKU نون (لو البوت جاب بياناته)."""
+    e = noon_track_entry(sku_up)
+    if not e:
+        return
+    with st.expander(calc.noon_track_label(e)):
+        st.markdown(calc.noon_track_html(e), unsafe_allow_html=True)
+
 def _t14_noon_part(r, part):
     """جزء من كارت نون: ident (SKU + تنبيهات + Xdock) / price (السعر والربح وحكم الإعلان) / ads (أداء الإعلانات).
     مقسّم لأجزاء عشان تتحاذى مع أمازون في صفوف متوازية."""
@@ -6863,6 +6921,8 @@ def _t14_noon_part(r, part):
                 unsafe_allow_html=True)
     elif part in ("box", "calc", "verdict"):
         render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s, part=part)
+    elif part == "comp":
+        render_noon_track(r["sku_up"])
     elif part == "ads" and ent:
         with st.expander(f"📢 إعلانات ({len(ent)})"):
             st.markdown(
@@ -7155,6 +7215,15 @@ if st.session_state["nav_page"] == "tab14":
                        "نون 🟢 | أمازون 🟠 | تريندول 🟣 | "
                        "One block per Noon SKU (sorted by yesterday's sales) with Noon | Amazon | Trendyol side by side")
 
+            _nt_all = get_noon_track()
+            _nt_c1, _nt_c2 = st.columns([1, 3])
+            with _nt_c1:
+                if st.button("🔄 تحديث بيانات المنافسين", key="nt_refresh_btn", use_container_width=True):
+                    _nt_all = get_noon_track(force=True)
+            with _nt_c2:
+                st.caption(f"🔎 بيانات المنافسين من بوت noon_tracker: {len(_nt_all)} SKU نون" if _nt_all
+                           else "🔎 لسه مفيش بيانات منافسين — شغّل بوت noon_tracker (بيعمل التابات NoonTrack_* أول مرة)")
+
             sales_display_days = int(load_settings().get("sales_display_days","7") or 7)
             today_t14 = datetime.now().date()
             sales_dates = [today_t14 - timedelta(days=i) for i in range(1, sales_display_days + 1)]
@@ -7225,6 +7294,7 @@ if st.session_state["nav_page"] == "tab14":
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBN"] = r
                 for r in rows_fbb_t14:
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBB"] = r
+                publish_noon_track_skus(list(sku_rows_t14.keys()))
                 ty_rows_t14 = {r["sku_up"]: {"TY": r} for r in rows_ty_t14}
                 asin_rows_t14 = {}
                 for r in rows_fsab_t14:
@@ -7592,15 +7662,17 @@ if st.session_state["nav_page"] == "tab14":
                         _has_ads_a = bool(r_asin and ads_map_amz_t14.get((r_asin.get("asin") or "").upper()))
                         _has_ads_t = bool(r_ty and get_ads_by_barcode_trendyol().get(r_ty["sku_up"]))
                         # صندوق السعر والربح وتحته «الحساب | الحكم | إعلانات» جنب بعض — في صف واحد لكل متجر (من غير فراغ بينهم)
-                        def _exp_row(fn, r, has_ads):
-                            _pl = ["calc"] + (["verdict", "ads"] if has_ads else [])
+                        def _exp_row(fn, r, has_ads, extra=()):
+                            _pl = ["calc"] + (["verdict", "ads"] if has_ads else []) + list(extra)
                             for _ec, _pt in zip(st.columns(len(_pl)), _pl):
                                 with _ec:
                                     fn(r, _pt)
                         cn, ca, ct = _cols3()
                         with cn:
                             if r_sku:
-                                _t14_noon_part(r_sku, "box"); _exp_row(_t14_noon_part, r_sku, _has_ads_n)
+                                _t14_noon_part(r_sku, "box")
+                                _exp_row(_t14_noon_part, r_sku, _has_ads_n,
+                                         extra=(["comp"] if noon_track_entry(r_sku["sku_up"]) else []))
                         with ca:
                             if r_asin:
                                 _t14_amz_part(r_asin, "box"); _exp_row(_t14_amz_part, r_asin, _has_ads_a)
