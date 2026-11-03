@@ -6910,13 +6910,13 @@ def render_noon_rivals(sku_up, our_price=None):
     except AttributeError:      # calc.py قديم على GitHub
         st.caption("⚠️ ارفع calc.py الجديد مع App.py علشان تظهر كبسولات المنافسين")
 
-def render_noon_track(sku_up):
+def render_noon_track(sku_up, our_price=None):
     """سلايدر المنافسين والتقييمات تحت SKU نون (لو البوت جاب بياناته)."""
     e = noon_track_entry(sku_up)
     if not e:
         return
     with st.expander(calc.noon_track_label(e)):
-        st.markdown(calc.noon_track_html(e), unsafe_allow_html=True)
+        st.markdown(calc.noon_track_html(e, our_price), unsafe_allow_html=True)
 
 def _t14_noon_part(r, part):
     """جزء من كارت نون: ident (SKU + تنبيهات + Xdock) / price (السعر والربح وحكم الإعلان) / ads (أداء الإعلانات).
@@ -7704,7 +7704,7 @@ if st.session_state["nav_page"] == "tab14":
                                 _t14_ty_part(r_ty, "box"); _exp_row(_t14_ty_part, r_ty, _has_ads_t)
                         # سلايدر المنافسين والتقييمات: بعرض الكارت كله (مش جوه عمود ضيق)
                         if r_sku:
-                            render_noon_track(r_sku["sku_up"])
+                            render_noon_track(r_sku["sku_up"], (live_map_t14.get(r_sku["sku_up"]) or {}).get("price"))
                         # قنوات المبيعات: (FBN | FSAB) ثم (FBB | FBA) — كل جزء (مبيعات / مخزون / تغطية) في صف مستقل عشان يتحاذوا.
                         # أمازون: القناة اللي مفيهاش مبيع أمس مبتتعرضش (مفيش داعي لأيام كلها صفر).
                         _shown_a = {}

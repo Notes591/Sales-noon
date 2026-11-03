@@ -4518,10 +4518,21 @@ def _nt_dicts(rows):
         out.append({h: (r[i] if i < len(r) else "") for i, h in enumerate(hdr) if h})
     return out
 
+_NT_AR = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
 def _nt_num(v):
+    """رقم من خلية الشيت: بيفهم الأرقام العربية والفاصلة العشرية العربية (٫) وفاصل الآلاف (٬) والفاصلة العادية."""
     try:
-        s = str(v).replace(",", "").strip()
-        return float(s) if s not in ("", "nan", "None") else None
+        s = str(v).strip().translate(_NT_AR)
+        s = s.replace("٫", ".").replace("٬", "").replace("\u202f", "").replace("\xa0", "").replace(" ", "").replace("،", ",")
+        if s in ("", "nan", "None", "-"):
+            return None
+        if "," in s:
+            if "." in s or re.fullmatch(r"-?\d{1,3}(,\d{3})+", s):
+                s = s.replace(",", "")
+            else:
+                s = s.replace(",", ".")
+        return float(s)
     except Exception:
         return None
 
@@ -4530,6 +4541,17 @@ def _nt_fmt(v, nd=2):
     if n is None:
         return str(v or "—") or "—"
     return f"{n:,.{nd}f}".rstrip("0").rstrip(".") if nd else f"{n:,.0f}"
+
+def _nt_gap(price, mine):
+    """فرق سعر الطرف التاني عن سعرنا: (النص, اللون). price = سعره، mine = سعرنا."""
+    if price is None or not mine:
+        return "", "#cbd5e1"
+    d = round(price - mine, 2)
+    if d == 0:
+        return "نفس سعرنا", "#cbd5e1"
+    if d < 0:
+        return f"أقل منا بـ {_nt_fmt(abs(d))}", "#fca5a5"
+    return f"أعلى منا بـ {_nt_fmt(d)}", "#86efac"
 
 def build_noon_track(products_rows, offers_rows, comps_rows):
     """يرجع {SKU: {"p": صف المنتج, "offers": [...], "comps": [...]}} من صفوف التابات الخام (القوايم)."""
@@ -4576,9 +4598,10 @@ def _nt_stale(stamp, days=2):
     except Exception:
         return False
 
-def noon_track_html(e):
-    """HTML (rtl) لتفاصيل المنافسة لـ SKU واحد: ملخص + البائعين + المنافسين."""
+def noon_track_html(e, our_price=None):
+    """HTML (rtl) لتفاصيل المنافسة لـ SKU واحد: ملخص + البائعين + المنافسين. our_price = سعرنا الاحتياطي."""
     p = e["p"]
+    mine = _nt_num(p.get("سعرنا")) or (float(our_price) if our_price else None)
     chip = ('<span style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:1px 8px;'
             'font-size:12px;color:#e2e8f0;white-space:nowrap;display:inline-block;margin:2px 2px;">{}</span>')
     th = 'style="padding:3px 8px;text-align:right;color:#94a3b8;font-weight:600;border-bottom:1px solid #334155;white-space:nowrap;"'
@@ -4596,21 +4619,21 @@ def noon_track_html(e):
         chips.append(f"⭐ <b dir='ltr'>{rating:g}</b> ({rc:,.0f} تقييم)" if rc else f"⭐ <b dir='ltr'>{rating:g}</b>")
     if p.get("صاحب البوكس"):
         fbn = " · FBN" if p.get("البوكس FBN") == "نعم" else ""
-        chips.append(f"🏆 البوكس: <b>{_nt_h(p['صاحب البوكس'])}</b> <b dir='ltr'>{_nt_fmt(p.get('سعر البوكس'))}</b>{fbn}")
+        _bg, _bc = _nt_gap(_nt_num(p.get("سعر البوكس")), mine)
+        _bgt = f" <span style='color:{_bc};'>({_bg})</span>" if (_bg and p.get("إحنا البوكس") != "نعم") else ""
+        chips.append(f"🏆 البوكس: <b>{_nt_h(p['صاحب البوكس'])}</b> <b dir='ltr'>{_nt_fmt(p.get('سعر البوكس'))}</b>{fbn}{_bgt}")
     if p.get("إحنا البوكس") == "نعم":
         chips.append('<span style="color:#4ade80;font-weight:700;">✅ إحنا البوكس</span>')
     elif p.get("متجرنا موجود") == "نعم":
         chips.append('<span style="color:#fbbf24;font-weight:700;">❌ مش إحنا البوكس</span>')
     elif p.get("متجرنا موجود") == "لا":
         chips.append('<span style="color:#f87171;font-weight:700;">🚫 متجرنا مش على المنتج</span>')
-    if _nt_num(p.get("سعرنا")):
+    if mine:
         rk = f" · ترتيبنا {_nt_h(p.get('ترتيبنا'))} من {_nt_h(p.get('عدد البائعين'))}" if p.get("ترتيبنا") else ""
-        chips.append(f"💵 سعرنا <b dir='ltr'>{_nt_fmt(p.get('سعرنا'))}</b>{rk}")
+        chips.append(f"💵 سعرنا <b dir='ltr'>{_nt_fmt(mine)}</b>{rk}")
     if _nt_num(p.get("أقل سعر")):
-        d = _nt_num(p.get("الفرق عن أقل سعر"))
-        dtxt = ""
-        if d is not None and d != 0:
-            dtxt = f" <span style='color:{'#f87171' if d > 0 else '#4ade80'};' dir='ltr'>({d:+,.2f})</span>"
+        gtxt, gcol = _nt_gap(_nt_num(p.get("أقل سعر")), mine)
+        dtxt = f" <span style='color:{gcol};'>({gtxt})</span>" if gtxt else ""
         chips.append(f"🔻 أقل سعر <b dir='ltr'>{_nt_fmt(p.get('أقل سعر'))}</b> — {_nt_h(p.get('أقل بائع'))}{dtxt}")
     if _nt_num(p.get("نسبة الخصم %")):
         chips.append(f"🏷️ خصم {_nt_fmt(p.get('نسبة الخصم %'), 1)}%")
@@ -4625,7 +4648,7 @@ def noon_track_html(e):
     if e["offers"]:
         parts.append('<div style="margin-top:8px;font-weight:700;color:#cbd5e1;">🛒 البائعين على المنتج</div>'
                      '<div style="overflow-x:auto;"><table style="border-collapse:collapse;width:100%;font-size:12.5px;">'
-                     f'<tr><th {th}>#</th><th {th}>البائع</th><th {th}>السعر</th>'
+                     f'<tr><th {th}>#</th><th {th}>البائع</th><th {th}>السعر</th><th {th}>الفرق عن سعرنا</th>'
                      f'<th {th}>FBN</th><th {th}>مخزون</th><th {th}>تقييم البائع</th></tr>')
         for o in e["offers"][:12]:
             ours = o.get("متجرنا") == "نعم"
@@ -4634,8 +4657,10 @@ def noon_track_html(e):
             sr = _nt_num(o.get("تقييم البائع"))
             src = _nt_num(o.get("عدد تقييمات البائع"))
             srt = (f"⭐ {sr:g}" + (f" ({src:,.0f})" if src else "")) if sr else "—"
+            _og, _oc = ("", "#cbd5e1") if ours else _nt_gap(_nt_num(o.get("السعر النهائي")), mine)
             parts.append(f'<tr style="{bg}"><td {td}>{_nt_h(o.get("ترتيب نون"))}</td><td {td}>{nm}</td>'
                          f'<td {td} dir="ltr">{_nt_fmt(o.get("السعر النهائي"))}</td>'
+                         f'<td {td}><span style="color:{_oc};">{_og or "—"}</span></td>'
                          f'<td {td}>{"✔" if o.get("FBN") == "نعم" else "—"}</td>'
                          f'<td {td}>{_nt_h(o.get("المخزون")) or "—"}</td><td {td}>{srt}</td></tr>')
         parts.append("</table></div>")
@@ -4643,13 +4668,19 @@ def noon_track_html(e):
     if e["comps"]:
         parts.append('<div style="margin-top:8px;font-weight:700;color:#cbd5e1;">⚔️ المنافسين</div>'
                      '<div style="overflow-x:auto;"><table style="border-collapse:collapse;width:100%;font-size:12.5px;">'
-                     f'<tr><th {th}>المنافس</th><th {th}>صاحب البوكس</th><th {th}>سعره</th><th {th}>الفرق عننا</th>'
-                     f'<th {th}>الأرخص</th><th {th}>تقييم</th><th {th}>FBN</th></tr>')
+                     f'<tr><th {th}>المنافس</th><th {th}>صاحب البوكس</th><th {th}>سعره</th><th {th}>الفرق عن سعرنا</th>'
+                     f'<th {th}>المقارنة</th><th {th}>تقييم</th><th {th}>FBN</th></tr>')
         for c in e["comps"][:15]:
-            who = c.get("أرخص من مين", "")
-            col = "#f87171" if who == "المنافس أرخص" else ("#4ade80" if who == "إحنا أرخص" else "#e2e8f0")
-            d = _nt_num(c.get("الفرق (المنافس - إحنا)"))
-            dtxt = f"{d:+,.2f}" if d is not None else "—"
+            cpr = _nt_num(c.get("سعر المنافس"))
+            if cpr is not None and mine:
+                dd = round(cpr - mine, 2)
+                who = "المنافس أرخص" if dd < 0 else ("إحنا أرخص" if dd > 0 else "نفس السعر")
+            else:
+                who = c.get("أرخص من مين", "")
+            col = "#fca5a5" if who == "المنافس أرخص" else ("#86efac" if who == "إحنا أرخص" else "#e2e8f0")
+            dtxt, _ = _nt_gap(cpr, mine) if (cpr is not None and mine) else ("", "")
+            dtxt = dtxt or "—"
+            wtxt = {"إحنا أرخص": "✅ سعرنا أفضل", "المنافس أرخص": "🔻 سعره أقل", "نفس السعر": "= نفس السعر"}.get(who, "—")
             name = _nt_h(c.get("اسم منتج المنافس"))[:48]
             link = c.get("الرابط")
             sku_c = _nt_h(c.get("SKU المنافس"))
@@ -4659,8 +4690,8 @@ def noon_track_html(e):
             parts.append(f'<tr><td {td}>{sku_html}<br><span style="color:#94a3b8;font-size:11px;">{name}</span></td>'
                          f'<td {td}>{_nt_h(c.get("بائع المنافس")) or "—"}</td>'
                          f'<td {td} dir="ltr">{_nt_fmt(c.get("سعر المنافس"))}</td>'
-                         f'<td {td} dir="ltr" style="color:{col};padding:3px 8px;text-align:right;border-bottom:1px solid #1e293b;">{dtxt}</td>'
-                         f'<td {td}><span style="color:{col};">{_nt_h(who) or "—"}</span></td>'
+                         f'<td {td}><span style="color:{col};">{dtxt}</span></td>'
+                         f'<td {td}><span style="color:{col};">{wtxt}</span></td>'
                          f'<td {td}>{crt}</td><td {td}>{"✔" if c.get("FBN") == "نعم" else "—"}</td></tr>')
         parts.append("</table></div>")
 
@@ -4694,7 +4725,7 @@ def noon_track_rivals(e, our_price=None):
                 cheaper.append({"seller": o.get("البائع"), "price": pr, "fbn": o.get("FBN") == "نعم", "comp": False})
     for c in e["comps"]:
         pr = _nt_num(c.get("سعر المنافس"))
-        if c.get("أرخص من مين") == "المنافس أرخص" and pr:
+        if pr and ((mine and pr < mine) if mine else c.get("أرخص من مين") == "المنافس أرخص"):
             cheaper.append({"seller": c.get("بائع المنافس") or c.get("SKU المنافس"), "price": pr,
                             "fbn": c.get("FBN") == "نعم", "comp": True})
     cheaper.sort(key=lambda x: x["price"])
@@ -4712,13 +4743,17 @@ def noon_track_rivals_html(e, our_price=None, max_show=4):
         if box["ours"]:
             out.append(chip.format(b="#16a34a", c="#4ade80", t=f"🏆 إحنا البوكس <b dir='ltr'>{_nt_fmt(box['price'])}</b>"))
         else:
+            gt, _gc = _nt_gap(box["price"], r["mine"])
             out.append(chip.format(b="#ca8a04", c="#fde68a",
-                                   t=f"🏆 البوكس: {_nt_h(box['seller'])} <b dir='ltr'>{_nt_fmt(box['price'])}</b>{fbn}"))
+                                   t=f"🏆 البوكس: {_nt_h(box['seller'])} <b dir='ltr'>{_nt_fmt(box['price'])}</b>{fbn}"
+                                     + (f" — {gt}" if gt else "")))
     ch = r["cheaper"]
     for c in ch[:max_show]:
         tag = " (منتج منافس)" if c["comp"] else ""
+        gt, _gc = _nt_gap(c["price"], r["mine"])
         out.append(chip.format(b="#dc2626", c="#fca5a5",
-                               t=f"🔻 {_nt_h(c['seller'])} <b dir='ltr'>{_nt_fmt(c['price'])}</b>{tag}"))
+                               t=f"🔻 {_nt_h(c['seller'])} <b dir='ltr'>{_nt_fmt(c['price'])}</b>{tag}"
+                                 + (f" — {gt}" if gt else "")))
     if len(ch) > max_show:
         out.append(chip.format(b="#475569", c="#cbd5e1", t=f"+{len(ch) - max_show} أرخص كمان"))
     if r["mine"] and not ch and box and not box["ours"] and box["price"] is not None and box["price"] >= r["mine"]:
