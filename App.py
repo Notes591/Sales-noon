@@ -6865,7 +6865,10 @@ NT_SKUS_TAB = "NoonTrack_SKUs"
 def publish_noon_track_skus(skus):
     """بيكتب في تاب NoonTrack_SKUs (بيتعمل أول مرة) اسكيوهات نون الظاهرة في تاب المبيعات (بدون -1)،
     والبوت المكتبي بيسحب المنافسين لنفس القايمة دي بس. بيتكتب لما القايمة تتغير أو كل ساعة على الأكتر."""
-    keys = sorted({calc.noon_track_key(x) for x in skus if x})
+    try:
+        keys = sorted({calc.noon_track_key(x) for x in skus if x})
+    except AttributeError:      # calc.py قديم على GitHub — ارفع calc.py مع App.py
+        return
     if not keys:
         return
     sig = hash(tuple(keys))
@@ -6885,7 +6888,10 @@ def publish_noon_track_skus(skus):
         pass
 
 def noon_track_entry(sku_up):
-    return get_noon_track().get(calc.noon_track_key(sku_up))
+    try:
+        return get_noon_track().get(calc.noon_track_key(sku_up))
+    except AttributeError:      # calc.py قديم على GitHub — ارفع calc.py مع App.py
+        return None
 
 def render_noon_track(sku_up):
     """سلايدر المنافسين والتقييمات تحت SKU نون (لو البوت جاب بياناته)."""
