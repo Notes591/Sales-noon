@@ -7318,6 +7318,21 @@ if st.session_state["nav_page"] == "tab14":
                 for r in rows_fbb_t14:
                     sku_rows_t14.setdefault(r["sku_up"], {})["FBB"] = r
                 publish_noon_track_skus(list(sku_rows_t14.keys()))
+                # ══ 🚨 تنبيهات: منافس أرخص مننا (للاسكيوهات الظاهرة هنا) + Excel ══
+                try:
+                    _al_price = {k: (v or {}).get("price") for k, v in get_live_map().items()}
+                    _al_rows = calc.noon_price_alerts(_nt_all, list(sku_rows_t14.keys()), _al_price) if _nt_all else []
+                except AttributeError:
+                    _al_rows = []
+                    st.warning("⚠️ ارفع calc.py الجديد عشان تظهر تنبيهات الأسعار")
+                if _nt_all:
+                    with st.expander(f"🚨 تنبيهات الأسعار — منافس أرخص مننا ({len(_al_rows)})", expanded=bool(_al_rows)):
+                        if _al_rows:
+                            _al_df = pd.DataFrame(_al_rows)
+                            st.dataframe(_al_df.drop(columns=["الرابط"]), use_container_width=True, hide_index=True)
+                            dl_btn(_al_df, "noon_price_alerts", key="dl_noon_alerts")
+                        else:
+                            st.success("✅ مفيش منافس أرخص مننا على اسكيوهات المبيعات دي")
                 ty_rows_t14 = {r["sku_up"]: {"TY": r} for r in rows_ty_t14}
                 asin_rows_t14 = {}
                 for r in rows_fsab_t14:

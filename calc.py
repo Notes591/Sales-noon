@@ -4795,3 +4795,44 @@ def noon_track_rivals_html(e, our_price=None, max_show=6):
                                t=f"🕒 {_nt_h(stamp)}" + (" — قديم" if stale else "")))
     out.append(chip.format(b="#334155", c="#64748b", t="calc v3-top"))
     return "".join(out)
+
+
+def noon_price_alerts(track, skus, price_map=None):
+    """تنبيهات: اسكيوهات (من قايمة skus) فيها بائع/منافس سعره أقل من سعرنا. يرجع قايمة صفوف مرتبة بأكبر فرق."""
+    rows = []
+    price_map = price_map or {}
+    for sku in skus:
+        e = track.get(noon_track_key(sku))
+        if not e:
+            continue
+        r = noon_track_rivals(e, price_map.get(str(sku).upper()))
+        mine = r["mine"]
+        if not mine:
+            continue
+        cheaper = [o for o in r["others"] if o["price"] < mine]
+        box = r["box"]
+        if box and not box["ours"] and box["price"] is not None and box["price"] < mine \
+                and not any(abs(o["price"] - box["price"]) < 1e-9 for o in cheaper):
+            cheaper.append({"seller": box["seller"], "price": box["price"], "comp": False, "fbn": box["fbn"], "rating": None})
+        if not cheaper:
+            continue
+        cheaper.sort(key=lambda x: x["price"])
+        lo = cheaper[0]
+        p = e["p"]
+        rows.append({
+            "SKU": noon_track_key(sku),
+            "اسم المنتج": p.get("اسم المنتج", ""),
+            "سعرنا": round(mine, 2),
+            "أقل منافس": lo["seller"],
+            "سعر أقل منافس": round(lo["price"], 2),
+            "الفرق (سعره − سعرنا)": round(lo["price"] - mine, 2),
+            "نسبة الفرق %": round((lo["price"] - mine) / mine * 100, 1),
+            "نوع المنافس": "منتج منافس" if lo["comp"] else "بائع على نفس المنتج",
+            "عدد الأرخص مننا": len(cheaper),
+            "صاحب البوكس": (box or {}).get("seller") or "",
+            "إحنا البوكس": "نعم" if box and box["ours"] else "لا",
+            "آخر تحديث": p.get("آخر تحديث", ""),
+            "الرابط": p.get("الرابط", ""),
+        })
+    rows.sort(key=lambda x: x["الفرق (سعره − سعرنا)"])
+    return rows
