@@ -4737,7 +4737,7 @@ def noon_track_rivals_html(e, our_price=None, max_show=6):
             'font-size:12px;color:{c};white-space:nowrap;display:inline-block;margin:2px 3px 2px 0;">{t}</span>')
     def gap_html(price):
         g, col = _nt_gap(price, mine)
-        return f" <span style='color:{col};font-weight:700;'>{g}</span>" if g else ""
+        return f" <span dir='ltr' style='color:{col};font-weight:700;unicode-bidi:isolate;'>{g}</span>" if g else ""
     def stars(rt, rc):
         if not rt:
             return ""
