@@ -5687,6 +5687,209 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
     else:
         st.success("✅ لا توجد أصناف محتاجة انتباه حالياً | No items currently need attention")
 
+ADS_RECO_TABS = ("AdsHistory", "AdsMonthly", "AdsCampaignHist", "AdsExperiments")
+ADS_EXP_SHEET = "AdsExperiments"
+ADS_RECO_TTL = 600
+
+
+def _ads_reco_load(force=False):
+    """يقرا تابات تاريخ الإعلانات والتجارب من الشيت (كاش 10 دقايق)."""
+    c = st.session_state.get("_ads_reco_raw")
+    if c and not force and time.time() - c[0] < ADS_RECO_TTL:
+        return c[1]
+    raw = {}
+    try:
+        have = {w.title for w in ss.worksheets()}
+        names = [t for t in ADS_RECO_TABS if t in have]
+        if names:
+            res = ss.values_batch_get(["'" + t + "'" for t in names])
+            for t, vr in zip(names, res.get("valueRanges", [])):
+                raw[t] = vr.get("values", []) or []
+    except Exception:
+        raw = c[1] if c else {}
+    st.session_state["_ads_reco_raw"] = (time.time(), raw)
+    return raw
+
+
+def _ads_exp_append(row):
+    try:
+        try:
+            ws = ss.worksheet(ADS_EXP_SHEET)
+        except Exception:
+            ws = ss.add_worksheet(title=ADS_EXP_SHEET, rows=200, cols=len(calc.ADS_EXP_HEADERS))
+            ws.update(range_name="A1", values=[calc.ADS_EXP_HEADERS])
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        return True
+    except Exception as e:
+        st.error(f"تعذر حفظ التجربة: {e}")
+        return False
+
+
+def _ads_exp_close(exp_id, note):
+    try:
+        ws = ss.worksheet(ADS_EXP_SHEET)
+        vals = ws.get_all_values()
+        hdr = vals[0]
+        ci, si, di, ni = hdr.index("ID"), hdr.index("Status"), hdr.index("Closed Date"), hdr.index("Result Note")
+        for i, r in enumerate(vals[1:], start=2):
+            if len(r) > ci and r[ci] == exp_id:
+                ws.update_cell(i, si + 1, "اتقفلت")
+                ws.update_cell(i, di + 1, datetime.now().date().isoformat())
+                ws.update_cell(i, ni + 1, note)
+                return True
+    except Exception as e:
+        st.error(f"تعذر قفل التجربة: {e}")
+    return False
+
+
+def render_ads_reco_section():
+    """🧠 تحليل ربحية الإعلانات والتوصيات (اقتراحات فقط — مفيش أي تغيير تلقائي في الميزانيات أو الحملات)."""
+    st.markdown("---")
+    st.markdown("### 🧠 تحليل ربحية الإعلانات والتوصيات")
+    st.caption("اقتراحات فقط — النظام مش بيغيّر أي ميزانية أو حملة. القرار ليك. "
+               "التقييم على المنتج كله (مبيعات عضوية + إعلان) مش على أرباح الطلبات المنسوبة للإعلان بس.")
+    if st.button("🔄 تحديث بيانات التوصيات", key="ads_reco_refresh"):
+        _ads_reco_load(force=True)
+        get_noon_track(force=True)
+    raw = _ads_reco_load()
+    hist, known = calc.ads_hist_parse(raw.get("AdsHistory"))
+    mtd, mtd_period = calc.ads_mtd_parse(raw.get("AdsMonthly"))
+    if not hist and not mtd:
+        st.info("لسه مفيش بيانات تاريخ إعلانات في الشيت. شغّل بوت نون (NOONServer / NOONAds) مرة، "
+                "هيعمل تابات AdsHistory وAdsMonthly وAdsCampaignHist، وبعدها اضغط تحديث.")
+        return
+    today = datetime.now().date()
+    live_m, com_m = get_live_map(), get_com_map()
+    nt = get_noon_track() or {}
+    apply_noon_our_names(nt)
+    key_to_sku = {}
+    for src in (live_m, com_m, inv_map):
+        for s in list(src.keys()):
+            key_to_sku.setdefault(calc.noon_track_key(s), s)
+    keys = set(hist.keys()) | set(mtd.keys())
+    keys = [k for k in keys if (sum(d.get("spends", 0) for d in hist.get(k, {}).values()) > 0
+                                 or (mtd.get(k) or {}).get("spends", 0) > 0)]
+    if not keys:
+        st.info("مفيش SKU عليه مصروف إعلاني في البيانات الحالية.")
+        return
+    days45 = [today - timedelta(days=i) for i in range(1, 46)]
+    try:
+        counts = build_daily_orders_counts(days45)
+    except Exception:
+        counts = {}
+    units_by_key = {}
+    for s, dd in counts.items():
+        k = calc.noon_track_key(s)
+        for d, n in dd.items():
+            units_by_key.setdefault(k, {})
+            units_by_key[k][d] = units_by_key[k].get(d, 0) + (n or 0)
+    asin_map = build_amazon_orders_asin_map()
+    inputs, extra = [], {}
+    for k in keys:
+        sku_up = key_to_sku.get(k)
+        price = (live_m.get(sku_up) or {}).get("price") if sku_up else None
+        ci = com_m.get(sku_up) if sku_up else None
+        unit_profit, cost_missing = None, False
+        if price is not None and ci:
+            _, net_tax = compute_net_price_after_fees(price, ci)
+            cost = resolve_unit_cost(sku_up, (asin_map.get(sku_up, "") or "").upper() or None)
+            if cost is None:
+                cost_missing, cost = True, 0.0
+            unit_profit = net_tax - cost
+        stock = (inv_map.get(sku_up) or {}).get("total_stock") if sku_up else None
+        comp = None
+        e = nt.get(k)
+        if e and price:
+            try:
+                r = calc.noon_track_rivals(e, price)
+                cheaper = [o["price"] for o in r["others"] if o["price"] < price]
+                box = r["box"]
+                if box and box.get("price") and box["price"] < price and not box.get("ours"):
+                    cheaper.append(box["price"])
+                comp = {"box_ours": (box["ours"] if box else None),
+                        "gap_lowest": (min(cheaper) - price) if cheaper else 0,
+                        "n_cheaper": len(cheaper),
+                        "rating": next((o["rating"] for o in r["others"] if o.get("rating")), None)}
+            except Exception:
+                comp = None
+        inputs.append({"sku": sku_up or k, "price": price, "unit_profit": unit_profit, "cost_missing": cost_missing,
+                       "com_missing": ci is None, "units_by_date": units_by_key.get(k, {}),
+                       "ads_by_date": hist.get(k, {}), "known_days": known, "ads_mtd": mtd.get(k),
+                       "stock": stock, "comp": comp, "today": today})
+        extra[inputs[-1]["sku"]] = (k, e)
+    results = calc.ads_reco_all(inputs)
+
+    # ── ملخص ──
+    lv = calc.ADS_RECO_LEVELS
+    cnt = {}
+    for r in results:
+        cnt[r["level"]] = cnt.get(r["level"], 0) + 1
+    cols = st.columns(len(lv))
+    for col, (lk, (lab, colr, bg)) in zip(cols, lv.items()):
+        col.markdown(f'<div style="background:{bg};border:1px solid {colr};border-radius:10px;padding:8px;text-align:center;direction:rtl;">'
+                     f'<div style="font-size:12px;color:{colr};font-weight:800;">{lab}</div>'
+                     f'<div style="font-size:22px;font-weight:800;color:#111827;">{cnt.get(lk, 0)}</div></div>',
+                     unsafe_allow_html=True)
+    if known:
+        st.caption(f"تاريخ يومي متاح: {len(known)} يوم (من {min(known)} إلى {max(known)}). كل ما التاريخ يزيد، الثقة بتزيد.")
+    else:
+        st.caption("مفيش تاريخ يومي لسه — التوصيات مبنية على لقطة الشهر وثقتها متوسطة كحد أقصى.")
+
+    f1, f2 = st.columns([2, 3])
+    sel = f1.multiselect("فلتر التوصية", [v[0] for v in lv.values()], key="ads_reco_lvfilter")
+    q = f2.text_input("بحث بالـ SKU", key="ads_reco_q").strip().upper()
+    shown = [r for r in results if (not sel or r["label"] in sel) and (not q or q in str(r["sku"]).upper())]
+    st.markdown(calc.ads_reco_table_html(shown), unsafe_allow_html=True)
+    if len(shown) > 80:
+        st.caption(f"معروض أول 80 من {len(shown)} — الباقي في ملف الإكسيل.")
+    dl_btn(pd.DataFrame(calc.ads_reco_rows(shown)), "ads_recommendations", key="ads_reco_dl")
+
+    # ── تفاصيل SKU + بدء تجربة تخفيض ──
+    st.markdown("#### 🔍 تفاصيل SKU")
+    pick = st.selectbox("اختار SKU", [r["sku"] for r in shown] or [""], key="ads_reco_pick")
+    cur = next((r for r in shown if r["sku"] == pick), None)
+    if cur:
+        st.markdown(calc.ads_reco_card_html(cur), unsafe_allow_html=True)
+        inp = next(i for i in inputs if i["sku"] == pick)
+        if cur["level"] in ("trim", "test_pause", "urgent") and inp.get("unit_profit") is not None:
+            with st.expander("🧪 ابدأ تجربة تخفيض تدريجي (بتتسجل للمتابعة بس — إنت اللي بتغيّر الميزانية بإيدك)"):
+                c1, c2 = st.columns(2)
+                step = c1.number_input("نسبة التخفيض %", 5, 80, 20, 5, key="ads_exp_step")
+                every = c2.number_input("نقيّم كل كام يوم", 2, 14, 3, key="ads_exp_every")
+                if st.button("📌 سجّل التجربة (البداية النهاردة)", key="ads_exp_go"):
+                    m = cur["m"]
+                    box_o = (inp.get("comp") or {}).get("box_ours")
+                    row = [f"E{datetime.now():%y%m%d%H%M%S}", datetime.now().isoformat(timespec="seconds"), pick,
+                           "تخفيض تدريجي", today.isoformat(), round(m["units_pd"], 2),
+                           round(m["profit_after_pd"], 2) if m.get("profit_after_pd") is not None else "",
+                           round(m["spend_pd"], 2), round(m["tacos"], 4) if m.get("tacos") is not None else "",
+                           "نعم" if box_o is True else ("لا" if box_o is False else ""), step, every, "جارية", "", "", ""]
+                    if _ads_exp_append(row):
+                        _ads_reco_load(force=True)
+                        st.success("اتسجلت. غيّر الميزانية بنفسك في لوحة نون، وراجع النتيجة تحت بعد كام يوم.")
+
+    # ── التجارب الجارية ──
+    exps = [x for x in calc.ads_exp_parse(raw.get("AdsExperiments")) if x["active"]]
+    if exps:
+        st.markdown("#### 🧪 التجارب الجارية")
+        by_sku = {i["sku"]: i for i in inputs}
+        for x in exps:
+            inp = by_sku.get(x.get("SKU"))
+            if not inp or inp.get("unit_profit") is None:
+                st.warning(f"{x.get('SKU')}: مفيش بيانات كفاية لتقييم التجربة.")
+                continue
+            box_now = (inp.get("comp") or {}).get("box_ours")
+            ev = calc.ads_experiment_eval(x, inp["units_by_date"], inp["ads_by_date"], known, inp["price"],
+                                          inp["unit_profit"], box_now, today)
+            st.markdown(calc.ads_exp_card_html(x, ev), unsafe_allow_html=True)
+            if st.button("إقفال التجربة", key="ads_exp_close_" + x["ID"]):
+                if _ads_exp_close(x["ID"], " | ".join(ev["reasons"])[:300]):
+                    _ads_reco_load(force=True)
+                    st.rerun()
+    st.caption("🔎 ترتيب الكلمات (عضوي/مدفوع) وظهور إعلانات المنافسين: مش متاح لسه — محتاج بوت ترتيب (المرحلة 2). "
+               "التوصيات مش بتعتمد عليه، وبيتكتب لك في كل كارت إنه 'لسه محتاج اختبار'.")
+
+
 def _render_ads_performance_tab():
     """تاب "الإعلانات" المستقل — منقول بالكامل برة داشبورد المبيعات، وبيتعرض مرة واحدة
     بس (مش 3 مرات زي الأول جوه تابات الكل/FBN/FBB) — لأن بيانات الإعلانات (Views/
@@ -6133,6 +6336,8 @@ def _render_ads_performance_tab():
             "تحديث في شيت الإعلانات | Current-vs-previous-period comparison isn't available yet because the "
             "Advertisements sheet only stores each campaign's live cumulative totals, with no daily date "
             "history to compare against. Enabling it would require snapshotting the ads sheet with dates.")
+
+    render_ads_reco_section()
 
 
 def _render_ads_performance_tab_amazon():

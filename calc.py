@@ -4858,3 +4858,510 @@ def noon_price_alerts(track, skus, price_map=None):
         })
     rows.sort(key=lambda x: x["الفرق (سعره − سعرنا)"])
     return rows
+
+
+# ══════════════════════════════════════════════════════════════════════════
+import datetime as _dt   # (calc.py بيستورد datetime كلاس فوق — ده موديول للتواريخ)
+
+
+# ══ محرك ربحية الإعلانات والتوصيات (اقتراح فقط — مفيش أي تغيير تلقائي) ══
+# المبدأ: الإعلان ما بيتصنّفش «خاسر/أوقفه» بس لأن مصروفه أكبر من ربح المبيعات المنسوبة له —
+# بنحسب أثره على المنتج ككل (إجمالي مبيعاته وربحه) ونفصل المؤكد (أرقام فعلية) عن اللي لسه يحتاج اختبار.
+# ══════════════════════════════════════════════════════════════════════════
+ADS_RECO_CFG = {
+    "min_clicks_any": 40,          # أقل نقرات نحكم بيها بحد أدنى
+    "min_clicks_good": 150,        # نقرات كفاية لثقة أعلى
+    "zero_order_clicks": 120,      # نقرات كتير من غير أي طلب منسوب
+    "cover_critical": 5,           # أيام تغطية حرجة
+    "cover_ok": 14,                # أيام تغطية مريحة للزيادة
+    "ad_share_trim": 0.35,         # الإعلان بياكل ≥35% من ربح المنتج → تخفيض تجريبي
+    "ad_share_urgent": 1.0,        # الإعلان بياكل ≥100% من ربح المنتج ككل → مراجعة عاجلة
+    "ad_share_grow_max": 0.25,     # للزيادة: الإعلان ≤25% من الربح
+    "organic_dep": 0.6,            # نسبة المبيعات غير المنسوبة اللي نعتبرها اعتماد عضوي عالي
+    "roas_grow_factor": 1.5,       # للزيادة: ROAS ≥ 1.5× نقطة التعادل
+    "min_units": 5,                # أقل وحدات مباعة في الفترة لنتحكم
+    "trim_step_pct": 20,           # خطوة التخفيض المقترحة
+    "trim_every_days": 3,
+    "retreat_units_drop": 0.25,    # تراجع لو مبيعات اليوم نزلت ≥25% عن قبل التجربة
+    "retreat_profit_drop": 0.15,   # تراجع لو الربح اليومي بعد الإعلان نزل ≥15%
+}
+
+ADS_RECO_LEVELS = {
+    "increase":   ("🟢 زيادة",          "#16a34a", "#dcfce7"),
+    "continue":   ("🔵 استمرار",        "#2563eb", "#dbeafe"),
+    "watch":      ("⚪ استمرار — راقب", "#6b7280", "#f3f4f6"),
+    "trim":       ("🟡 تخفيض تجريبي",   "#b45309", "#fef3c7"),
+    "urgent":     ("🔴 مراجعة عاجلة",   "#dc2626", "#fee2e2"),
+    "test_pause": ("🟣 اختبار إيقاف",   "#7c3aed", "#ede9fe"),
+}
+
+
+def _ah_f(v):
+    try:
+        return float(str(v).replace(",", "").strip()) if v not in (None, "") else 0.0
+    except Exception:
+        return 0.0
+
+
+def ads_hist_parse(rows):
+    """AdsHistory (قوايم من الشيت) -> ({SKU_key: {date: {views,clicks,orders,atc,spends,revenue}}}, {التواريخ الموجودة})."""
+    out, known = {}, set()
+    if not rows or len(rows) < 2:
+        return out, known
+    hdr = [str(h).strip() for h in rows[0]]
+    ix = {h: i for i, h in enumerate(hdr)}
+    def g(r, k):
+        i = ix.get(k)
+        return r[i] if i is not None and i < len(r) else ""
+    for r in rows[1:]:
+        try:
+            d = _dt.date.fromisoformat(str(g(r, "Date")).strip()[:10])
+        except Exception:
+            continue
+        known.add(d)
+        k = noon_track_key(g(r, "SKU"))
+        if not k:
+            continue
+        e = out.setdefault(k, {}).setdefault(d, {"views": 0.0, "clicks": 0.0, "orders": 0.0, "atc": 0.0, "spends": 0.0, "revenue": 0.0})
+        for a, b in (("views", "Views"), ("clicks", "Clicks"), ("orders", "Orders"), ("atc", "ATC"), ("spends", "Spends"), ("revenue", "Revenue")):
+            e[a] += _ah_f(g(r, b))
+    return out, known
+
+
+def ads_mtd_parse(rows):
+    """AdsMonthly (قوايم) -> {SKU_key: {views,clicks,orders,atc,spends,revenue}} + (بداية, نهاية) الفترة لو موجودة."""
+    out, period = {}, None
+    if not rows or len(rows) < 2:
+        return out, period
+    hdr = [str(h).strip() for h in rows[0]]
+    ix = {h: i for i, h in enumerate(hdr)}
+    def g(r, k):
+        i = ix.get(k)
+        return r[i] if i is not None and i < len(r) else ""
+    for r in rows[1:]:
+        k = noon_track_key(g(r, "SKU"))
+        if not k:
+            continue
+        if period is None:
+            try:
+                period = (_dt.date.fromisoformat(str(g(r, "Start Date"))[:10]), _dt.date.fromisoformat(str(g(r, "End Date"))[:10]))
+            except Exception:
+                pass
+        e = out.setdefault(k, {"views": 0.0, "clicks": 0.0, "orders": 0.0, "atc": 0.0, "spends": 0.0, "revenue": 0.0})
+        for a, b in (("views", "Views"), ("clicks", "Clicks"), ("orders", "Orders"), ("atc", "ATC"), ("spends", "Spends"), ("revenue", "Revenue")):
+            e[a] += _ah_f(g(r, b))
+    return out, period
+
+
+def ads_camp_hist_parse(rows):
+    """AdsCampaignHist -> قايمة dicts (بأسماء الأعمدة)، مرتبة بالتاريخ."""
+    if not rows or len(rows) < 2:
+        return []
+    hdr = [str(h).strip() for h in rows[0]]
+    out = [{h: (r[i] if i < len(r) else "") for i, h in enumerate(hdr) if h} for r in rows[1:]]
+    out.sort(key=lambda x: str(x.get("Date", "")))
+    return out
+
+
+def _ads_window_metrics(inp, dates, mtd=False):
+    """مقاييس فترة واحدة. الإعلان بيتحسب بس على الأيام المعروفة في التاريخ (الأيام اللي البوت سجّلها)، والمبيعات لنفس الأيام."""
+    price, up = inp.get("price"), inp.get("unit_profit")
+    units = inp.get("units_by_date") or {}
+    if mtd:
+        a = inp.get("ads_mtd") or {}
+        cov = list(dates)
+        sp, ao, ar, ck, vw = (a.get("spends", 0), a.get("orders", 0), a.get("revenue", 0), a.get("clicks", 0), a.get("views", 0))
+    else:
+        known, ads = inp.get("known_days") or set(), inp.get("ads_by_date") or {}
+        cov = [d for d in dates if d in known]
+        sp = sum((ads.get(d) or {}).get("spends", 0) for d in cov)
+        ao = sum((ads.get(d) or {}).get("orders", 0) for d in cov)
+        ar = sum((ads.get(d) or {}).get("revenue", 0) for d in cov)
+        ck = sum((ads.get(d) or {}).get("clicks", 0) for d in cov)
+        vw = sum((ads.get(d) or {}).get("views", 0) for d in cov)
+    u = sum(units.get(d, 0) for d in cov)
+    n = max(len(cov), 1)
+    sales = u * price if price else None
+    profit_before = u * up if up is not None else None
+    m = {
+        "days": len(dates), "cov_days": len(cov), "spend": sp, "ad_orders": ao, "ad_revenue": ar, "clicks": ck, "views": vw,
+        "units": u, "sales": sales,
+        "roas": (ar / sp) if sp > 0 else None,
+        "tacos": (sp / sales) if (sales and sales > 0) else None,
+        "cpc": (sp / ck) if ck > 0 else None,
+        "cvr": (ao / ck) if ck > 0 else None,
+        "organic_units": max(u - ao, 0), "organic_share": (max(u - ao, 0) / u) if u > 0 else None,
+        "attrib_over_total": ao > u * 1.05 and u > 0,      # منسوب أكتر من إجمالي المبيعات (فترة إسناد نون أطول من اليوم)
+        "profit_before": profit_before,
+        "profit_after": (profit_before - sp) if profit_before is not None else None,
+        "ad_share": (sp / profit_before) if (profit_before and profit_before > 0) else None,
+        "attrib_profit": (ao * up) if up is not None else None,
+        "naive_result": (ao * up - sp) if up is not None else None,
+        "units_pd": u / n, "spend_pd": sp / n,
+        "profit_after_pd": ((profit_before - sp) / n) if profit_before is not None else None,
+        "be_roas": (price / up) if (price and up and up > 0) else None,
+        "margin": (up / price) if (price and up is not None and price > 0) else None,
+    }
+    return m
+
+
+def ads_reco_for_sku(inp, cfg=None):
+    """توصية واحدة لـ SKU: level / reasons / confirmed / needs_test / confidence / suggestion / trend.
+    inp: sku, price, unit_profit (None لو مش معروف), cost_missing, com_missing, units_by_date, ads_by_date, known_days,
+         ads_mtd (اختياري — لقطة الشهر لو مفيش تاريخ يومي)، stock, comp {box_ours, gap_lowest, n_cheaper, rating}, today."""
+    c = dict(ADS_RECO_CFG, **(cfg or {}))
+    today = inp.get("today") or _dt.date.today()
+    w7 = [today - _dt.timedelta(days=i) for i in range(1, 8)]
+    w_prev = [today - _dt.timedelta(days=i) for i in range(8, 15)]
+    m = _ads_window_metrics(inp, w7)
+    source = "daily"
+    if m["cov_days"] == 0 and inp.get("ads_mtd"):
+        first = today.replace(day=1) if today.day > 1 else (today - _dt.timedelta(days=1)).replace(day=1)
+        mtd_dates = [first + _dt.timedelta(days=i) for i in range((today - first).days)]
+        m = _ads_window_metrics(inp, mtd_dates, mtd=True)
+        source = "monthly"
+    mp = _ads_window_metrics(inp, w_prev) if source == "daily" else None
+    up, price, stock, comp = inp.get("unit_profit"), inp.get("price"), inp.get("stock"), inp.get("comp") or None
+    cover = None
+    if stock is not None:
+        avg = m["units_pd"] if m["units_pd"] > 0 else 0
+        cover = (stock / avg) if avg > 0 else 9999
+    reasons_u, flags, needs_test, confirmed = [], [], [], []
+    nz = lambda x, d=0.0: d if x is None else x
+    fmt = lambda x, d=2: f"{x:,.{d}f}"
+
+    # ── مؤكد: أرقام فعلية ──
+    confirmed.append(("المصروف", fmt(m["spend"])))
+    confirmed.append(("طلبات منسوبة للإعلان", fmt(m["ad_orders"], 0)))
+    confirmed.append(("إيراد منسوب", fmt(m["ad_revenue"])))
+    if m["units"]:
+        confirmed.append(("إجمالي وحدات المنتج", fmt(m["units"], 0)))
+        confirmed.append(("غير منسوب للإعلان (عضوي)", f"{fmt(m['organic_units'], 0)} ({m['organic_share'] * 100:.0f}%)"))
+    if m["roas"] is not None:
+        confirmed.append(("ROAS", fmt(m["roas"])))
+    if m["tacos"] is not None:
+        confirmed.append(("TACOS (المصروف ÷ إجمالي المبيعات)", f"{m['tacos'] * 100:.1f}%"))
+    if m["profit_before"] is not None:
+        confirmed.append(("ربح المنتج قبل الإعلان", fmt(m["profit_before"])))
+        confirmed.append(("ربح المنتج بعد الإعلان", fmt(m["profit_after"])))
+    if m["ad_share"] is not None:
+        confirmed.append(("الإعلان = من ربح المنتج", f"{m['ad_share'] * 100:.0f}%"))
+    if m["be_roas"]:
+        confirmed.append(("ROAS التعادل", fmt(m["be_roas"])))
+    if cover is not None:
+        confirmed.append(("أيام التغطية", "∞" if cover >= 9999 else fmt(cover, 0)))
+
+    # ── مراجعة عاجلة ──
+    if up is None:
+        reasons_u.append("ربح الوحدة غير معروف" + (" (تكلفة المنتج غير مسجلة)" if inp.get("cost_missing") else "") + (" (COM ناقص)" if inp.get("com_missing") else "")
+                         + " — مفيش حكم على الربحية قبل استكمال البيانات")
+    elif up <= 0:
+        reasons_u.append(f"كل وحدة بتتباع بربح {fmt(up)} (صفر/سالب) حتى قبل الإعلان — المشكلة في السعر أو التكلفة مش في الإعلان")
+    if cover is not None and (stock <= 0 or cover < c["cover_critical"]) and m["spend"] > 0:
+        reasons_u.append(f"المخزون {stock} وبيكفي " + ("0" if stock <= 0 else f"{fmt(cover, 0)}") + f" يوم بس والإعلان شغال — هتدفع على منتج ممكن يخلص")
+    if m["ad_share"] is not None and m["ad_share"] >= c["ad_share_urgent"]:
+        reasons_u.append(f"الإعلان بياكل {m['ad_share'] * 100:.0f}% من ربح المنتج ككل (المصروف {fmt(m['spend'])} مقابل ربح {fmt(m['profit_before'])}) — المنتج بعد الإعلان مش بيكسب")
+    if m["clicks"] >= c["zero_order_clicks"] and m["ad_orders"] == 0:
+        reasons_u.append(f"{fmt(m['clicks'], 0)} نقرة من غير أي طلب منسوب — راجع السعر والصور والمنافسين، مش بالضرورة وقف الإعلان")
+    if comp and comp.get("box_ours") is False and (comp.get("gap_lowest") or 0) < 0 and m["spend"] > 0 \
+            and (m["roas"] is None or (m["be_roas"] and m["roas"] < m["be_roas"])):
+        reasons_u.append(f"إحنا مش صاحب البوكس ومنافس أرخص بـ {fmt(abs(comp['gap_lowest']))} — الإعلان بيجيب زيارات لعرض مش بيكسب")
+
+    # ── ثقة البيانات ──
+    score, cn = 0, []
+    if source == "daily":
+        score += 2 if m["cov_days"] >= 7 else (1 if m["cov_days"] >= 3 else 0)
+        if m["cov_days"] < 3:
+            cn.append(f"تاريخ الإعلان {m['cov_days']} يوم بس")
+    else:
+        cn.append("بنستخدم لقطة الشهر (مفيش تاريخ يومي لسه)")
+    score += 2 if m["clicks"] >= c["min_clicks_good"] else (1 if m["clicks"] >= c["min_clicks_any"] else 0)
+    if m["clicks"] < c["min_clicks_any"]:
+        cn.append(f"نقرات قليلة ({fmt(m['clicks'], 0)})")
+    score += 2 if m["ad_orders"] >= 10 else (1 if m["ad_orders"] >= 3 else 0)
+    if m["ad_orders"] < 3:
+        cn.append(f"طلبات منسوبة قليلة ({fmt(m['ad_orders'], 0)})")
+    score += 1 if up is not None else 0
+    score += 1 if price else 0
+    if m["attrib_over_total"]:
+        cn.append("الطلبات المنسوبة أكبر من إجمالي مبيعات الفترة (نون بتنسب على فترة أطول من اليوم) — العضوي تقريبي")
+    else:
+        score += 1
+    if inp.get("cost_missing"):
+        cn.append("تكلفة المنتج غير مسجلة")
+    conf = "high" if score >= 7 else ("medium" if score >= 4 else "low")
+
+    # ── مستوى التوصية ──
+    level, suggestion = None, ""
+    if reasons_u:
+        level, suggestion = "urgent", "راجع المنتج الأول (سعر/مخزون/بيانات) قبل أي قرار على الميزانية. مفيش إيقاف تلقائي."
+    elif m["spend"] <= 0:
+        level = "watch"
+        reasons_u.append("مفيش مصروف في الفترة")
+    else:
+        organic_hi = m["organic_share"] is not None and m["organic_share"] >= c["organic_dep"] and not m["attrib_over_total"]
+        low_data = m["clicks"] < c["min_clicks_any"] and m["ad_orders"] < 3
+        losing_naive = m["naive_result"] is not None and m["naive_result"] < 0
+        if low_data:
+            level, suggestion = "watch", "بيانات قليلة — كمّل وراقب لحد ما النقرات/الطلبات تكفي للحكم."
+            reasons_u.append("مفيش بيانات كفاية للحكم")
+        elif losing_naive and organic_hi and (m["profit_after"] or 0) > 0 and m["units"] >= c["min_units"]:
+            level = "test_pause"
+            suggestion = ("جرّب إيقاف مؤقت (أو تخفيض كبير) لعدد أيام محدد وقارن مبيعات المنتج ككل: لو المبيعات الكلية ثابتة يبقى "
+                          "الإعلان مش هو اللي بيجيبها. ارجع فوراً لو نزلت.")
+            reasons_u.append(f"الإعلان لوحده مش بيغطي نفسه (نتيجة المنسوب {fmt(m['naive_result'])}) لكن {m['organic_share'] * 100:.0f}% من مبيعات المنتج بتيجي من غير إعلان والمنتج بعد الإعلان رابح ({fmt(m['profit_after'])})")
+            needs_test.append("هل المبيعات العضوية هتفضل لو وقفنا الإعلان؟ (ترتيب البحث ممكن يتأثر) — غير مؤكد قبل التجربة")
+        elif (m["ad_share"] is not None and m["ad_share"] >= c["ad_share_trim"]) or (losing_naive and m["units"] >= c["min_units"]):
+            level = "trim"
+            suggestion = f"خفّض الميزانية {c['trim_step_pct']}% لمدة {c['trim_every_days']} أيام وقارن مبيعات المنتج ككل والربح اليومي، وكمّل لو ثابتين."
+            if m["ad_share"] is not None:
+                reasons_u.append(f"الإعلان بياكل {m['ad_share'] * 100:.0f}% من ربح المنتج")
+            if losing_naive:
+                reasons_u.append(f"نتيجة المنسوب سالبة ({fmt(m['naive_result'])}) — ده مش كفاية للإيقاف، لسه محتاج نشوف أثره على المنتج ككل")
+            needs_test.append("تأثير التخفيض على المبيعات الكلية والترتيب — غير مؤكد قبل التجربة")
+        elif (m["be_roas"] and m["roas"] is not None and m["roas"] >= c["roas_grow_factor"] * m["be_roas"]
+              and (m["ad_share"] is None or m["ad_share"] <= c["ad_share_grow_max"])
+              and (cover is None or cover >= c["cover_ok"]) and m["ad_orders"] >= 3
+              and not (comp and comp.get("box_ours") is False and (comp.get("gap_lowest") or 0) < 0)):
+            level = "increase"
+            suggestion = "زوّد الميزانية 20% وراقب ROAS و TACOS كل يومين. لو ROAS نزل تحت التعادل ارجع."
+            reasons_u.append(f"ROAS {fmt(m['roas'])} أعلى من التعادل {fmt(m['be_roas'])} بوضوح، والإعلان {nz(m['ad_share']) * 100:.0f}% من الربح، والمخزون مريح")
+            needs_test.append("هل الزيادة هتحافظ على نفس الكفاءة؟ (العائد بيقل مع التوسّع)")
+        else:
+            level, suggestion = "continue", "كمّل زي ما هو وراقب."
+            reasons_u.append("الأرقام ضمن النطاق الطبيعي — ملقيناش سبب قوي للتغيير")
+            if comp and comp.get("box_ours") is False and (comp.get("gap_lowest") or 0) < 0:
+                reasons_u.append("تنبيه: إحنا مش صاحب البوكس ومنافس أرخص — راقب السعر قبل أي زيادة")
+    if source == "monthly" and conf == "high":
+        conf = "medium"
+    if level in ("trim", "test_pause", "increase") and conf == "high":
+        conf = "medium"          # أي توصية تعتمد على أثر لسه مجرّبناهوش: ما تتصنّفش ثقة عالية
+        cn.append("التوصية تعتمد على أثر محتاج اختبار")
+    if m["cov_days"] < 3 and source == "daily" and level in ("trim", "test_pause", "increase"):
+        conf = "low"
+    if comp:
+        if comp.get("box_ours") is True:
+            flags.append("✅ إحنا صاحب البوكس")
+        elif comp.get("box_ours") is False:
+            flags.append("⚠️ مش صاحب البوكس")
+        if comp.get("n_cheaper"):
+            flags.append(f"{comp['n_cheaper']} منافس أرخص مننا")
+        if comp.get("rating"):
+            flags.append(f"⭐ {comp['rating']:g}")
+    needs_test.append("الترتيب العضوي/المدفوع بالكلمات وظهور إعلانات المنافسين: مش متاح لسه (بوت الترتيب — المرحلة 2)")
+
+    trend = None
+    if mp and m["cov_days"] >= 3 and mp["cov_days"] >= 3:
+        trend = {
+            "tacos": (m["tacos"], mp["tacos"]), "roas": (m["roas"], mp["roas"]),
+            "profit_after_pd": (m["profit_after_pd"], mp["profit_after_pd"]), "spend_pd": (m["spend_pd"], mp["spend_pd"]),
+            "units_pd": (m["units_pd"], mp["units_pd"]),
+        }
+    lab, col, bg = ADS_RECO_LEVELS[level]
+    return {"sku": inp.get("sku"), "level": level, "label": lab, "color": col, "bg": bg, "reasons": reasons_u, "suggestion": suggestion,
+            "confirmed": confirmed, "needs_test": needs_test, "confidence": conf, "conf_score": score, "conf_notes": cn,
+            "flags": flags, "m": m, "m_prev": mp, "trend": trend, "source": source, "cover": cover}
+
+
+def ads_reco_all(inputs, cfg=None):
+    """يشغّل التوصيات على قايمة inputs ويرتبها: عاجل ثم اختبار إيقاف ثم تخفيض ثم زيادة ثم استمرار."""
+    order = {"urgent": 0, "test_pause": 1, "trim": 2, "increase": 3, "continue": 4, "watch": 5}
+    res = [ads_reco_for_sku(i, cfg) for i in inputs]
+    res.sort(key=lambda r: (order[r["level"]], -(r["m"]["spend"] or 0)))
+    return res
+
+
+def ads_reco_rows(results):
+    """صفوف مسطّحة للجدول/الإكسيل."""
+    conf_ar = {"high": "عالية", "medium": "متوسطة", "low": "منخفضة"}
+    rows = []
+    for r in results:
+        m = r["m"]
+        rows.append({
+            "SKU": r["sku"], "التوصية": r["label"], "الثقة": conf_ar[r["confidence"]],
+            "المصروف": round(m["spend"], 2), "طلبات منسوبة": round(m["ad_orders"]), "إجمالي وحدات": round(m["units"]),
+            "عضوي %": round(m["organic_share"] * 100) if m["organic_share"] is not None else None,
+            "ROAS": round(m["roas"], 2) if m["roas"] is not None else None,
+            "TACOS %": round(m["tacos"] * 100, 1) if m["tacos"] is not None else None,
+            "ربح قبل الإعلان": round(m["profit_before"], 2) if m["profit_before"] is not None else None,
+            "ربح بعد الإعلان": round(m["profit_after"], 2) if m["profit_after"] is not None else None,
+            "الإعلان من الربح %": round(m["ad_share"] * 100) if m["ad_share"] is not None else None,
+            "أيام التغطية": (None if r["cover"] is None else (9999 if r["cover"] >= 9999 else round(r["cover"]))),
+            "السبب": " | ".join(r["reasons"]), "المقترح": r["suggestion"], "ملاحظات الثقة": " | ".join(r["conf_notes"]),
+        })
+    return rows
+
+
+def ads_experiment_eval(exp, units_by_date, ads_by_date, known_days, price, unit_profit, box_ours_now, today=None, cfg=None):
+    """تقييم تجربة تخفيض: مقارنة بعد البداية بخط الأساس المسجّل. يرجّع status: wait / hold / continue / retreat + أسباب وأرقام.
+    exp: start (date), base_units_pd, base_profit_pd, base_spend_pd, base_tacos, box_ours (bool|None), step_pct, every_days."""
+    c = dict(ADS_RECO_CFG, **(cfg or {}))
+    today = today or _dt.date.today()
+    start = exp["start"]
+    dates = [start + _dt.timedelta(days=i) for i in range(max((today - start).days, 0))]
+    cov = [d for d in dates if d in (known_days or set())]
+    n = len(dates)
+    out = {"days": n, "cov_days": len(cov), "status": "wait", "reasons": [], "numbers": [], "rank": "الترتيب: غير متاح (محتاج بوت الترتيب — المرحلة 2)"}
+    if n < 2:
+        out["reasons"].append("لسه بدري — مرّ أقل من يومين على بداية التجربة")
+        return out
+    ads = ads_by_date or {}
+    spend_pd = (sum((ads.get(d) or {}).get("spends", 0) for d in cov) / len(cov)) if cov else None
+    units_pd = sum((units_by_date or {}).get(d, 0) for d in dates) / n
+    profit_pd = (units_pd * unit_profit - (spend_pd or 0)) if unit_profit is not None and spend_pd is not None else None
+    b_u, b_p, b_s = exp.get("base_units_pd"), exp.get("base_profit_pd"), exp.get("base_spend_pd")
+    def pct(a, b):
+        return ((a - b) / b) if (a is not None and b not in (None, 0)) else None
+    du, dp, ds = pct(units_pd, b_u), pct(profit_pd, b_p), pct(spend_pd, b_s)
+    out["numbers"] = [("مبيعات يومية (وحدات)", f"{units_pd:.1f} ← كانت {b_u:.1f}" if b_u is not None else f"{units_pd:.1f}"),
+                      ("مصروف يومي", "—" if spend_pd is None else (f"{spend_pd:.1f} ← كان {b_s:.1f}" if b_s is not None else f"{spend_pd:.1f}")),
+                      ("ربح يومي بعد الإعلان", "—" if profit_pd is None else (f"{profit_pd:.1f} ← كان {b_p:.1f}" if b_p is not None else f"{profit_pd:.1f}"))]
+    retreat = []
+    if n >= 3 and du is not None and du <= -c["retreat_units_drop"]:
+        retreat.append(f"مبيعات المنتج الكلية نزلت {abs(du) * 100:.0f}% عن قبل التجربة")
+    if n >= 3 and dp is not None and b_p and dp <= -c["retreat_profit_drop"]:
+        retreat.append(f"الربح اليومي بعد الإعلان نزل {abs(dp) * 100:.0f}%")
+    if exp.get("box_ours") is True and box_ours_now is False:
+        retreat.append("فقدنا البوكس أثناء التجربة")
+    if retreat:
+        out["status"], out["reasons"] = "retreat", retreat + ["ارجع للميزانية القديمة وكمّل مراقبة"]
+    elif n >= int(exp.get("every_days") or c["trim_every_days"]):
+        out["status"] = "continue"
+        out["reasons"] = ["المبيعات والربح ثابتين بعد الخطوة — ممكن تكمل الخطوة اللي بعدها (تخفيض إضافي) أو تثبّت هنا"]
+        if du is not None and du >= 0.1:
+            out["reasons"].append("المبيعات زادت — غالباً الإعلان مش هو المحرّك الأساسي (مع مراعاة تغيّر الأيام)")
+    else:
+        out["status"], out["reasons"] = "hold", ["التجربة شغالة — كمّل لحد ما تخلص الفترة المحددة"]
+    return out
+
+
+# ── عرض التوصيات (HTML) + تجارب التخفيض ──
+ADS_EXP_HEADERS = ["ID", "Created", "SKU", "Type", "Start Date", "Base Units/Day", "Base Profit/Day", "Base Spend/Day",
+                   "Base TACOS", "Box Ours", "Step %", "Every Days", "Status", "Note", "Closed Date", "Result Note"]
+
+_ADS_CONF = {"high": ("عالية", "#15803d", "#dcfce7"), "medium": ("متوسطة", "#b45309", "#fef3c7"), "low": ("منخفضة", "#b91c1c", "#fee2e2")}
+
+
+def ads_exp_parse(rows):
+    """AdsExperiments (قوايم) -> قايمة تجارب (dicts بتواريخ/أرقام)."""
+    out = []
+    if not rows or len(rows) < 2:
+        return out
+    hdr = [str(h).strip() for h in rows[0]]
+    for r in rows[1:]:
+        d = {h: (r[i] if i < len(r) else "") for i, h in enumerate(hdr) if h}
+        if not d.get("ID"):
+            continue
+        try:
+            start = _dt.date.fromisoformat(str(d.get("Start Date"))[:10])
+        except Exception:
+            continue
+        d["start"] = start
+        d["base_units_pd"] = _nt_num(d.get("Base Units/Day"))
+        d["base_profit_pd"] = _nt_num(d.get("Base Profit/Day"))
+        d["base_spend_pd"] = _nt_num(d.get("Base Spend/Day"))
+        d["base_tacos"] = _nt_num(d.get("Base TACOS"))
+        bo = str(d.get("Box Ours") or "").strip()
+        d["box_ours"] = True if bo == "نعم" else (False if bo == "لا" else None)
+        d["step_pct"] = _nt_num(d.get("Step %"))
+        d["every_days"] = int(_nt_num(d.get("Every Days")) or 3)
+        d["active"] = str(d.get("Status") or "").strip() == "جارية"
+        out.append(d)
+    return out
+
+
+def _ads_pill(label, col, bg):
+    return (f'<span style="background:{bg};color:{col};border:1px solid {col};border-radius:999px;padding:2px 10px;'
+            f'font-weight:800;font-size:12px;white-space:nowrap;display:inline-block;">{_nt_h(label)}</span>')
+
+
+def ads_reco_table_html(results, limit=80):
+    """جدول التوصيات بألوان — بيعرض أول limit صف (الباقي في الإكسيل)."""
+    f = lambda x, d=0: "—" if x is None else f"{x:,.{d}f}"
+    th = "padding:6px 8px;text-align:right;font-size:11px;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap;"
+    td = "padding:6px 8px;font-size:12px;border-bottom:1px solid #f1f5f9;vertical-align:top;"
+    head = ["SKU", "التوصية", "الثقة", "المصروف", "ROAS", "TACOS", "ربح قبل", "ربح بعد", "الإعلان من الربح", "عضوي", "تغطية", "السبب الرئيسي"]
+    rows = []
+    for r in results[:limit]:
+        m = r["m"]
+        cl, cc, cb = _ADS_CONF[r["confidence"]]
+        cov = "—" if r["cover"] is None else ("∞" if r["cover"] >= 9999 else f"{r['cover']:.0f} يوم")
+        tac = "—" if m["tacos"] is None else "%.1f%%" % (m["tacos"] * 100)
+        ash = "—" if m["ad_share"] is None else "%.0f%%" % (m["ad_share"] * 100)
+        org = "—" if m["organic_share"] is None else "%.0f%%" % (m["organic_share"] * 100)
+        rows.append(
+            f'<tr style="background:{r["bg"]}22;">'
+            f'<td style="{td}font-family:monospace;direction:ltr;text-align:left;">{_nt_h(r["sku"])}</td>'
+            f'<td style="{td}">{_ads_pill(r["label"], r["color"], r["bg"])}</td>'
+            f'<td style="{td}">{_ads_pill(cl, cc, cb)}</td>'
+            f'<td style="{td}direction:ltr;text-align:right;">{f(m["spend"])}</td>'
+            f'<td style="{td}direction:ltr;text-align:right;">{f(m["roas"], 2)}</td>'
+            f'<td style="{td}direction:ltr;text-align:right;">{tac}</td>'
+            f'<td style="{td}direction:ltr;text-align:right;">{f(m["profit_before"])}</td>'
+            f'<td style="{td}direction:ltr;text-align:right;">{f(m["profit_after"])}</td>'
+            f'<td style="{td}direction:ltr;text-align:right;">{ash}</td>'
+            f'<td style="{td}direction:ltr;text-align:right;">{org}</td>'
+            f'<td style="{td}white-space:nowrap;">{cov}</td>'
+            f'<td style="{td}min-width:260px;">{_nt_h(r["reasons"][0] if r["reasons"] else "")}</td></tr>')
+    return ('<div style="overflow-x:auto;direction:rtl;"><table style="border-collapse:collapse;width:100%;background:#fff;'
+            'border:1px solid #e5e7eb;border-radius:10px;"><thead><tr>' + "".join(f'<th style="{th}">{h}</th>' for h in head)
+            + "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>")
+
+
+def _ads_trend_html(r):
+    t = r.get("trend")
+    if not t:
+        return '<div style="font-size:12px;color:#6b7280;">الترند: لسه مفيش تاريخ كفاية (محتاج 3 أيام على الأقل في كل أسبوع).</div>'
+    def item(name, pair, better_up, d=2, pct=False):
+        a, b = pair
+        if a is None or b is None:
+            return ""
+        diff = a - b
+        good = (diff >= 0) == better_up
+        col = "#15803d" if good else "#b91c1c"
+        arrow = "↑" if diff > 0 else ("↓" if diff < 0 else "=")
+        fa = f"{a * 100:.1f}%" if pct else f"{a:,.{d}f}"
+        fb = f"{b * 100:.1f}%" if pct else f"{b:,.{d}f}"
+        return f'<span style="margin-left:12px;">{name}: <b style="color:{col};direction:ltr;display:inline-block;">{arrow} {fa}</b> <span style="color:#6b7280;">(قبلها {fb})</span></span>'
+    return ('<div style="font-size:12px;color:#111827;">📈 آخر 7 أيام مقابل الـ 7 قبلها — '
+            + item("TACOS", t["tacos"], False, pct=True) + item("ROAS", t["roas"], True)
+            + item("ربح يومي بعد الإعلان", t["profit_after_pd"], True, 1) + item("وحدات يومية", t["units_pd"], True, 1) + "</div>")
+
+
+def ads_reco_card_html(r):
+    """تفاصيل توصية واحدة: السبب + الأرقام المؤكدة + اللي لسه يحتاج اختبار + الثقة."""
+    cl, cc, cb = _ADS_CONF[r["confidence"]]
+    lis = lambda xs: "".join(f'<li style="margin:3px 0;">{_nt_h(x)}</li>' for x in xs)
+    conf_rows = "".join(f'<tr><td style="padding:2px 0;color:#6b7280;font-size:12px;">{_nt_h(a)}</td>'
+                        f'<td style="padding:2px 10px;font-weight:700;font-size:12px;direction:ltr;text-align:left;">{_nt_h(b)}</td></tr>'
+                        for a, b in r["confirmed"])
+    src = ("" if r["source"] == "daily" else '<div style="font-size:11px;color:#b45309;margin-top:4px;">⚠️ الأرقام من لقطة الشهر (AdsMonthly) — مفيش تاريخ يومي لسه.</div>')
+    flags = " &nbsp; ".join(_nt_h(x) for x in r["flags"])
+    return (
+        f'<div style="direction:rtl;background:#fff;border:1px solid {r["color"]};border-right:6px solid {r["color"]};border-radius:12px;padding:14px 16px;">'
+        f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">{_ads_pill(r["label"], r["color"], r["bg"])}'
+        f'<span style="font-size:12px;color:#6b7280;">ثقة البيانات:</span>{_ads_pill(cl, cc, cb)}'
+        f'<span style="font-family:monospace;direction:ltr;font-size:12px;color:#374151;">{_nt_h(r["sku"])}</span>'
+        f'<span style="font-size:12px;">{flags}</span></div>'
+        f'<div style="margin-top:10px;font-size:14px;font-weight:800;color:#111827;">المقترح: {_nt_h(r["suggestion"])}</div>'
+        f'<div style="margin-top:8px;font-size:12px;font-weight:700;color:#111827;">🔎 ليه؟</div><ul style="margin:4px 18px;padding:0;font-size:13px;color:#1f2937;">{lis(r["reasons"])}</ul>'
+        f'<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:8px;">'
+        f'<div><div style="font-size:12px;font-weight:700;color:#15803d;">✅ أرقام مؤكدة (من البيانات)</div><table>{conf_rows}</table></div>'
+        f'<div style="flex:1;min-width:240px;"><div style="font-size:12px;font-weight:700;color:#b45309;">🧪 لسه يحتاج اختبار (مش مؤكد)</div>'
+        f'<ul style="margin:4px 18px;padding:0;font-size:12px;color:#374151;">{lis(r["needs_test"])}</ul>'
+        + (f'<div style="font-size:12px;font-weight:700;color:#b91c1c;margin-top:6px;">⚖️ ليه الثقة {cl}؟</div><ul style="margin:4px 18px;padding:0;font-size:12px;color:#374151;">{lis(r["conf_notes"])}</ul>' if r["conf_notes"] else "")
+        + f'</div></div><div style="margin-top:8px;">{_ads_trend_html(r)}</div>{src}'
+        f'<div style="margin-top:6px;font-size:11px;color:#6b7280;">اقتراح فقط — مفيش تغيير تلقائي في الميزانيات أو الحملات.</div></div>')
+
+
+def ads_exp_card_html(exp, ev, level_label=""):
+    stt = {"wait": ("⏳ لسه بدري", "#6b7280", "#f3f4f6"), "hold": ("🧪 التجربة شغالة", "#2563eb", "#dbeafe"),
+           "continue": ("✅ ثابتة — كمّل", "#16a34a", "#dcfce7"), "retreat": ("🔙 تراجع الآن", "#dc2626", "#fee2e2")}[ev["status"]]
+    nums = "".join(f'<div style="font-size:12px;"><span style="color:#6b7280;">{_nt_h(a)}:</span> <b style="direction:ltr;display:inline-block;">{_nt_h(b)}</b></div>' for a, b in ev["numbers"])
+    why = "".join(f'<li style="margin:2px 0;">{_nt_h(x)}</li>' for x in ev["reasons"])
+    return (f'<div style="direction:rtl;background:#fff;border:1px solid {stt[1]};border-right:6px solid {stt[1]};border-radius:12px;padding:12px 14px;">'
+            f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">{_ads_pill(stt[0], stt[1], stt[2])}'
+            f'<span style="font-family:monospace;direction:ltr;font-size:12px;">{_nt_h(exp.get("SKU"))}</span>'
+            f'<span style="font-size:12px;color:#374151;">{_nt_h(exp.get("Type"))} — بدأت {exp["start"]} (يوم {ev["days"]}) — خطوة {_nt_h(exp.get("Step %"))}% كل {exp["every_days"]} أيام</span></div>'
+            f'<div style="margin-top:6px;">{nums}</div><ul style="margin:6px 18px;padding:0;font-size:13px;">{why}</ul>'
+            f'<div style="font-size:11px;color:#6b7280;">{_nt_h(ev["rank"])} — ماتنساش تراجع الترتيب يدوياً على نون أثناء التجربة.</div></div>')
