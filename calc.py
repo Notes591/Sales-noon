@@ -968,6 +968,7 @@ def get_ads_map(env, data=None):
         sku_up = str(sku_raw).strip().upper()
         entry = {
             "campaign": col(row, "Campaign Name") or "—",
+            "cid": str(col(row, "Campaign ID")).strip(),
             "views":  _f2(col(row, "Views")),
             "clicks": _f2(col(row, "Clicks")),
             "orders": _f2(col(row, "Orders")),

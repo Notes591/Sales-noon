@@ -5761,24 +5761,119 @@ def _ads_exp_close(exp_id, note):
     return False
 
 
-def render_ads_reco_section():
-    """🧠 تحليل ربحية الإعلانات والتوصيات (اقتراحات فقط — مفيش أي تغيير تلقائي في الميزانيات أو الحملات)."""
-    st.markdown("---")
-    st.markdown("### 🧠 تحليل ربحية الإعلانات والتوصيات")
-    st.caption("اقتراحات فقط — النظام مش بيغيّر أي ميزانية أو حملة. القرار ليك. "
-               "التقييم على المنتج كله (مبيعات عضوية + إعلان) مش على أرباح الطلبات المنسوبة للإعلان بس.")
-    if st.button("🔄 تحديث بيانات التوصيات", key="ads_reco_refresh"):
-        _ads_reco_load(force=True)
-        st.session_state.pop("_ads_monthly_rows", None)
-        get_noon_track(force=True)
+def _ads_daily_rows():
+    c = st.session_state.get("_ads_daily_rows")
+    if c and time.time() - c[0] < 600:
+        return c[1]
+    rows = None
+    try:
+        rows = ss.worksheet("AdsDaily").get_all_values()
+    except Exception:
+        rows = c[1] if c else None
+    st.session_state["_ads_daily_rows"] = (time.time(), rows)
+    return rows
+
+
+def get_ads_map_daily():
+    """إعلانات أمس (من تاب AdsDaily اللي البوت بيكتبه) بنفس شكل get_ads_map."""
+    rows = _ads_daily_rows()
+    if rows and len(rows) > 1:
+        try:
+            return calc.get_ads_map(_ENV, data=rows)
+        except Exception:
+            return {}
+    return {}
+
+
+def _ads_yday_for(sku_up):
+    return get_ads_map_daily().get(sku_up) or []
+
+
+def _ads_yday_match(ad, yl):
+    """حملة أمس المقابلة لحملة الشهر: بالـ Campaign ID، ولو مش موجود بالاسم (لو الاسم متكرر بنجمّعهم)."""
+    if ad.get("cid"):
+        m = [y for y in yl if y.get("cid") == ad["cid"]]
+        if m:
+            return m[0]
+    return None
+
+
+def _ads_line(ad, cps=True):
+    return (f"👁️ ظهور: {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {ad['clicks']:,.0f} &nbsp;|&nbsp; "
+            f"🛒 طلبات: {ad['orders']:,.0f} &nbsp;|&nbsp; ➕ سلة: {ad['atc']:,.0f}<br>"
+            f"💸 مصروف: {ad['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {ad['revenue']:,.2f} ريال<br>"
+            f"📊 CTR: {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {ad['roas']:.2f} &nbsp;|&nbsp; "
+            f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CPS: {ad['cps']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%")
+
+
+def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
+    """إعلانات نون في كارت المبيعات: الشهر (من أول الشهر لأمس) + أمس لكل حملة."""
+    yl = _ads_yday_for(sku_up)
+    ys = sum(a["spends"] for a in yl); yr = sum(a["revenue"] for a in yl)
+    yo = sum(a["orders"] for a in yl); yc = sum(a["clicks"] for a in yl)
+    with st.expander(f"📢 إعلانات ({len(ent)})"):
+        st.markdown(
+            f"📅 **الشهر:** 💸 {tot_s:,.2f} &nbsp;|&nbsp; 💰 {tot_r:,.2f} &nbsp;|&nbsp; 🛒 {tot_o:,.0f} طلب<br>"
+            + (f"🕒 **أمس:** 💸 {ys:,.2f} &nbsp;|&nbsp; 💰 {yr:,.2f} &nbsp;|&nbsp; 🛒 {yo:,.0f} طلب &nbsp;|&nbsp; 🖱️ {yc:,.0f} نقرة"
+               if yl else "🕒 **أمس:** مفيش إعلان اشتغل أمس (أو البوت لسه ماسحبش أمس)"),
+            unsafe_allow_html=True)
+        for ad in ent:
+            y = _ads_yday_match(ad, yl)
+            if y is None and not ad.get("cid"):
+                yy = [a for a in yl if a["campaign"] == ad["campaign"]]
+                y = yy[0] if len(yy) == 1 else None
+            ytxt = ""
+            if y:
+                ytxt = ("<br><b>🕒 أمس:</b> " + f"🖱️ نقرات: {y['clicks']:,.0f} &nbsp;|&nbsp; 🛒 طلبات: {y['orders']:,.0f} &nbsp;|&nbsp; "
+                        f"➕ سلة: {y['atc']:,.0f} &nbsp;|&nbsp; 💸 مصروف: {y['spends']:,.2f} &nbsp;|&nbsp; "
+                        f"💰 إيراد: {y['revenue']:,.2f} &nbsp;|&nbsp; 🎯 ROAS: {y['roas']:.2f}")
+            elif yl:
+                ytxt = "<br><b>🕒 أمس:</b> <span style='color:#9ca3af;'>مفيش نشاط</span>"
+            st.markdown(f"**{ad['campaign']}**<br><b>📅 الشهر:</b><br>{_ads_line(ad)}{ytxt}", unsafe_allow_html=True)
+            st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+
+
+def render_ads_reco_chip(sku_up):
+    """كبسولة توصية الإعلان جنب صورة المنتج في المبيعات."""
+    try:
+        D = _ads_reco_compute()
+        if D.get("status") != "ok":
+            return
+        r = D["by_sku"].get(str(sku_up).upper())
+        if not r:
+            return
+        conf = {"high": "عالية", "medium": "متوسطة", "low": "منخفضة"}[r["confidence"]]
+        why = r["reasons"][0] if r["reasons"] else ""
+        st.markdown(
+            '<div style="direction:rtl;margin:4px 0;">' + calc._ads_pill(r["label"], r["color"], r["bg"]) +
+            f' <span style="font-size:12px;color:#9ca3af;">ثقة {conf}</span>'
+            f'<div style="font-size:12px;margin-top:3px;">{calc._nt_h(why)}</div>'
+            f'<div style="font-size:12px;color:#9ca3af;">{calc._nt_h(r["suggestion"])}</div></div>',
+            unsafe_allow_html=True)
+    except Exception:
+        pass
+
+
+def _ads_reco_compute(force=False):
+    """بيحسب توصيات كل الـ SKUs مرة واحدة ويكاشيها 10 دقايق (بتستخدمها شاشة التوصيات وكارت المبيعات)."""
+    c = st.session_state.get("_ads_reco_calc")
+    if c and not force and time.time() - c[0] < ADS_RECO_TTL:
+        return c[1]
+    try:
+        out = _ads_reco_compute_inner()
+    except Exception as e:
+        out = {"status": "error", "err": str(e)[:200]}
+    st.session_state["_ads_reco_calc"] = (time.time(), out)
+    return out
+
+
+def _ads_reco_compute_inner():
+    today = datetime.now().date()
     raw = _ads_reco_load()
     hist, known = calc.ads_hist_parse(raw.get("AdsHistory"))
     mtd, mtd_period = calc.ads_mtd_parse(raw.get("AdsMonthly"))
     if not hist and not mtd:
-        st.info("لسه مفيش بيانات تاريخ إعلانات في الشيت. شغّل بوت نون (NOONServer / NOONAds) مرة، "
-                "هيعمل تابات AdsHistory وAdsMonthly وAdsCampaignHist، وبعدها اضغط تحديث.")
-        return
-    today = datetime.now().date()
+        return {"status": "nodata", "raw": raw}
     live_m, com_m = get_live_map(), get_com_map()
     nt = get_noon_track() or {}
     apply_noon_our_names(nt)
@@ -5790,8 +5885,7 @@ def render_ads_reco_section():
     keys = [k for k in keys if (sum(d.get("spends", 0) for d in hist.get(k, {}).values()) > 0
                                  or (mtd.get(k) or {}).get("spends", 0) > 0)]
     if not keys:
-        st.info("مفيش SKU عليه مصروف إعلاني في البيانات الحالية.")
-        return
+        return {"status": "nokeys", "raw": raw}
     days45 = [today - timedelta(days=i) for i in range(1, 46)]
     try:
         counts = build_daily_orders_counts(days45)
@@ -5838,7 +5932,36 @@ def render_ads_reco_section():
                        "stock": stock, "comp": comp, "today": today})
         extra[inputs[-1]["sku"]] = (k, e)
     results = calc.ads_reco_all(inputs)
+    return {"status": "ok", "raw": raw, "results": results, "inputs": inputs, "known": known,
+            "by_sku": {str(r["sku"]).upper(): r for r in results}}
 
+
+
+def render_ads_reco_section():
+    """🧠 تحليل ربحية الإعلانات والتوصيات (اقتراحات فقط — مفيش أي تغيير تلقائي في الميزانيات أو الحملات)."""
+    st.markdown("---")
+    st.markdown("### 🧠 تحليل ربحية الإعلانات والتوصيات")
+    st.caption("اقتراحات فقط — النظام مش بيغيّر أي ميزانية أو حملة. القرار ليك. "
+               "التقييم على المنتج كله (مبيعات عضوية + إعلان) مش على أرباح الطلبات المنسوبة للإعلان بس.")
+    if st.button("🔄 تحديث بيانات التوصيات", key="ads_reco_refresh"):
+        _ads_reco_load(force=True)
+        st.session_state.pop("_ads_monthly_rows", None)
+        get_noon_track(force=True)
+        st.session_state.pop("_ads_reco_calc", None)
+        st.session_state.pop("_ads_daily_rows", None)
+    D = _ads_reco_compute()
+    if D.get("status") == "error":
+        st.error("تعذر حساب التوصيات: " + D.get("err", ""))
+        return
+    if D["status"] == "nodata":
+        st.info("لسه مفيش بيانات تاريخ إعلانات في الشيت. شغّل بوت نون (NOONServer / NOONAds) مرة، "
+                "هيعمل تابات AdsHistory وAdsMonthly وAdsCampaignHist، وبعدها اضغط تحديث.")
+        return
+    if D["status"] == "nokeys":
+        st.info("مفيش SKU عليه مصروف إعلاني في البيانات الحالية.")
+        return
+    raw, results, inputs, known = D["raw"], D["results"], D["inputs"], D["known"]
+    today = datetime.now().date()
     # ── ملخص ──
     lv = calc.ADS_RECO_LEVELS
     cnt = {}
@@ -6856,21 +6979,7 @@ def _t14_sku_part(r):
         r, com_map_t14, live_map_t14, sales_dates,
         ads_entries_t14, total_orders_t14, total_spends_t14)
     if ads_entries_t14:
-        with st.expander(f"📢 إعلانات ({len(ads_entries_t14)})"):
-            st.markdown(
-                f"💸 **إجمالي المصروف:** {total_spends_t14:,.2f} ريال &nbsp;|&nbsp; "
-                f"💰 **إجمالي الإيراد:** {total_revenue_t14:,.2f} ريال &nbsp;|&nbsp; "
-                f"🛒 **طلبات من الإعلان:** {total_orders_t14:,.0f}")
-            for ad in ads_entries_t14:
-                st.markdown(
-                    f"**{ad['campaign']}**<br>"
-                    f"👁️ ظهور: {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {ad['clicks']:,.0f} &nbsp;|&nbsp; "
-                    f"🛒 طلبات: {ad['orders']:,.0f} &nbsp;|&nbsp; ➕ سلة: {ad['atc']:,.0f}<br>"
-                    f"💸 مصروف: {ad['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {ad['revenue']:,.2f} ريال<br>"
-                    f"📊 CTR: {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {ad['roas']:.2f} &nbsp;|&nbsp; "
-                    f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CPS: {ad['cps']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%",
-                    unsafe_allow_html=True)
-                st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+        render_noon_ads_expander(r["sku_up"], ads_entries_t14, total_spends_t14, total_revenue_t14, total_orders_t14)
 
 _COV_SINK = [None]      # لو فيها قائمة: الكبسولات بتتجمع فيها وتتعرض كلها في سطر واحد فوق
 
@@ -7211,21 +7320,7 @@ def _t14_noon_part(r, part):
     elif part == "comp":
         render_noon_track(r["sku_up"])
     elif part == "ads" and ent:
-        with st.expander(f"📢 إعلانات ({len(ent)})"):
-            st.markdown(
-                f"💸 **إجمالي المصروف:** {tot_s:,.2f} ريال &nbsp;|&nbsp; "
-                f"💰 **إجمالي الإيراد:** {tot_r:,.2f} ريال &nbsp;|&nbsp; "
-                f"🛒 **طلبات من الإعلان:** {tot_o:,.0f}")
-            for ad in ent:
-                st.markdown(
-                    f"**{ad['campaign']}**<br>"
-                    f"👁️ ظهور: {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {ad['clicks']:,.0f} &nbsp;|&nbsp; "
-                    f"🛒 طلبات: {ad['orders']:,.0f} &nbsp;|&nbsp; ➕ سلة: {ad['atc']:,.0f}<br>"
-                    f"💸 مصروف: {ad['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {ad['revenue']:,.2f} ريال<br>"
-                    f"📊 CTR: {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {ad['roas']:.2f} &nbsp;|&nbsp; "
-                    f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CPS: {ad['cps']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%",
-                    unsafe_allow_html=True)
-                st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+        render_noon_ads_expander(r["sku_up"], ent, tot_s, tot_r, tot_o)
 
 def _t14_amz_part(r, part):
     """نفس _t14_noon_part لكن لـ ASIN أمازون."""
@@ -7850,6 +7945,7 @@ if st.session_state["nav_page"] == "tab14":
                         render_china_for_sku(first_key, first_row)  # 🚢 كمية/شحنات الصين القادمة (مربوطة بالكود)
                         if noon_chs and b["sku"]:
                             render_noon_rivals(b["sku"], (live_map_t14.get(b["sku"].upper()) or {}).get("price"))
+                            render_ads_reco_chip(b["sku"])
 
                     # ══ نون | أمازون | تريندول جنب بعض — كل قسم في صف مستقل عشان الأقسام تتحاذى (السعر جنب السعر) ══
                     r_sku = r_asin = r_ty = None
