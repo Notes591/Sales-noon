@@ -5789,13 +5789,25 @@ def _ads_yday_for(sku_up):
     return get_ads_map_daily().get(sku_up) or []
 
 
-def _ads_yday_match(ad, yl):
-    """حملة أمس المقابلة لحملة الشهر: بالـ Campaign ID، ولو مش موجود بالاسم (لو الاسم متكرر بنجمّعهم)."""
-    if ad.get("cid"):
-        m = [y for y in yl if y.get("cid") == ad["cid"]]
-        if m:
-            return m[0]
-    return None
+def _ads_row_key(a):
+    return (a.get("store", ""), a.get("cid", ""), a.get("psku", ""), a.get("offer", ""))
+
+
+def _ads_yday_assign(ent, yl):
+    """يربط كل صف شهري بصف أمس بتاعه (واحد لواحد): بمفتاح (متجر، حملة، PSKU، كود العرض) ثم بالحملة+العرض ثم بالاسم لو فريد."""
+    used, out = set(), {}
+    def take(pred):
+        for idx, ad in enumerate(ent):
+            if idx in out:
+                continue
+            for k, y in enumerate(yl):
+                if k not in used and pred(ad, y):
+                    out[idx] = y; used.add(k)
+                    break
+    take(lambda a, y: _ads_row_key(a) == _ads_row_key(y) and any(_ads_row_key(a)))
+    take(lambda a, y: (a.get("cid"), a.get("offer")) == (y.get("cid"), y.get("offer")) and a.get("cid"))
+    take(lambda a, y: a.get("cid") and a.get("cid") == y.get("cid") and a.get("store") == y.get("store"))
+    return out
 
 
 def _ads_line(ad, cps=True):
@@ -5807,30 +5819,27 @@ def _ads_line(ad, cps=True):
 
 
 def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
-    """إعلانات نون في كارت المبيعات: الشهر (من أول الشهر لأمس) + أمس لكل حملة."""
+    """إعلانات نون في كارت المبيعات: تبويب لأمس (من AdsDaily) وتبويب للشهر (من AdsMonthly) — كل واحد لوحده."""
     yl = _ads_yday_for(sku_up)
-    ys = sum(a["spends"] for a in yl); yr = sum(a["revenue"] for a in yl)
-    yo = sum(a["orders"] for a in yl); yc = sum(a["clicks"] for a in yl)
-    with st.expander(f"📢 إعلانات ({len(ent)})"):
-        st.markdown(
-            f"📅 **الشهر:** 💸 {tot_s:,.2f} &nbsp;|&nbsp; 💰 {tot_r:,.2f} &nbsp;|&nbsp; 🛒 {tot_o:,.0f} طلب<br>"
-            + (f"🕒 **أمس:** 💸 {ys:,.2f} &nbsp;|&nbsp; 💰 {yr:,.2f} &nbsp;|&nbsp; 🛒 {yo:,.0f} طلب &nbsp;|&nbsp; 🖱️ {yc:,.0f} نقرة"
-               if yl else "🕒 **أمس:** مفيش إعلان اشتغل أمس (أو البوت لسه ماسحبش أمس)"),
-            unsafe_allow_html=True)
-        for ad in ent:
-            y = _ads_yday_match(ad, yl)
-            if y is None and not ad.get("cid"):
-                yy = [a for a in yl if a["campaign"] == ad["campaign"]]
-                y = yy[0] if len(yy) == 1 else None
-            ytxt = ""
-            if y:
-                ytxt = ("<br><b>🕒 أمس:</b> " + f"🖱️ نقرات: {y['clicks']:,.0f} &nbsp;|&nbsp; 🛒 طلبات: {y['orders']:,.0f} &nbsp;|&nbsp; "
-                        f"➕ سلة: {y['atc']:,.0f} &nbsp;|&nbsp; 💸 مصروف: {y['spends']:,.2f} &nbsp;|&nbsp; "
-                        f"💰 إيراد: {y['revenue']:,.2f} &nbsp;|&nbsp; 🎯 ROAS: {y['roas']:.2f}")
-            elif yl:
-                ytxt = "<br><b>🕒 أمس:</b> <span style='color:#9ca3af;'>مفيش نشاط</span>"
-            st.markdown(f"**{ad['campaign']}**<br><b>📅 الشهر:</b><br>{_ads_line(ad)}{ytxt}", unsafe_allow_html=True)
+    def _tot(lst):
+        return (sum(a["spends"] for a in lst), sum(a["revenue"] for a in lst),
+                sum(a["orders"] for a in lst), sum(a["clicks"] for a in lst))
+    def _show(lst, label):
+        s_, r_, o_, c_ = _tot(lst)
+        st.markdown(f"💸 **إجمالي المصروف:** {s_:,.2f} ريال &nbsp;|&nbsp; 💰 **إجمالي الإيراد:** {r_:,.2f} ريال &nbsp;|&nbsp; "
+                    f"🛒 **طلبات:** {o_:,.0f} &nbsp;|&nbsp; 🖱️ **نقرات:** {c_:,.0f}", unsafe_allow_html=True)
+        for ad in lst:
+            st.markdown(f"**{ad['campaign']}**<br>{_ads_line(ad)}", unsafe_allow_html=True)
             st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+    with st.expander(f"📢 إعلانات ({len(ent)})"):
+        t_y, t_m = st.tabs(["🕒 أمس", "📅 الشهر (من أول الشهر لأمس)"])
+        with t_y:
+            if yl:
+                _show(yl, "أمس")
+            else:
+                st.caption("مفيش إعلان اشتغل أمس على الـ SKU ده (أو البوت لسه ماسحبش أمس).")
+        with t_m:
+            _show(ent, "الشهر")
 
 
 def render_ads_reco_chip(sku_up):
