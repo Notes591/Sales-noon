@@ -542,7 +542,23 @@ def big_note_html(text):
 # ══ خريطة الإعلانات (SKU -> قائمة كامبينات) | Ads map (SKU -> list of campaigns) ══
 
 def get_ads_map(*args, **kwargs):
+    """إعلانات نون: المصدر الأساسي تاب AdsMonthly (البوت بيحدّثه كل تشغيل)، ولو مش موجود/فاضي بيرجع لشيت Advertisements اليدوي."""
+    rows = _ads_monthly_rows()
+    if rows and len(rows) > 1:
+        return calc.get_ads_map(_ENV, data=rows)
     return calc.get_ads_map(_ENV, *args, **kwargs)
+
+def _ads_monthly_rows():
+    c = st.session_state.get("_ads_monthly_rows")
+    if c and time.time() - c[0] < 600:
+        return c[1]
+    rows = None
+    try:
+        rows = ss.worksheet("AdsMonthly").get_all_values()
+    except Exception:
+        rows = c[1] if c else None
+    st.session_state["_ads_monthly_rows"] = (time.time(), rows)
+    return rows
 
 # ══ خريطة إعلانات أمازون (ASIN -> قائمة صفوف) | Amazon ads map (ASIN -> list of rows) ══
 def get_ads_map_amazon(*args, **kwargs):
@@ -4624,7 +4640,10 @@ def render_upload_tab():
     if _grp.startswith("🅽"):
         render_tacweed_upload("up")
         render_inventory_upload()
-        render_generic_ads_upload("up", ads_sheet, "Advertisements", "📤 رفع إعلانات نون | Upload Noon Ads", ["Sku", "SKU"])
+        if _ads_monthly_rows() and len(_ads_monthly_rows()) > 1:
+            st.info("📊 إعلانات نون بتتحدّث تلقائي من البوت (تاب AdsMonthly) — الرفع اليدوي اتقفل.")
+        else:
+            render_generic_ads_upload("up", ads_sheet, "Advertisements", "📤 رفع إعلانات نون | Upload Noon Ads", ["Sku", "SKU"])
     elif _grp.startswith("📦"):
         render_tacweed_amazon_upload("up")
         render_generic_ads_upload("up", ads_amz_sheet, "AdvertisementsAmz", "📤 رفع إعلانات أمازون | Upload Amazon Ads", ["المنتجات"])
@@ -5750,6 +5769,7 @@ def render_ads_reco_section():
                "التقييم على المنتج كله (مبيعات عضوية + إعلان) مش على أرباح الطلبات المنسوبة للإعلان بس.")
     if st.button("🔄 تحديث بيانات التوصيات", key="ads_reco_refresh"):
         _ads_reco_load(force=True)
+        st.session_state.pop("_ads_monthly_rows", None)
         get_noon_track(force=True)
     raw = _ads_reco_load()
     hist, known = calc.ads_hist_parse(raw.get("AdsHistory"))

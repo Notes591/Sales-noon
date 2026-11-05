@@ -946,8 +946,10 @@ def resolve_unit_cost(env, sku_up, asin_up=None):
             return c
     return get_sku_cost(env, sku_up)
 
-def get_ads_map(env):
-    data = env.get_cached(env.ads_sheet)
+def get_ads_map(env, data=None):
+    """data: صفوف جاهزة (مثلاً من تاب AdsMonthly اللي البوت بيكتبه)؛ لو مفيش بيقرا شيت Advertisements اليدوي."""
+    if data is None:
+        data = env.get_cached(env.ads_sheet)
     if not data or len(data) < 2:
         return {}
     header = [h.strip() for h in data[0]]
@@ -978,6 +980,10 @@ def get_ads_map(env):
             "cps":    _f2(col(row, "CPS")),
             "cvr":    _f2(col(row, "CVR")),
         }
+        if not entry["cps"] and entry["orders"] > 0:
+            entry["cps"] = entry["spends"] / entry["orders"]
+        if not entry["roas"] and entry["spends"] > 0:
+            entry["roas"] = entry["revenue"] / entry["spends"]
         m.setdefault(sku_up, []).append(entry)
     return m
 
