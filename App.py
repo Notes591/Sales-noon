@@ -5860,7 +5860,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
     def _tacos_txt(spend, dates):
         try:
             D = _ads_reco_compute()
-            inp = D["inp_by_sku"].get(str(sku_up).upper()) if D.get("status") == "ok" else None
+            inp = (D["inp_by_sku"].get(str(sku_up).upper()) or D["inp_by_key"].get(calc.noon_track_key(sku_up))) if D.get("status") == "ok" else None
             if not inp or not inp.get("price"):
                 return ""
             units = sum((inp["units_by_date"] or {}).get(d, 0) for d in dates)
@@ -5878,7 +5878,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
         _dates = _yday if label == "أمس" else _mdays
         for ad in lst:
             st.markdown(f"🏷️ **الحملات:** {ad['campaign']}<br>{_ads_line(ad)}" + _tacos_txt(ad["spends"], _dates), unsafe_allow_html=True)
-    with st.expander("📢 إعلانات (إجمالي الـ SKU)"):
+    with st.expander("📢 إعلانات"):
         t_y, t_m = st.tabs(["🕒 أمس", "📅 الشهر (من أول الشهر لأمس)"])
         with t_y:
             if yl:
@@ -5894,7 +5894,7 @@ def _ads_reco_get(sku_up):
         D = _ads_reco_compute()
         if D.get("status") != "ok":
             return None
-        return D["by_sku"].get(str(sku_up).upper())
+        return D["by_sku"].get(str(sku_up).upper()) or D["by_key"].get(calc.noon_track_key(sku_up))
     except Exception:
         return None
 
@@ -5929,9 +5929,15 @@ def render_ads_reco_chip(sku_up):
     """كبسولة توصية الإعلان جنب صورة المنتج في المبيعات."""
     try:
         D = _ads_reco_compute()
+        if D.get("status") == "error":
+            st.caption("🧠 توصيات الإعلان: تعذر الحساب — " + D.get("err", ""))
+            return
+        if D.get("status") == "nodata":
+            st.caption("🧠 توصيات الإعلان: مفيش بيانات تاريخ في الشيت لسه (شغّل بوت نون واضغط تحديث).")
+            return
         if D.get("status") != "ok":
             return
-        r = D["by_sku"].get(str(sku_up).upper())
+        r = D["by_sku"].get(str(sku_up).upper()) or D["by_key"].get(calc.noon_track_key(sku_up))
         if not r:
             return
         conf = {"high": "عالية", "medium": "متوسطة", "low": "منخفضة"}[r["confidence"]]
@@ -6027,7 +6033,9 @@ def _ads_reco_compute_inner():
     results = calc.ads_reco_all(inputs)
     return {"status": "ok", "raw": raw, "results": results, "inputs": inputs, "known": known,
             "by_sku": {str(r["sku"]).upper(): r for r in results},
-            "inp_by_sku": {str(i["sku"]).upper(): i for i in inputs}}
+            "inp_by_sku": {str(i["sku"]).upper(): i for i in inputs},
+            "by_key": {calc.noon_track_key(r["sku"]): r for r in results},
+            "inp_by_key": {calc.noon_track_key(i["sku"]): i for i in inputs}}
 
 
 
