@@ -5741,7 +5741,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
 ADS_RECO_TABS = ("AdsHistory", "AdsMonthly", "AdsCampaignHist", "AdsExperiments")
 ADS_EXP_SHEET = "AdsExperiments"
 ADS_RECO_TTL = 600
-ADS_RECO_VER = 3      # بيزيد مع أي تغيير في شكل نتيجة الحساب عشان الكاش القديم ما يتستخدمش
+ADS_RECO_VER = 4      # بيزيد مع أي تغيير في شكل نتيجة الحساب عشان الكاش القديم ما يتستخدمش
 
 
 def _ads_reco_load(force=False):
@@ -5929,7 +5929,7 @@ def ads_reco_inline_html(sku_up):
             else:
                 _bk = list((D.get("by_key") or {}).keys())
                 why = (f"مفيش توصية للـ SKU ده (مفتاح البحث {calc.noon_track_key(sku_up)}) — عدد SKUs اللي ليها توصية: {len(_bk)}"
-                       + (f"، أمثلة: {', '.join(_bk[:3])}" if _bk else "") + f" [نسخة {D.get('v')}]")
+                       + (f"، أمثلة: {', '.join(_bk[:3])}" if _bk else "") + f" — {D.get('diag', '')} [نسخة {D.get('v')}]")
         except Exception as e:
             why = "خطأ: " + str(e)[:120]
         return "", f'<div dir="rtl" style="font-size:11px;margin-top:4px;color:#9ca3af;">🧠 التوصية: {calc._nt_h(why)}</div>'
@@ -5988,6 +5988,14 @@ def _ads_reco_compute_inner():
     raw = _ads_reco_load()
     hist, known = calc.ads_hist_parse(raw.get("AdsHistory"))
     mtd, mtd_period = calc.ads_mtd_parse(raw.get("AdsMonthly"))
+    if not mtd:        # لو القراءة الجماعية ماجابتش الشهري، نقراه مباشرة من التاب
+        try:
+            mtd, mtd_period = calc.ads_mtd_parse(ss.worksheet("AdsMonthly").get_all_values())
+        except Exception:
+            pass
+    _diag = (f"AdsHistory: {len(raw.get('AdsHistory') or [])} صف / {len(hist)} SKU · "
+             f"AdsMonthly: {len(raw.get('AdsMonthly') or [])} صف / {len(mtd)} SKU "
+             f"({sum(1 for v in mtd.values() if v.get('spends', 0) > 0)} بمصروف)")
     if not hist and not mtd:
         return {"status": "nodata", "raw": raw}
     live_m, com_m = get_live_map(), get_com_map()
@@ -6048,7 +6056,7 @@ def _ads_reco_compute_inner():
                        "stock": stock, "comp": comp, "today": today})
         extra[inputs[-1]["sku"]] = (k, e)
     results = calc.ads_reco_all(inputs)
-    return {"status": "ok", "raw": raw, "results": results, "inputs": inputs, "known": known,
+    return {"status": "ok", "diag": _diag, "raw": raw, "results": results, "inputs": inputs, "known": known,
             "by_sku": {str(r["sku"]).upper(): r for r in results},
             "inp_by_sku": {str(i["sku"]).upper(): i for i in inputs},
             "by_key": {calc.noon_track_key(r["sku"]): r for r in results},

@@ -4951,8 +4951,9 @@ ADS_RECO_LEVELS = {
 
 
 def _ah_f(v):
+    """نفس تحويل الأرقام المستخدم في get_ads_map (بيتعامل مع الفاصلة العربية والنسبة المئوية)."""
     try:
-        return float(str(v).replace(",", "").strip()) if v not in (None, "") else 0.0
+        return _f2(v)
     except Exception:
         return 0.0
 
