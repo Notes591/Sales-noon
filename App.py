@@ -680,6 +680,9 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
           _vc2 = ("#16a34a", "#4ade80") if ad_ok_t14 else ("#dc2626", "#f87171")
           _pill_v = (f'<span style="border:1px solid {_vc2[0]};color:{_vc2[1]};border-radius:999px;padding:1px 9px;'
                      f'font-size:11px;font-weight:800;white-space:nowrap;">{ad_verdict_t14}</span>')
+      _reco_pill, _reco_line = ("", "")
+      if ad_verdict_t14 and r.get("sku_up"):
+          _reco_pill, _reco_line = ads_reco_inline_html(r["sku_up"])
       st.markdown(
         '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:5px 10px;margin:4px 0;">'
         '<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;">'
@@ -689,7 +692,8 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
         + '</div>'
         + f'<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;margin-top:4px;'
           f'color:{profit_color_t14};font-size:13px;font-weight:800;">'
-          f'<span>🧮 صافي الربح <span dir="ltr">{net_profit_t14:,.2f}</span> ريال</span>{_pill_v}</div>'
+          f'<span>🧮 صافي الربح <span dir="ltr">{net_profit_t14:,.2f}</span> ريال</span>'
+          f'<span style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">{_pill_v}{_reco_pill}</span></div>{_reco_line}'
         + missing_note_t14 + '</div>',
         unsafe_allow_html=True)
     if part in ("all", "calc"):
@@ -4868,6 +4872,33 @@ def apply_noon_our_names(track):
     except AttributeError:
         pass
 
+def render_ads_reco_dashboard():
+    """🧠 توصيات الإعلانات في داشبورد المبيعات (اقتراحات فقط)."""
+    D = _ads_reco_compute()
+    if D.get("status") != "ok":
+        return
+    res = D["results"]
+    st.markdown("### 🧠 توصيات الإعلانات")
+    st.caption("اقتراحات فقط — مفيش أي تغيير تلقائي. التفاصيل الكاملة والتجارب في تبويب الإعلانات.")
+    lv = calc.ADS_RECO_LEVELS
+    cnt = {}
+    for r in res:
+        cnt[r["level"]] = cnt.get(r["level"], 0) + 1
+    cols = st.columns(len(lv))
+    for col, (lk, (lab, colr, bg)) in zip(cols, lv.items()):
+        col.markdown(f'<div style="background:{bg};border:1px solid {colr};border-radius:10px;padding:6px;text-align:center;direction:rtl;">'
+                     f'<div style="font-size:12px;color:{colr};font-weight:800;">{lab}</div>'
+                     f'<div style="font-size:20px;font-weight:800;color:#111827;">{cnt.get(lk, 0)}</div></div>', unsafe_allow_html=True)
+    act = [r for r in res if r["level"] in ("urgent", "test_pause", "trim", "increase")]
+    if act:
+        st.markdown(calc.ads_reco_table_html(act, limit=15), unsafe_allow_html=True)
+        if len(act) > 15:
+            st.caption(f"معروض أول 15 من {len(act)} — الباقي في Excel.")
+    else:
+        st.caption("مفيش توصيات تحتاج تدخل دلوقتي.")
+    dl_btn(pd.DataFrame(calc.ads_reco_rows(res)), "ads_recommendations_dash", key="ads_reco_dl_dash")
+
+
 def render_noon_price_alerts():
     """🚨 تنبيهات الأسعار في داشبورد المبيعات: اسكيوهات نون فيها منافس أرخص مننا + Excel."""
     nt = get_noon_track()
@@ -5676,6 +5707,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
 
     if channel == "noon" and key_suffix == "all":
         render_noon_price_alerts()
+        render_ads_reco_dashboard()
 
     # ── أصناف تحتاج انتباه (مع صور) | Needs-attention (with images) ──
     # القائمة اتحسبت فوق قبل شريط التنبيهات السريعة (attention_rows_td) — هنا بس بنعرضها بالتفصيل
@@ -5825,9 +5857,27 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
     def _tot(lst):
         return (sum(a["spends"] for a in lst), sum(a["revenue"] for a in lst),
                 sum(a["orders"] for a in lst), sum(a["clicks"] for a in lst))
+    def _tacos_txt(spend, dates):
+        try:
+            D = _ads_reco_compute()
+            inp = D["inp_by_sku"].get(str(sku_up).upper()) if D.get("status") == "ok" else None
+            if not inp or not inp.get("price"):
+                return ""
+            units = sum((inp["units_by_date"] or {}).get(d, 0) for d in dates)
+            sales = units * inp["price"]
+            if sales <= 0:
+                return ""
+            return (f"<br>📉 <b>TACOS: {spend / sales * 100:.1f}%</b> "
+                    f"<span style='color:#9ca3af;'>(مصروف ÷ مبيعات الـ SKU الكلية ≈ {sales:,.0f} ريال من {units:,.0f} وحدة)</span>")
+        except Exception:
+            return ""
+    _today = datetime.now().date()
+    _yday = [_today - timedelta(days=1)]
+    _mdays = [_today.replace(day=1) + timedelta(days=i) for i in range(max((_today - _today.replace(day=1)).days, 0))]
     def _show(lst, label):
+        _dates = _yday if label == "أمس" else _mdays
         for ad in lst:
-            st.markdown(f"🏷️ **الحملات:** {ad['campaign']}<br>{_ads_line(ad)}", unsafe_allow_html=True)
+            st.markdown(f"🏷️ **الحملات:** {ad['campaign']}<br>{_ads_line(ad)}" + _tacos_txt(ad["spends"], _dates), unsafe_allow_html=True)
     with st.expander("📢 إعلانات (إجمالي الـ SKU)"):
         t_y, t_m = st.tabs(["🕒 أمس", "📅 الشهر (من أول الشهر لأمس)"])
         with t_y:
@@ -5837,6 +5887,42 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
                 st.caption("مفيش إعلان اشتغل أمس على الـ SKU ده (أو البوت لسه ماسحبش أمس).")
         with t_m:
             _show(ent, "الشهر")
+
+
+def _ads_reco_get(sku_up):
+    try:
+        D = _ads_reco_compute()
+        if D.get("status") != "ok":
+            return None
+        return D["by_sku"].get(str(sku_up).upper())
+    except Exception:
+        return None
+
+
+def _ads_reco_metrics_line(r):
+    """TACOS | ROAS | الإعلان من الربح — من آخر 7 أيام."""
+    m = r["m"]
+    bits = []
+    if m.get("tacos") is not None:
+        bits.append(f"TACOS <b>{m['tacos'] * 100:.1f}%</b>")
+    if m.get("roas") is not None:
+        bits.append(f"ROAS <b>{m['roas']:.2f}</b>")
+    if m.get("ad_share") is not None:
+        bits.append(f"الإعلان من الربح <b>{m['ad_share'] * 100:.0f}%</b>")
+    return " &nbsp;|&nbsp; ".join(bits)
+
+
+def ads_reco_inline_html(sku_up):
+    """(كبسولة التوصية، سطر الاقتراح والأرقام) — بيتحطوا جنب «الإعلان مربح/غير مربح» في كارت المبيعات."""
+    r = _ads_reco_get(sku_up)
+    if not r:
+        return "", ""
+    pill = calc._ads_pill(r["label"], r["color"], r["bg"])
+    ml = _ads_reco_metrics_line(r)
+    line = ('<div dir="rtl" style="font-size:12px;margin-top:4px;color:#e2e8f0;">'
+            + (f'<div>📉 {ml} <span style="color:#9ca3af;">(آخر 7 أيام)</span></div>' if ml else "")
+            + f'<div>💡 {calc._nt_h(r["suggestion"])}</div></div>')
+    return pill, line
 
 
 def render_ads_reco_chip(sku_up):
@@ -5853,6 +5939,7 @@ def render_ads_reco_chip(sku_up):
         st.markdown(
             '<div style="direction:rtl;margin:4px 0;">' + calc._ads_pill(r["label"], r["color"], r["bg"]) +
             f' <span style="font-size:12px;color:#9ca3af;">ثقة {conf}</span>'
+            f'<div style="font-size:12px;margin-top:3px;">{_ads_reco_metrics_line(r)}</div>'
             f'<div style="font-size:12px;margin-top:3px;">{calc._nt_h(why)}</div>'
             f'<div style="font-size:12px;color:#9ca3af;">{calc._nt_h(r["suggestion"])}</div></div>',
             unsafe_allow_html=True)
@@ -5939,7 +6026,8 @@ def _ads_reco_compute_inner():
         extra[inputs[-1]["sku"]] = (k, e)
     results = calc.ads_reco_all(inputs)
     return {"status": "ok", "raw": raw, "results": results, "inputs": inputs, "known": known,
-            "by_sku": {str(r["sku"]).upper(): r for r in results}}
+            "by_sku": {str(r["sku"]).upper(): r for r in results},
+            "inp_by_sku": {str(i["sku"]).upper(): i for i in inputs}}
 
 
 
