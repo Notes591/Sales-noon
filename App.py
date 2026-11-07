@@ -5741,7 +5741,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
 ADS_RECO_TABS = ("AdsHistory", "AdsMonthly", "AdsCampaignHist", "AdsExperiments")
 ADS_EXP_SHEET = "AdsExperiments"
 ADS_RECO_TTL = 600
-ADS_RECO_VER = 4      # بيزيد مع أي تغيير في شكل نتيجة الحساب عشان الكاش القديم ما يتستخدمش
+ADS_RECO_VER = 5      # بيزيد مع أي تغيير في شكل نتيجة الحساب عشان الكاش القديم ما يتستخدمش
 
 
 def _ads_reco_load(force=False):
@@ -5858,7 +5858,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
     def _tot(lst):
         return (sum(a["spends"] for a in lst), sum(a["revenue"] for a in lst),
                 sum(a["orders"] for a in lst), sum(a["clicks"] for a in lst))
-    def _tacos_txt(spend, dates):
+    def _tacos_txt(spend, dates, ad_orders=0):
         try:
             D = _ads_reco_compute()
             inp = ((D.get("inp_by_sku") or {}).get(str(sku_up).upper()) or (D.get("inp_by_key") or {}).get(calc.noon_track_key(sku_up))) if D.get("status") == "ok" else None
@@ -5867,9 +5867,16 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
             units = sum((inp["units_by_date"] or {}).get(d, 0) for d in dates)
             sales = units * inp["price"]
             if sales <= 0:
-                return ""
+                return "<br>📉 TACOS: — <span style='color:#9ca3af;'>(مفيش مبيعات للـ SKU ده في الفترة في شيت الطلبات)</span>"
+            warn = []
+            if ad_orders and ad_orders > units:
+                warn.append(f"طلبات الإعلان ({ad_orders:,.0f}) أكتر من وحدات الطلبات ({units:,.0f})")
+            of = D.get("orders_from")
+            if of and dates and of > min(dates):
+                warn.append(f"بيانات الطلبات عندنا بتبدأ من {of}")
+            w = (f" <span style='color:#f59e0b;'>⚠️ غير دقيق — {' و'.join(warn)}</span>" if warn else "")
             return (f"<br>📉 <b>TACOS: {spend / sales * 100:.1f}%</b> "
-                    f"<span style='color:#9ca3af;'>(مصروف ÷ مبيعات الـ SKU الكلية ≈ {sales:,.0f} ريال من {units:,.0f} وحدة)</span>")
+                    f"<span style='color:#9ca3af;'>(مصروف ÷ مبيعات الـ SKU الكلية ≈ {sales:,.0f} ريال من {units:,.0f} وحدة)</span>{w}")
         except Exception:
             return ""
     _today = datetime.now().date()
@@ -5878,7 +5885,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
     def _show(lst, label):
         _dates = _yday if label == "أمس" else _mdays
         for ad in lst:
-            st.markdown(f"🏷️ **الحملات:** {ad['campaign']}<br>{_ads_line(ad)}" + _tacos_txt(ad["spends"], _dates), unsafe_allow_html=True)
+            st.markdown(f"🏷️ **الحملات:** {ad['campaign']}<br>{_ads_line(ad)}" + _tacos_txt(ad["spends"], _dates, ad.get("orders", 0)), unsafe_allow_html=True)
     with st.expander("📢 إعلانات"):
         t_y, t_m = st.tabs(["🕒 أمس", "📅 الشهر (من أول الشهر لأمس)"])
         with t_y:
@@ -5937,6 +5944,7 @@ def ads_reco_inline_html(sku_up):
     ml = _ads_reco_metrics_line(r)
     line = ('<div dir="rtl" style="font-size:12px;margin-top:4px;color:#e2e8f0;">'
             + (f'<div>📉 {ml} <span style="color:#9ca3af;">(آخر 7 أيام)</span></div>' if ml else "")
+            + (f'<div>🔎 {calc._nt_h(r["reasons"][0])}</div>' if r.get("reasons") else "")
             + f'<div>💡 {calc._nt_h(r["suggestion"])}</div></div>')
     return pill, line
 
@@ -6015,6 +6023,8 @@ def _ads_reco_compute_inner():
         counts = build_daily_orders_counts(days45)
     except Exception:
         counts = {}
+    _of = [d for dd in counts.values() for d, n in dd.items() if n]
+    orders_from = min(_of) if _of else None
     units_by_key = {}
     for s, dd in counts.items():
         k = calc.noon_track_key(s)
@@ -6056,7 +6066,7 @@ def _ads_reco_compute_inner():
                        "stock": stock, "comp": comp, "today": today})
         extra[inputs[-1]["sku"]] = (k, e)
     results = calc.ads_reco_all(inputs)
-    return {"status": "ok", "diag": _diag, "raw": raw, "results": results, "inputs": inputs, "known": known,
+    return {"status": "ok", "diag": _diag, "orders_from": orders_from, "raw": raw, "results": results, "inputs": inputs, "known": known,
             "by_sku": {str(r["sku"]).upper(): r for r in results},
             "inp_by_sku": {str(i["sku"]).upper(): i for i in inputs},
             "by_key": {calc.noon_track_key(r["sku"]): r for r in results},
