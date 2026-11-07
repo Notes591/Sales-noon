@@ -576,7 +576,7 @@ def get_live_map(*args, **kwargs):
 
 
 
-def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads_entries_t14, total_orders_t14, total_spends_t14, part="all"):
+def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads_entries_t14, total_orders_t14, total_spends_t14, part="all", reco_noon=False):
     """يعرض بلوك السعر الأساسي/التوصيل/العمولة/الصافي/الربح لصف SKU واحد في تاب المبيعات
     (بيتنادى من الـ FBN والـ FBB على حد سواء). بيعرض البلوك دايمًا حتى لو بيانات العمولة/
     التوصيل (من تاب COM) أو السعر (من LIVE/الطلبات) ناقصة لهذا الـ SKU — وبيحط صفر في
@@ -681,7 +681,7 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
           _pill_v = (f'<span style="border:1px solid {_vc2[0]};color:{_vc2[1]};border-radius:999px;padding:1px 9px;'
                      f'font-size:11px;font-weight:800;white-space:nowrap;">{ad_verdict_t14}</span>')
       _reco_pill, _reco_line = ("", "")
-      if ad_verdict_t14 and r.get("sku_up"):
+      if reco_noon and ad_verdict_t14 and r.get("sku_up"):
           _reco_pill, _reco_line = ads_reco_inline_html(r["sku_up"])
       st.markdown(
         '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:5px 10px;margin:4px 0;">'
@@ -5927,7 +5927,9 @@ def ads_reco_inline_html(sku_up):
             elif stt == "nokeys":
                 why = "مفيش SKU عليه مصروف إعلاني في بيانات التاريخ"
             else:
-                why = "الـ SKU ده مش موجود في بيانات الإعلانات اليومية (AdsHistory) — ممكن البوت لسه ماسحبوش"
+                _bk = list((D.get("by_key") or {}).keys())
+                why = (f"مفيش توصية للـ SKU ده (مفتاح البحث {calc.noon_track_key(sku_up)}) — عدد SKUs اللي ليها توصية: {len(_bk)}"
+                       + (f"، أمثلة: {', '.join(_bk[:3])}" if _bk else "") + f" [نسخة {D.get('v')}]")
         except Exception as e:
             why = "خطأ: " + str(e)[:120]
         return "", f'<div dir="rtl" style="font-size:11px;margin-top:4px;color:#9ca3af;">🧠 التوصية: {calc._nt_h(why)}</div>'
@@ -7094,7 +7096,7 @@ def _t14_sku_part(r):
     #    missing values default to zero with a warning) ══
     render_price_profit_block_t14(
         r, com_map_t14, live_map_t14, sales_dates,
-        ads_entries_t14, total_orders_t14, total_spends_t14)
+        ads_entries_t14, total_orders_t14, total_spends_t14, reco_noon=True)
     if ads_entries_t14:
         render_noon_ads_expander(r["sku_up"], ads_entries_t14, total_spends_t14, total_revenue_t14, total_orders_t14)
 
@@ -7433,7 +7435,7 @@ def _t14_noon_part(r, part):
                 f'{" — قارب على النفاد" if xlow else ""}</span>',
                 unsafe_allow_html=True)
     elif part in ("box", "calc", "verdict"):
-        render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s, part=part)
+        render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ent, tot_o, tot_s, part=part, reco_noon=True)
     elif part == "comp":
         render_noon_track(r["sku_up"])
     elif part == "ads" and ent:
