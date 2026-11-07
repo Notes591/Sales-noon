@@ -5916,7 +5916,20 @@ def ads_reco_inline_html(sku_up):
     """(كبسولة التوصية، سطر الاقتراح والأرقام) — بيتحطوا جنب «الإعلان مربح/غير مربح» في كارت المبيعات."""
     r = _ads_reco_get(sku_up)
     if not r:
-        return "", ""
+        try:
+            D = _ads_reco_compute()
+            stt = D.get("status")
+            if stt == "error":
+                why = "تعذر حساب التوصيات: " + D.get("err", "")
+            elif stt == "nodata":
+                why = "مفيش بيانات تاريخ إعلانات في الشيت (AdsHistory/AdsMonthly) — شغّل البوت واضغط تحديث"
+            elif stt == "nokeys":
+                why = "مفيش SKU عليه مصروف إعلاني في بيانات التاريخ"
+            else:
+                why = "الـ SKU ده مش موجود في بيانات الإعلانات اليومية (AdsHistory) — ممكن البوت لسه ماسحبوش"
+        except Exception as e:
+            why = "خطأ: " + str(e)[:120]
+        return "", f'<div dir="rtl" style="font-size:11px;margin-top:4px;color:#9ca3af;">🧠 التوصية: {calc._nt_h(why)}</div>'
     pill = calc._ads_pill(r["label"], r["color"], r["bg"])
     ml = _ads_reco_metrics_line(r)
     line = ('<div dir="rtl" style="font-size:12px;margin-top:4px;color:#e2e8f0;">'
