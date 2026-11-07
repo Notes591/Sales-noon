@@ -5741,6 +5741,7 @@ def _render_sales_dashboard_body(counts_fn, prices_fn, family_stats_fn, key_suff
 ADS_RECO_TABS = ("AdsHistory", "AdsMonthly", "AdsCampaignHist", "AdsExperiments")
 ADS_EXP_SHEET = "AdsExperiments"
 ADS_RECO_TTL = 600
+ADS_RECO_VER = 3      # بيزيد مع أي تغيير في شكل نتيجة الحساب عشان الكاش القديم ما يتستخدمش
 
 
 def _ads_reco_load(force=False):
@@ -5860,7 +5861,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
     def _tacos_txt(spend, dates):
         try:
             D = _ads_reco_compute()
-            inp = (D["inp_by_sku"].get(str(sku_up).upper()) or D["inp_by_key"].get(calc.noon_track_key(sku_up))) if D.get("status") == "ok" else None
+            inp = ((D.get("inp_by_sku") or {}).get(str(sku_up).upper()) or (D.get("inp_by_key") or {}).get(calc.noon_track_key(sku_up))) if D.get("status") == "ok" else None
             if not inp or not inp.get("price"):
                 return ""
             units = sum((inp["units_by_date"] or {}).get(d, 0) for d in dates)
@@ -5894,7 +5895,7 @@ def _ads_reco_get(sku_up):
         D = _ads_reco_compute()
         if D.get("status") != "ok":
             return None
-        return D["by_sku"].get(str(sku_up).upper()) or D["by_key"].get(calc.noon_track_key(sku_up))
+        return (D.get("by_sku") or {}).get(str(sku_up).upper()) or (D.get("by_key") or {}).get(calc.noon_track_key(sku_up))
     except Exception:
         return None
 
@@ -5950,7 +5951,7 @@ def render_ads_reco_chip(sku_up):
             return
         if D.get("status") != "ok":
             return
-        r = D["by_sku"].get(str(sku_up).upper()) or D["by_key"].get(calc.noon_track_key(sku_up))
+        r = (D.get("by_sku") or {}).get(str(sku_up).upper()) or (D.get("by_key") or {}).get(calc.noon_track_key(sku_up))
         if not r:
             return
         conf = {"high": "عالية", "medium": "متوسطة", "low": "منخفضة"}[r["confidence"]]
@@ -5969,12 +5970,13 @@ def render_ads_reco_chip(sku_up):
 def _ads_reco_compute(force=False):
     """بيحسب توصيات كل الـ SKUs مرة واحدة ويكاشيها 10 دقايق (بتستخدمها شاشة التوصيات وكارت المبيعات)."""
     c = st.session_state.get("_ads_reco_calc")
-    if c and not force and time.time() - c[0] < ADS_RECO_TTL:
+    if c and not force and time.time() - c[0] < ADS_RECO_TTL and c[1].get("v") == ADS_RECO_VER:
         return c[1]
     try:
         out = _ads_reco_compute_inner()
     except Exception as e:
         out = {"status": "error", "err": str(e)[:200]}
+    out["v"] = ADS_RECO_VER
     st.session_state["_ads_reco_calc"] = (time.time(), out)
     return out
 
