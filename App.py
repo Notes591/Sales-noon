@@ -4880,6 +4880,8 @@ def render_ads_reco_dashboard():
     res = D["results"]
     st.markdown("### 🧠 توصيات الإعلانات")
     st.caption("اقتراحات فقط — مفيش أي تغيير تلقائي. التفاصيل الكاملة والتجارب في تبويب الإعلانات.")
+    with st.expander("ℹ️ معنى TACOS وROAS وباقي المصطلحات"):
+        st.markdown(calc.ADS_GLOSSARY_HTML, unsafe_allow_html=True)
     lv = calc.ADS_RECO_LEVELS
     cnt = {}
     for r in res:
@@ -5847,8 +5849,8 @@ def _ads_line(ad, cps=True):
     return (f"👁️ ظهور: {ad['views']:,.0f} &nbsp;|&nbsp; 🖱️ نقرات: {ad['clicks']:,.0f} &nbsp;|&nbsp; "
             f"🛒 طلبات: {ad['orders']:,.0f} &nbsp;|&nbsp; ➕ سلة: {ad['atc']:,.0f}<br>"
             f"💸 مصروف: {ad['spends']:,.2f} ريال &nbsp;|&nbsp; 💰 إيراد: {ad['revenue']:,.2f} ريال<br>"
-            f"📊 CTR: {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS: {ad['roas']:.2f} &nbsp;|&nbsp; "
-            f"CPC: {ad['cpc']:.2f} &nbsp;|&nbsp; CPS: {ad['cps']:.2f} &nbsp;|&nbsp; CVR: {ad['cvr']:.2f}%")
+            f"📊 CTR (نسبة النقر): {ad['ctr']:.2f}% &nbsp;|&nbsp; 🎯 ROAS (عائد الإعلان): {ad['roas']:.2f}<br>"
+            f"CPC (تكلفة النقرة): {ad['cpc']:.2f} &nbsp;|&nbsp; CPS (تكلفة الطلب): {ad['cps']:.2f} &nbsp;|&nbsp; CVR (نسبة التحويل): {ad['cvr']:.2f}%")
 
 
 def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
@@ -5867,7 +5869,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
             units = sum((inp["units_by_date"] or {}).get(d, 0) for d in dates)
             sales = units * inp["price"]
             if sales <= 0:
-                return "<br>📉 TACOS: — <span style='color:#9ca3af;'>(مفيش مبيعات للـ SKU ده في الفترة في شيت الطلبات)</span>"
+                return "<br>📉 TACOS (نسبة الإعلان): — <span style='color:#9ca3af;'>(مفيش مبيعات للـ SKU ده في الفترة في شيت الطلبات)</span>"
             warn = []
             if ad_orders and ad_orders > units:
                 warn.append(f"طلبات الإعلان ({ad_orders:,.0f}) أكتر من وحدات الطلبات ({units:,.0f})")
@@ -5875,7 +5877,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
             if of and dates and of > min(dates):
                 warn.append(f"بيانات الطلبات عندنا بتبدأ من {of}")
             w = (f" <span style='color:#f59e0b;'>⚠️ غير دقيق — {' و'.join(warn)}</span>" if warn else "")
-            return (f"<br>📉 <b>TACOS: {spend / sales * 100:.1f}%</b> "
+            return (f"<br>📉 <b>TACOS (نسبة الإعلان): {spend / sales * 100:.1f}%</b> "
                     f"<span style='color:#9ca3af;'>(مصروف ÷ مبيعات الـ SKU الكلية ≈ {sales:,.0f} ريال من {units:,.0f} وحدة)</span>{w}")
         except Exception:
             return ""
@@ -5912,11 +5914,15 @@ def _ads_reco_metrics_line(r):
     m = r["m"]
     bits = []
     if m.get("tacos") is not None:
-        bits.append(f"TACOS <b>{m['tacos'] * 100:.1f}%</b>")
+        bits.append(f"TACOS <small>(نسبة الإعلان)</small> <b>{m['tacos'] * 100:.1f}%</b>")
     if m.get("roas") is not None:
-        bits.append(f"ROAS <b>{m['roas']:.2f}</b>")
+        bits.append(f"ROAS <small>(عائد الإعلان)</small> <b>{m['roas']:.2f}</b>")
     if m.get("ad_share") is not None:
         bits.append(f"الإعلان من الربح <b>{m['ad_share'] * 100:.0f}%</b>")
+    conf = {"high": "عالية", "medium": "متوسطة", "low": "منخفضة"}.get(r.get("confidence"), "")
+    days = m.get("cov_days")
+    if conf:
+        bits.append(f"ثقة <b>{conf}</b>" + (f" ({days:.0f} يوم بيانات)" if days is not None else ""))
     return " &nbsp;|&nbsp; ".join(bits)
 
 
@@ -5943,7 +5949,7 @@ def ads_reco_inline_html(sku_up):
     pill = calc._ads_pill(r["label"], r["color"], r["bg"])
     ml = _ads_reco_metrics_line(r)
     line = ('<div dir="rtl" style="font-size:12px;margin-top:4px;color:#e2e8f0;">'
-            + (f'<div>📉 {ml} <span style="color:#9ca3af;">(آخر 7 أيام)</span></div>' if ml else "")
+            + (f'<div>📉 {ml} </div>' if ml else "")
             + (f'<div>🔎 {calc._nt_h(r["reasons"][0])}</div>' if r.get("reasons") else "")
             + f'<div>💡 {calc._nt_h(r["suggestion"])}</div></div>')
     return pill, line
@@ -6080,6 +6086,8 @@ def render_ads_reco_section():
     st.markdown("### 🧠 تحليل ربحية الإعلانات والتوصيات")
     st.caption("اقتراحات فقط — النظام مش بيغيّر أي ميزانية أو حملة. القرار ليك. "
                "التقييم على المنتج كله (مبيعات عضوية + إعلان) مش على أرباح الطلبات المنسوبة للإعلان بس.")
+    with st.expander("ℹ️ معنى TACOS وROAS وباقي المصطلحات"):
+        st.markdown(calc.ADS_GLOSSARY_HTML, unsafe_allow_html=True)
     if st.button("🔄 تحديث بيانات التوصيات", key="ads_reco_refresh"):
         _ads_reco_load(force=True)
         st.session_state.pop("_ads_monthly_rows", None)

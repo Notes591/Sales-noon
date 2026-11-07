@@ -5093,9 +5093,9 @@ def ads_reco_for_sku(inp, cfg=None):
         confirmed.append(("إجمالي وحدات المنتج", fmt(m["units"], 0)))
         confirmed.append(("غير منسوب للإعلان (عضوي)", f"{fmt(m['organic_units'], 0)} ({m['organic_share'] * 100:.0f}%)"))
     if m["roas"] is not None:
-        confirmed.append(("ROAS", fmt(m["roas"])))
+        confirmed.append(("ROAS (عائد الإعلان)", fmt(m["roas"])))
     if m["tacos"] is not None:
-        confirmed.append(("TACOS (المصروف ÷ إجمالي المبيعات)", f"{m['tacos'] * 100:.1f}%"))
+        confirmed.append(("TACOS (نسبة الإعلان)", f"{m['tacos'] * 100:.1f}%"))
     if m["profit_before"] is not None:
         confirmed.append(("ربح المنتج قبل الإعلان", fmt(m["profit_before"])))
         confirmed.append(("ربح المنتج بعد الإعلان", fmt(m["profit_after"])))
@@ -5335,7 +5335,7 @@ def ads_reco_table_html(results, limit=80):
     f = lambda x, d=0: "—" if x is None else f"{x:,.{d}f}"
     th = "padding:6px 8px;text-align:right;font-size:11px;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap;"
     td = "padding:6px 8px;font-size:12px;border-bottom:1px solid #f1f5f9;vertical-align:top;"
-    head = ["SKU", "التوصية", "الثقة", "المصروف", "ROAS", "TACOS", "ربح قبل", "ربح بعد", "الإعلان من الربح", "عضوي", "تغطية", "السبب الرئيسي"]
+    head = ["SKU", "التوصية", "الثقة", "المصروف", "ROAS<br><span style=\"font-weight:400\">عائد الإعلان</span>", "TACOS<br><span style=\"font-weight:400\">نسبة الإعلان</span>", "ربح قبل", "ربح بعد", "الإعلان من الربح", "عضوي", "تغطية", "السبب الرئيسي"]
     rows = []
     for r in results[:limit]:
         m = r["m"]
@@ -5379,7 +5379,7 @@ def _ads_trend_html(r):
         fb = f"{b * 100:.1f}%" if pct else f"{b:,.{d}f}"
         return f'<span style="margin-left:12px;">{name}: <b style="color:{col};direction:ltr;display:inline-block;">{arrow} {fa}</b> <span style="color:#6b7280;">(قبلها {fb})</span></span>'
     return ('<div style="font-size:12px;color:#111827;">📈 آخر 7 أيام مقابل الـ 7 قبلها — '
-            + item("TACOS", t["tacos"], False, pct=True) + item("ROAS", t["roas"], True)
+            + item("TACOS (نسبة الإعلان)", t["tacos"], False, pct=True) + item("ROAS (عائد الإعلان)", t["roas"], True)
             + item("ربح يومي بعد الإعلان", t["profit_after_pd"], True, 1) + item("وحدات يومية", t["units_pd"], True, 1) + "</div>")
 
 
@@ -5420,3 +5420,17 @@ def ads_exp_card_html(exp, ev, level_label=""):
             f'<span style="font-size:12px;color:#374151;">{_nt_h(exp.get("Type"))} — بدأت {exp["start"]} (يوم {ev["days"]}) — خطوة {_nt_h(exp.get("Step %"))}% كل {exp["every_days"]} أيام</span></div>'
             f'<div style="margin-top:6px;">{nums}</div><ul style="margin:6px 18px;padding:0;font-size:13px;">{why}</ul>'
             f'<div style="font-size:11px;color:#6b7280;">{_nt_h(ev["rank"])} — ماتنساش تراجع الترتيب يدوياً على نون أثناء التجربة.</div></div>')
+
+
+ADS_GLOSSARY_HTML = (
+    '<div dir="rtl" style="font-size:13px;line-height:1.9;">'
+    '<b>TACOS</b> = مصروف الإعلان ÷ <u>إجمالي</u> مبيعات المنتج (إعلان + عضوي). كل ما قلّ كان أحسن.<br>'
+    '<b>ROAS</b> = مبيعات الإعلان ÷ مصروفه. يعني كل ريال إعلان جاب كام ريال مبيعات.<br>'
+    '<b>ROAS التعادل</b> = سعر البيع ÷ ربح الوحدة. أقل ROAS يغطي تكلفة الإعلان؛ تحته الإعلان بياكل ربح.<br>'
+    '<b>الإعلان من الربح</b> = مصروف الإعلان ÷ ربح المنتج قبل الإعلان.<br>'
+    '<b>عضوي</b> = مبيعات جت من غير ما العميل يضغط على إعلانك.<br>'
+    '<b>CTR</b> = نسبة النقر (نقرات ÷ ظهور). <b>CPC</b> = تكلفة النقرة. <b>CPS</b> = تكلفة الطلب الواحد. '
+    '<b>CVR</b> = نسبة تحويل النقرات لطلبات.<br>'
+    '<b>تغطية</b> = عدد أيام المخزون الكافية على معدل البيع الحالي.'
+    '</div>'
+)
