@@ -969,6 +969,9 @@ def get_ads_map(env, data=None):
         entry = {
             "campaign": col(row, "Campaign Name") or "—",
             "cid": str(col(row, "Campaign ID")).strip(),
+            "store": str(col(row, "Store")).strip(),
+            "psku": str(col(row, "PSKU")).strip(),
+            "offer": str(col(row, "Offer Code")).strip(),
             "views":  _f2(col(row, "Views")),
             "clicks": _f2(col(row, "Clicks")),
             "orders": _f2(col(row, "Orders")),
@@ -986,7 +989,51 @@ def get_ads_map(env, data=None):
         if not entry["roas"] and entry["spends"] > 0:
             entry["roas"] = entry["revenue"] / entry["spends"]
         m.setdefault(sku_up, []).append(entry)
-    return m
+    return _ads_merge_same_campaign(m)
+
+
+def _ads_merge_same_campaign(m):
+    """نفس الـ SKU في نفس الحملة بأكتر من صف (عروض/Offer Code مختلفة) -> صف واحد بأرقام مجمّعة،
+    والنسب (CTR/ROAS/CPC/CPS/CVR) بتتحسب من المجاميع مش بتتجمّع."""
+    out = {}
+    for sku, lst in m.items():
+        grp, order = {}, []
+        for e in lst:
+            k = e.get("cid") or e.get("campaign")
+            if k not in grp:
+                g = dict(e)
+                grp[k] = g
+                order.append(k)
+            else:
+                g = grp[k]
+                for f in ("views", "clicks", "orders", "atc", "spends", "revenue"):
+                    g[f] += e[f]
+        res = []
+        for k in order:
+            g = grp[k]
+            g["ctr"] = (g["clicks"] / g["views"] * 100) if g["views"] > 0 else 0.0
+            g["cvr"] = (g["orders"] / g["clicks"] * 100) if g["clicks"] > 0 else 0.0
+            g["cpc"] = (g["spends"] / g["clicks"]) if g["clicks"] > 0 else 0.0
+            g["cps"] = (g["spends"] / g["orders"]) if g["orders"] > 0 else 0.0
+            g["roas"] = (g["revenue"] / g["spends"]) if g["spends"] > 0 else 0.0
+            res.append(g)
+        out[sku] = res
+    return out
+
+def ads_merge_by_sku(lst):
+    """كل صفوف إعلانات SKU واحد (حتى لو من حملات مختلفة) -> صف واحد بمجاميع، والنسب من المجاميع. بيرجع [] لو القايمة فاضية."""
+    if not lst:
+        return []
+    g = {"campaign": " + ".join(dict.fromkeys(str(e.get("campaign") or "—") for e in lst)), "n_campaigns": len(lst)}
+    for f in ("views", "clicks", "orders", "atc", "spends", "revenue"):
+        g[f] = sum(e[f] for e in lst)
+    g["ctr"] = (g["clicks"] / g["views"] * 100) if g["views"] > 0 else 0.0
+    g["cvr"] = (g["orders"] / g["clicks"] * 100) if g["clicks"] > 0 else 0.0
+    g["cpc"] = (g["spends"] / g["clicks"]) if g["clicks"] > 0 else 0.0
+    g["cps"] = (g["spends"] / g["orders"]) if g["orders"] > 0 else 0.0
+    g["roas"] = (g["revenue"] / g["spends"]) if g["spends"] > 0 else 0.0
+    return [g]
+
 
 def get_ads_map_amazon(env):
     """بتقرأ من شيت AdvertisementsAmz بشكله الجديد — تصدير إعلانات أمازون

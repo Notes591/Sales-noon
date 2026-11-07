@@ -5820,18 +5820,15 @@ def _ads_line(ad, cps=True):
 
 def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
     """إعلانات نون في كارت المبيعات: تبويب لأمس (من AdsDaily) وتبويب للشهر (من AdsMonthly) — كل واحد لوحده."""
-    yl = _ads_yday_for(sku_up)
+    yl = calc.ads_merge_by_sku(_ads_yday_for(sku_up))
+    ent = calc.ads_merge_by_sku(ent)
     def _tot(lst):
         return (sum(a["spends"] for a in lst), sum(a["revenue"] for a in lst),
                 sum(a["orders"] for a in lst), sum(a["clicks"] for a in lst))
     def _show(lst, label):
-        s_, r_, o_, c_ = _tot(lst)
-        st.markdown(f"💸 **إجمالي المصروف:** {s_:,.2f} ريال &nbsp;|&nbsp; 💰 **إجمالي الإيراد:** {r_:,.2f} ريال &nbsp;|&nbsp; "
-                    f"🛒 **طلبات:** {o_:,.0f} &nbsp;|&nbsp; 🖱️ **نقرات:** {c_:,.0f}", unsafe_allow_html=True)
         for ad in lst:
-            st.markdown(f"**{ad['campaign']}**<br>{_ads_line(ad)}", unsafe_allow_html=True)
-            st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
-    with st.expander(f"📢 إعلانات ({len(ent)})"):
+            st.markdown(f"🏷️ **الحملات:** {ad['campaign']}<br>{_ads_line(ad)}", unsafe_allow_html=True)
+    with st.expander("📢 إعلانات (إجمالي الـ SKU)"):
         t_y, t_m = st.tabs(["🕒 أمس", "📅 الشهر (من أول الشهر لأمس)"])
         with t_y:
             if yl:
