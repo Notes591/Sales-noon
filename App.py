@@ -2295,7 +2295,7 @@ def _own_tag(owner, qty=None, what=""):
         t += f": {qty:,} قطعة {what}".rstrip()
     return f" <span style='color:#fbbf24;font-weight:700;'>[{t}]</span>"
 
-def _china_avail_sentence(g, today, owner=_OWN_CU):
+def _china_avail_sentence(g, today, owner=_OWN_CU, hide_missing=False):
     dated, undated = {}, 0
     for l in g:
         d = _china_date(l["_d"]["eta_dest"])
@@ -2307,6 +2307,10 @@ def _china_avail_sentence(g, today, owner=_OWN_CU):
     est_note = f"≈ = تقديري (تاريخ وصول الميناء الفعلي + {calc.CHINA_RIYADH_LEAD_DAYS} يوم، مش تاريخ مكتوب)"
     parts = [f"{q:,} قطعة يوم {'≈ ' if e else ''}{_china_fmt_date(d, today)}" for d, (q, e) in sorted(dated.items())]
     _tag = (f" <span style='color:#9ca3af;'>({est_note})</span>" if any(e for _, e in dated.values()) else "")
+    if hide_missing:   # لسه في خطوة قبل الوصول — طبيعي ماله تاريخ رياض، منذكرش اللي بعدها
+        undated = 0
+        if not parts:
+            return ""
     if parts and undated:
         return ("📅 متوقع تكون متاحة للبيع في مخزن الرياض: " + "، ".join(parts) + _tag
                 + f"، و{undated:,} قطعة لسه تاريخ وصولها لمخزن الرياض غير مكتوب في ملف الصين"
@@ -2346,8 +2350,11 @@ def _china_card_parts(inc, today, row=None, sku_up=""):
         line = f"🏭 <b>{q['factory']:,} قطعة</b> لسه في المصنع ({parts})"
         if ready:
             line += f" — الإنتاج جاهز {ready}"
-        items.append(line + " — ولسه ماتشحنتش من الصين" + (_own_tag(_OWN_CN, q['factory'], "ولسه ماتشحنتش") if any(_china_date(l["_d"]["ready"]) and _china_date(l["_d"]["ready"]) < today for l in g) else "")
-                     + "<br><span class='cn-sub'>" + _china_avail_sentence(g, today, _OWN_CN) + "</span>")
+        _late_q = sum(l["_qty"] for l in g if _china_date(l["_d"]["ready"]) and _china_date(l["_d"]["ready"]) < today)
+        if _late_q:
+            line += " — ولسه ماتشحنتش من الصين" + _own_tag(_OWN_CN, _late_q, "فات ميعاد جاهزيتها ولسه ماتشحنتش")
+        _av = _china_avail_sentence(g, today, _OWN_CN, hide_missing=True)
+        items.append(line + (f"<br><span class='cn-sub'>{_av}</span>" if _av else ""))
 
     g = groups["sea"]
     if g:
@@ -2367,7 +2374,8 @@ def _china_card_parts(inc, today, row=None, sku_up=""):
                 line += _own_tag(_OWN_CU, q['sea'], "فات ميعاد وصولها للميناء")
         else:
             line += "، وموعد وصولها للميناء غير مكتوب" + _own_tag(_OWN_CU, q['sea'], "موعد وصولها للميناء ناقص")
-        items.append(line + "<br><span class='cn-sub'>" + _china_avail_sentence(g, today) + "</span>")
+        _av = _china_avail_sentence(g, today, _OWN_CU, hide_missing=True)
+        items.append(line + (f"<br><span class='cn-sub'>{_av}</span>" if _av else ""))
 
     g = groups["port"]
     if g:
