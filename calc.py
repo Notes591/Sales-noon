@@ -4424,6 +4424,8 @@ def ct_parse_date(v, year=None, anchor=None):
             return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).strftime("%Y-%m-%d")
         m = re.match(r"^(\d{1,2})[./\-](\d{1,2})$", s)
         if m and year:
+            if re.fullmatch(r"[123]", m.group(2)):       # 8٫2 ممكن تكون 2 أو 20 أغسطس (الإكسيل بيشيل الصفر) — مش هنخمّن
+                return ""
             day = int(m.group(2))
             if day in (40, 50, 60, 70, 80, 90):      # 5٫8 بتتعرض 5٫80 (خلية بخانتين عشريتين) = 8 مايو، مش يوم 80
                 day //= 10
@@ -4525,7 +4527,8 @@ def ct_sync_plan(china_raw, tracking_recs):
         cur = {k: (str(row[j]).strip() if j < len(row) else "") for k, j in pos.items()}
         if not any(cur.get(k) for k in CHINA_FLAT_INPUT_KEYS) or _china_is_label_row(cur):
             continue
-        cur = {k: ("" if _cf_is_hint(v) else v) for k, v in cur.items()}      # نصوص الإرشاد مش بيانات: تعتبر فاضية
+        hinted = {k for k, v in cur.items() if _cf_is_hint(v)}
+        cur = {k: ("" if k in hinted else v) for k, v in cur.items()}      # نصوص الإرشاد مش بيانات: تعتبر فاضية
         cno, bl, sid = ct_norm_ref(cur.get("container_no")), ct_norm_ref(cur.get("bl_no")), ct_norm_ref(cur.get("shipment_id"))
         recs = by_c.get(cno) if cno else None
         if not recs and bl:
@@ -4534,6 +4537,9 @@ def ct_sync_plan(china_raw, tracking_recs):
             recs = by_inv.get(sid)
         if not recs:
             continue
+        if len(recs) > 1 and ct_norm_ref(cur.get("seal_no")):          # أكتر من حاوية على نفس البوليصة: نحدد الحاوية بالختم
+            by_seal = [r for r in recs if ct_norm_ref(r.get("seal_no")) == ct_norm_ref(cur.get("seal_no"))]
+            recs = by_seal or recs
         if len(recs) == 1:
             vals = {k: recs[0].get(k, "") for k, _ in CT_FIELD_MAP}
             status_txt = recs[0]["_status_text"]
@@ -4563,6 +4569,9 @@ def ct_sync_plan(china_raw, tracking_recs):
                 note(f"⚠️ صف {i + 1} في China: {k} = «{cv}» بينما Container tracking فيه «{tv}» — ما اتغيّرش")
                 continue
             if k in _CT_FILL_ONLY and cv:
+                continue
+            if k in hinted:
+                note(f"⚠️ صف {i + 1} في China: {k} فيه نص إرشاد/معادلة — ما كتبتش «{tv}» فوقه (اتأكد إنه خلية عادية)")
                 continue
             ch[k] = tv
             new[k] = tv
