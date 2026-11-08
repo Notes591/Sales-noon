@@ -1511,24 +1511,17 @@ def china_flat_to_tables(flat_rows):
             pass
         l["record_key"] = "SKU|" + l["line_id"]
         lines.append(l)
-    # ── سقف الكمية: مجموع كميات سطور الحاوية ماينفعش يعدّي «إجمالي قطع الحاوية» (منع العد المزدوج) ──
-    cap = {}
+    # ── تنبيه فقط: مجموع كميات سطور الحاوية أكبر من «إجمالي قطع الحاوية» (ممكن شحن مجمّع، فمنعدّل الكميات) ──
+    cap, tot = {}, {}
     for r in rows:
         if r["container_no"] and _cf_num(r.get("ctr_total_units")):
             cap[r["container_no"]] = max(cap.get(r["container_no"], 0), _cf_num(r["ctr_total_units"]))
-    used = {}
     for l in lines:
-        cn = l.get("container_no", "")
-        if cn not in cap:
-            continue
-        q = _cf_num(l.get("total_qty"))
-        room = max(cap[cn] - used.get(cn, 0), 0)
-        if q > room:
-            conflicts.append({"السجل": f"حاوية {cn}", "الحقل": "total_qty",
-                              "القيم": f"سطر {l.get('internal_order_no') or l.get('line_id')}: {q:,} اتخفّضت لـ {room:,} (إجمالي قطع الحاوية {cap[cn]:,})"})
-            q = room
-            l["total_qty"] = str(q)
-        used[cn] = used.get(cn, 0) + q
+        tot[l.get("container_no", "")] = tot.get(l.get("container_no", ""), 0) + _cf_num(l.get("total_qty"))
+    for cn, cp in cap.items():
+        if tot.get(cn, 0) > cp:
+            conflicts.append({"السجل": f"حاوية {cn}", "الحقل": "ctr_total_units",
+                              "القيم": f"مجموع كميات الطلبات {tot[cn]:,} أكبر من إجمالي قطع الحاوية في الشيت {cp:,} — لو الشحن مجمّع صحّح إجمالي الحاوية"})
     return ships, conts, lines, conflicts
 
 def _china_col_letter(n):
