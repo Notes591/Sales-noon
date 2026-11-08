@@ -2226,7 +2226,7 @@ def _china_decision_boxes(dec, today):
     elif st_ == "need_date":
         out += box("#78350f", "#fde68a",
                    f"🟠 <b>مش قادر أحكم:</b> المخزون هيخلص يوم {F(dec['stockout'])} وفيه {dec['undated']:,} قطعة جاية من الصين "
-                   f"بس تاريخ وصولها لمخزن الرياض غير مكتوب.<br>🎯 <b>المطلوب:</b> اطلب من الصين تكتب تاريخ الوصول لمخزن الرياض، "
+                   f"بس تاريخ وصولها لمخزن الرياض غير مكتوب.<br>🎯 <b>المطلوب:</b> اطلب من موظف التخليص الجمركي يكتب تاريخ الوصول لمخزن الرياض، "
                    f"ولو مفيش شحنة هتغطي اطلب قبل {F(dec['order_by'])}.")
     elif st_ == "safe":
         extra = f" (مش شامل {dec['undated']:,} قطعة تاريخ وصولها غير مكتوب)" if dec.get("undated") else ""
@@ -2285,23 +2285,36 @@ def _china_range(dates, today=None):
         return _china_fmt_date(ds[0], today)
     return f"من {_china_fmt_date(ds[0])} إلى {_china_fmt_date(ds[-1])}"
 
-def _china_avail_sentence(g, today):
+_OWN_CN = "موظف الصين"
+_OWN_CU = "موظف التخليص الجمركي"
+
+def _own_tag(owner, qty=None, what=""):
+    """وسم صغير: مين يراجع + كام قطعة + على إيه"""
+    t = f"👤 مراجعة {owner}"
+    if qty:
+        t += f": {qty:,} قطعة {what}".rstrip()
+    return f" <span style='color:#fbbf24;font-weight:700;'>[{t}]</span>"
+
+def _china_avail_sentence(g, today, owner=_OWN_CU):
     dated, undated = {}, 0
-    _est = any(l["_d"].get("eta_dest_est") for l in g)
     for l in g:
         d = _china_date(l["_d"]["eta_dest"])
         if d:
-            dated[d] = dated.get(d, 0) + l["_qty"]
+            q0, e0 = dated.get(d, (0, False))
+            dated[d] = (q0 + l["_qty"], e0 or bool(l["_d"].get("eta_dest_est")))
         else:
             undated += l["_qty"]
-    parts = [f"{q:,} قطعة يوم {_china_fmt_date(d, today)}" for d, q in sorted(dated.items())]
-    _tag = (f" <span style='color:#9ca3af;'>(تقديري: وصول الميناء + {calc.CHINA_RIYADH_LEAD_DAYS} يوم — مش تاريخ مكتوب)</span>" if _est else "")
+    est_note = f"≈ = تقديري (وصول الميناء + {calc.CHINA_RIYADH_LEAD_DAYS} يوم، مش تاريخ مكتوب)"
+    parts = [f"{q:,} قطعة يوم {'≈ ' if e else ''}{_china_fmt_date(d, today)}" for d, (q, e) in sorted(dated.items())]
+    _tag = (f" <span style='color:#9ca3af;'>({est_note})</span>" if any(e for _, e in dated.values()) else "")
     if parts and undated:
         return ("📅 متوقع تكون متاحة للبيع في مخزن الرياض: " + "، ".join(parts) + _tag
-                + f"، و{undated:,} قطعة لسه تاريخ وصولها لمخزن الرياض غير مكتوب في ملف الصين")
+                + f"، و{undated:,} قطعة لسه تاريخ وصولها لمخزن الرياض غير مكتوب في ملف الصين"
+                + _own_tag(owner, undated, "تاريخ وصولها ناقص"))
     if parts:
         return "📅 متوقع تكون متاحة للبيع في مخزن الرياض: " + "، ".join(parts) + _tag
-    return "📅 تاريخ وصولها لمخزن الرياض لسه غير مكتوب في ملف الصين"
+    return ("📅 تاريخ وصولها لمخزن الرياض لسه غير مكتوب في ملف الصين"
+            + _own_tag(owner, undated, "تاريخ وصولها ناقص"))
 
 def _china_card_parts(inc, today, row=None, sku_up=""):
     """كارت واحد يشرح الكمية القادمة من الصين: كام في المصنع، كام في البحر، كام وصل الميناء، وإمتى كل جزء
@@ -2333,7 +2346,8 @@ def _china_card_parts(inc, today, row=None, sku_up=""):
         line = f"🏭 <b>{q['factory']:,} قطعة</b> لسه في المصنع ({parts})"
         if ready:
             line += f" — الإنتاج جاهز {ready}"
-        items.append(line + " — ولسه ماتشحنتش من الصين<br><span class='cn-sub'>" + _china_avail_sentence(g, today) + "</span>")
+        items.append(line + " — ولسه ماتشحنتش من الصين" + (_own_tag(_OWN_CN, q['factory'], "ولسه ماتشحنتش") if any(_china_date(l["_d"]["ready"]) and _china_date(l["_d"]["ready"]) < today for l in g) else "")
+                     + "<br><span class='cn-sub'>" + _china_avail_sentence(g, today, _OWN_CN) + "</span>")
 
     g = groups["sea"]
     if g:
@@ -2349,8 +2363,10 @@ def _china_card_parts(inc, today, row=None, sku_up=""):
             late = max(e for e in etas if e) < today
             line += (f"، وكان متوقع تصل ميناء{port_txt} {_china_range(etas, today)} ولسه ماوصلتش" if late
                      else f"، ومتوقع تصل ميناء{port_txt} {_china_range(etas, today)}")
+            if late:
+                line += _own_tag(_OWN_CU, q['sea'], "فات ميعاد وصولها للميناء")
         else:
-            line += "، وموعد وصولها للميناء غير مكتوب"
+            line += "، وموعد وصولها للميناء غير مكتوب" + _own_tag(_OWN_CU, q['sea'], "موعد وصولها للميناء ناقص")
         items.append(line + "<br><span class='cn-sub'>" + _china_avail_sentence(g, today) + "</span>")
 
     g = groups["port"]
@@ -2363,6 +2379,8 @@ def _china_card_parts(inc, today, row=None, sku_up=""):
         line = f"⚓ <b>{q['port']:,} قطعة</b> وصلت الميناء" + (f" يوم {arr}" if arr else "")
         if cust:
             line += " — " + "، ".join(cust)
+        if n_prc + n_wait:
+            line += _own_tag(_OWN_CU, n_prc + n_wait, "باقي لها تخليص")
         items.append(line + "<br><span class='cn-sub'>" + _china_avail_sentence(g, today) + "</span>")
 
     alert, dec_items, dec_label = "", [], ""
