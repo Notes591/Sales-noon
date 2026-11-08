@@ -658,8 +658,8 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
     missing_note_t14 = ""
     if missing_parts_t14:
         missing_note_t14 = (
-            f'<br><span style="color:#fbbf24;font-size:12px;">⚠️ بيانات ناقصة: '
-            f'{" و".join(missing_parts_t14)} — تم اعتبارها صفر في الحساب</span>'
+            f'<div style="color:#ef4444;font-size:13px;font-weight:800;margin-top:4px;">⚠️ ناقص: '
+            f'{" و".join(missing_parts_t14)} — عشان كده صافي الربح مش معروض</div>'
         )
 
     verdict_html_t14 = ""
@@ -692,7 +692,8 @@ def render_price_profit_block_t14(r, com_map_t14, live_map_t14, sales_dates, ads
         + '</div>'
         + f'<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;margin-top:4px;'
           f'color:{profit_color_t14};font-size:13px;font-weight:800;">'
-          f'<span>🧮 صافي الربح <span dir="ltr">{net_profit_t14:,.2f}</span> ريال</span>'
+          + (f'<span>🧮 صافي الربح <span dir="ltr">{net_profit_t14:,.2f}</span> ريال</span>' if not missing_parts_t14
+             else '<span style="color:#ef4444;">🧮 صافي الربح غير محسوب</span>') +
           f'<span style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">{_pill_v}{_reco_pill}</span></div>{_reco_line}'
         + missing_note_t14 + '</div>',
         unsafe_allow_html=True)
@@ -5869,7 +5870,7 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
             units = sum((inp["units_by_date"] or {}).get(d, 0) for d in dates)
             sales = units * inp["price"]
             if sales <= 0:
-                return "<br>📉 TACOS (نسبة الإعلان): — <span style='color:#9ca3af;'>(مفيش مبيعات للـ SKU ده في الفترة في شيت الطلبات)</span>"
+                return "<br>📉 TACOS (تكلفة الإعلان من المبيعات): — <span style='color:#9ca3af;'>(مفيش مبيعات للـ SKU ده في الفترة في شيت الطلبات)</span>"
             warn = []
             if ad_orders and ad_orders > units:
                 warn.append(f"طلبات الإعلان ({ad_orders:,.0f}) أكتر من وحدات الطلبات ({units:,.0f})")
@@ -5877,8 +5878,10 @@ def render_noon_ads_expander(sku_up, ent, tot_s, tot_r, tot_o):
             if of and dates and of > min(dates):
                 warn.append(f"بيانات الطلبات عندنا بتبدأ من {of}")
             w = (f" <span style='color:#f59e0b;'>⚠️ غير دقيق — {' و'.join(warn)}</span>" if warn else "")
-            return (f"<br>📉 <b>TACOS (نسبة الإعلان): {spend / sales * 100:.1f}%</b> "
-                    f"<span style='color:#9ca3af;'>(مصروف ÷ مبيعات الـ SKU الكلية ≈ {sales:,.0f} ريال من {units:,.0f} وحدة)</span>{w}")
+            org = max(units - (ad_orders or 0), 0)
+            split = f"<br>🧮 من الإعلان: <b>{min(ad_orders or 0, units):,.0f}</b> طلب | عضوي: <b>{org:,.0f}</b> طلب"
+            return (f"<br>📉 <b>TACOS (تكلفة الإعلان من المبيعات): {spend / sales * 100:.1f}%</b> "
+                    f"<span style='color:#9ca3af;'>(مصروف ÷ مبيعات الـ SKU الكلية ≈ {sales:,.0f} ريال من {units:,.0f} وحدة)</span>{w}" + split)
         except Exception:
             return ""
     _today = datetime.now().date()
@@ -5914,7 +5917,7 @@ def _ads_reco_metrics_line(r):
     m = r["m"]
     bits = []
     if m.get("tacos") is not None:
-        bits.append(f"TACOS <small>(نسبة الإعلان)</small> <b>{m['tacos'] * 100:.1f}%</b>")
+        bits.append(f"TACOS <small>(تكلفة الإعلان من المبيعات)</small> <b>{m['tacos'] * 100:.1f}%</b>")
     if m.get("roas") is not None:
         bits.append(f"ROAS <small>(عائد الإعلان)</small> <b>{m['roas']:.2f}</b>")
     if m.get("ad_share") is not None:

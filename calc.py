@@ -4525,6 +4525,7 @@ def ct_sync_plan(china_raw, tracking_recs):
         cur = {k: (str(row[j]).strip() if j < len(row) else "") for k, j in pos.items()}
         if not any(cur.get(k) for k in CHINA_FLAT_INPUT_KEYS) or _china_is_label_row(cur):
             continue
+        cur = {k: ("" if _cf_is_hint(v) else v) for k, v in cur.items()}      # نصوص الإرشاد مش بيانات: تعتبر فاضية
         cno, bl, sid = ct_norm_ref(cur.get("container_no")), ct_norm_ref(cur.get("bl_no")), ct_norm_ref(cur.get("shipment_id"))
         recs = by_c.get(cno) if cno else None
         if not recs and bl:
