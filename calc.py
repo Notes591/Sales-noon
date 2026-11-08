@@ -1404,9 +1404,26 @@ def _cs_shipment(codes):
     prog = [x for x in nonc if _cs_prog(x) >= 0]
     return min(prog, key=_cs_prog) if prog else nonc[0]
 
+_CF_HINT_PREFIXES = ("لما ", "اختر ", "سجّل ", "سجل ", "أضف ", "اضف ", "أكّد ", "اكد ", "أكد ")
+
+def _cf_is_hint(v):
+    """نص تعليمات/إرشاد (مش بيانات): «لما يبدأ الإنتاج غيّر الحالة | Update status … [الحالة | Status]»."""
+    v = str(v or "").strip()
+    if not v:
+        return False
+    if "|" in v and "[" in v and v.endswith("]"):
+        return True
+    return v.startswith(_CF_HINT_PREFIXES) and "|" in v
+
 def china_flat_to_tables(flat_rows):
     """صفوف الشيت الواحد -> (ships, conts, lines, conflicts) بنفس شكل الجداول القديمة."""
     rows = [{k: _cf_g(r, k) for k in CHINA_FLAT_INPUT_KEYS + CHINA_STATUS_LEGACY} for r in flat_rows]
+    for r in rows:
+        for k in list(r):
+            if r[k] and _cf_is_hint(r[k]):
+                r[k] = ""                                   # نصوص الإرشاد مش بيانات
+        if not r.get("container_no") and r.get("seal_no") and (r.get("vessel_name") or r.get("actual_etd") or r.get("eta_port")):
+            r["container_no"], r["seal_no"] = r["seal_no"], ""    # رقم الحاوية متكتوب تحت عمود الختم
     rows = [r for r in rows if any(r.values())]
     for r in rows:
         r["_code"] = _cs_floor(r, china_row_status(r))
@@ -1494,6 +1511,24 @@ def china_flat_to_tables(flat_rows):
             pass
         l["record_key"] = "SKU|" + l["line_id"]
         lines.append(l)
+    # ── سقف الكمية: مجموع كميات سطور الحاوية ماينفعش يعدّي «إجمالي قطع الحاوية» (منع العد المزدوج) ──
+    cap = {}
+    for r in rows:
+        if r["container_no"] and _cf_num(r.get("ctr_total_units")):
+            cap[r["container_no"]] = max(cap.get(r["container_no"], 0), _cf_num(r["ctr_total_units"]))
+    used = {}
+    for l in lines:
+        cn = l.get("container_no", "")
+        if cn not in cap:
+            continue
+        q = _cf_num(l.get("total_qty"))
+        room = max(cap[cn] - used.get(cn, 0), 0)
+        if q > room:
+            conflicts.append({"السجل": f"حاوية {cn}", "الحقل": "total_qty",
+                              "القيم": f"سطر {l.get('internal_order_no') or l.get('line_id')}: {q:,} اتخفّضت لـ {room:,} (إجمالي قطع الحاوية {cap[cn]:,})"})
+            q = room
+            l["total_qty"] = str(q)
+        used[cn] = used.get(cn, 0) + q
     return ships, conts, lines, conflicts
 
 def _china_col_letter(n):
