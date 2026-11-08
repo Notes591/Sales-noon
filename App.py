@@ -2164,7 +2164,7 @@ def _china_lines_table_html(lines):
         upd = f'{l["_upd"]} ({l["_upd_by"]})' if l["_upd"] and l["_upd_by"] else (l["_upd"] or "—")
         cells = [l["_shipment_id"] or "—", l.get("container_no") or "—", f'{l["_qty"]:,}',
                  l.get("_stage_eff") or l.get("stock_stage") or "—",
-                 d["etd"] or "—", d["eta_port"] or "—", d["port_arr"] or "—", d["eta_dest"] or "—", d["wh_arr"] or "—", av_txt,
+                 d["etd"] or "—", d["eta_port"] or "—", d["port_arr"] or "—", (("≈ " + d["eta_dest"]) if d["eta_dest"] and d.get("eta_dest_est") else (d["eta_dest"] or "—")), d["wh_arr"] or "—", av_txt,
                  "—" if dte is None else dte, "—" if dly is None else dly, upd,
                  f'{l.get("internal_order_no") or "—"} | {l.get("po_no") or "—"}']
         body += "<tr>" + "".join(f'<td style="padding:3px 8px;">{_esc(str(c))}</td>' for c in cells) + "</tr>"
@@ -2287,6 +2287,7 @@ def _china_range(dates, today=None):
 
 def _china_avail_sentence(g, today):
     dated, undated = {}, 0
+    _est = any(l["_d"].get("eta_dest_est") for l in g)
     for l in g:
         d = _china_date(l["_d"]["eta_dest"])
         if d:
@@ -2294,11 +2295,12 @@ def _china_avail_sentence(g, today):
         else:
             undated += l["_qty"]
     parts = [f"{q:,} قطعة يوم {_china_fmt_date(d, today)}" for d, q in sorted(dated.items())]
+    _tag = (f" <span style='color:#9ca3af;'>(تقديري: وصول الميناء + {calc.CHINA_RIYADH_LEAD_DAYS} يوم — مش تاريخ مكتوب)</span>" if _est else "")
     if parts and undated:
-        return ("📅 متوقع تكون متاحة للبيع في مخزن الرياض: " + "، ".join(parts)
+        return ("📅 متوقع تكون متاحة للبيع في مخزن الرياض: " + "، ".join(parts) + _tag
                 + f"، و{undated:,} قطعة لسه تاريخ وصولها لمخزن الرياض غير مكتوب في ملف الصين")
     if parts:
-        return "📅 متوقع تكون متاحة للبيع في مخزن الرياض: " + "، ".join(parts)
+        return "📅 متوقع تكون متاحة للبيع في مخزن الرياض: " + "، ".join(parts) + _tag
     return "📅 تاريخ وصولها لمخزن الرياض لسه غير مكتوب في ملف الصين"
 
 def _china_card_parts(inc, today, row=None, sku_up=""):

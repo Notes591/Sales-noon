@@ -1685,6 +1685,8 @@ def _china_diff(env, parsed):
                         "ثابت": len(new) - len(added) - len(changed), "عندنا ومش في الملف": len(removed)})
     return summary, details
 
+CHINA_RIYADH_LEAD_DAYS = 12      # تقدير الأيام من وصول الميناء لوصول مخزن الرياض (لما التاريخ الفعلي مش مكتوب)
+
 def _china_enrich(line, conts, ship_by_pair, ship_by_no):
     ctr = conts.get(line.get("container_no", "")) or {}
     shp = (ship_by_pair.get((line.get("internal_order_no", ""), line.get("po_no", "")))
@@ -1735,6 +1737,13 @@ def _china_enrich(line, conts, ship_by_pair, ship_by_no):
         "eta_dest": shp.get("eta_destination", ""),
         "wh_arr": wh_arr,
     }
+    # تاريخ وصول الرياض لو مش مكتوب: تقدير = وصول الميناء (الفعلي وإلا المتوقع) + CHINA_RIYADH_LEAD_DAYS يوم
+    e["_d"]["eta_dest_est"] = False
+    if status == "incoming" and not e["_d"]["eta_dest"]:
+        _base = _china_date(e["_d"]["port_arr"]) or _china_date(e["_d"]["eta_port"])
+        if _base:
+            e["_d"]["eta_dest"] = (_base + timedelta(days=CHINA_RIYADH_LEAD_DAYS)).strftime("%Y-%m-%d")
+            e["_d"]["eta_dest_est"] = True
     e["_upd"] = ctr.get("last_updated_at") or line.get("last_updated_at", "")
     e["_upd_by"] = ctr.get("updated_by") or line.get("updated_by", "")
     e["_qty"] = _china_int(line.get("total_qty", ""))
