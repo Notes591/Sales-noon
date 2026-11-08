@@ -7884,7 +7884,7 @@ if st.session_state["nav_page"] == "tab14":
                     return (_yv(c, "FBN") + _yv(c, "FBB"), _tv(c, "FBN") + _tv(c, "FBB"))
 
                 # ══ كل بلوك = SKU نون واحد + ASIN أمازون + Barcode تريندول لنفس الكود (بالترتيب حسب المبيعات)، والكود بيتكرر عادي ══
-                # الترتيب النهائي تنازلي بمبيعات أمس لـ SKU نون (الأكبر فوق). تريندول: Barcode = SKU فبيتحط جنب نفس الـ SKU مباشرة.
+                # الترتيب النهائي تنازلي بمبيعات أمس لـ SKU نون (الأكبر فوق). تريندول: زي أمازون بالكود والأعلى مبيعًا (الاسم بس لو مفيش كود).
                 # ASIN/Barcode زيادة أو بدون كود = بلوك لوحده. أي ASIN/Barcode بدون مبيعات أمس مبيتعرضش (إلا لو بتبحث).
                 def _asin_sales(a):
                     c = asin_rows_t14[a]
@@ -7899,12 +7899,13 @@ if st.session_state["nav_page"] == "tab14":
                     blk = {"code": (tac_map_t14.get(sku_up, "") or "").strip(), "sku": sku_up, "asin": None, "tb": None}
                     blocks_by_sku[sku_up] = blk
                     blocks_t14.append(blk)
+                # تريندول زي أمازون: بيتطابق بالكود وبالأعلى مبيعًا. التطابق بالاسم (Barcode = SKU) بس لو الـ Barcode ملوش كود
                 ty_left = []
                 for k in ty_sel:
-                    if k in blocks_by_sku:
-                        blocks_by_sku[k]["tb"] = k
-                    else:
+                    if (tac_map_t14.get(k, "") or "").strip() or k not in blocks_by_sku:
                         ty_left.append(k)
+                    else:
+                        blocks_by_sku[k]["tb"] = k
                 code_blocks = {}
                 for blk in blocks_t14:
                     if blk["code"]:
