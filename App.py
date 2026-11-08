@@ -2304,7 +2304,7 @@ def _china_avail_sentence(g, today, owner=_OWN_CU):
             dated[d] = (q0 + l["_qty"], e0 or bool(l["_d"].get("eta_dest_est")))
         else:
             undated += l["_qty"]
-    est_note = f"≈ = تقديري (وصول الميناء + {calc.CHINA_RIYADH_LEAD_DAYS} يوم، مش تاريخ مكتوب)"
+    est_note = f"≈ = تقديري (تاريخ وصول الميناء الفعلي + {calc.CHINA_RIYADH_LEAD_DAYS} يوم، مش تاريخ مكتوب)"
     parts = [f"{q:,} قطعة يوم {'≈ ' if e else ''}{_china_fmt_date(d, today)}" for d, (q, e) in sorted(dated.items())]
     _tag = (f" <span style='color:#9ca3af;'>({est_note})</span>" if any(e for _, e in dated.values()) else "")
     if parts and undated:

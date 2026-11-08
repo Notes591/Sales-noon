@@ -1740,12 +1740,8 @@ def _china_enrich(line, conts, ship_by_pair, ship_by_no):
     # تاريخ وصول الرياض لو مش مكتوب: تقدير = وصول الميناء (الفعلي وإلا المتوقع) + CHINA_RIYADH_LEAD_DAYS يوم
     e["_d"]["eta_dest_est"] = False
     if status == "incoming" and not e["_d"]["eta_dest"]:
+        # التقدير بس من تاريخ الوصول الفعلي للميناء اللي موظف الجمرك كتبه — من غيره مفيش تقدير
         _base = _china_date(e["_d"]["port_arr"])
-        if not _base:
-            # لسه ماوصلتش الميناء: لو ميعاد الوصول فات، أقرب وصول ممكن هو النهارده (مش التاريخ القديم)
-            _base = _china_date(e["_d"]["eta_port"])
-            if _base and _base < datetime.now().date():
-                _base = datetime.now().date()
         if _base:
             e["_d"]["eta_dest"] = (_base + timedelta(days=CHINA_RIYADH_LEAD_DAYS)).strftime("%Y-%m-%d")
             e["_d"]["eta_dest_est"] = True
