@@ -159,11 +159,34 @@ def get_latest_sku_price(r, ordered_dates):
             return vals[0][0]
     return None
 
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫٬", "0123456789.,")
+
+def _wh_num(v):
+    """يحوّل كمية مكتوبة بأي شكل ("1,687" / "1 687" / "١٦٨٧" / "485.0") لرقم؛ None لو مش رقم."""
+    s = str(v if v is not None else "").translate(_AR_DIGITS).strip().replace(",", "").replace(" ", "").replace("\u00a0", "")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
 def _build_warehouse_stock_map(raw):
-    m = {}
+    """كود → الكمية المتوفرة (نص رقم صحيح). بيجمّع الصفوف المكررة لنفس الكود (بدل ما آخر صف يمسح اللي قبله)،
+    وبيفهم الأرقام اللي فيها فاصلة آلاف (1,687) — قبل كده دي كانت بتتقري صفر."""
+    acc, raw_txt = {}, {}
     for row in raw[1:]:
         if len(row) >= 2 and row[0].strip():
-            m[row[0].strip()] = row[1].strip()
+            code = row[0].strip()
+            n = _wh_num(row[1])
+            if n is None:
+                raw_txt.setdefault(code, row[1].strip())
+            else:
+                acc[code] = acc.get(code, 0.0) + n
+    m = {c: t for c, t in raw_txt.items() if c not in acc}
+    for c, n in acc.items():
+        n = max(0.0, n)
+        m[c] = str(int(n)) if n == int(n) else str(n)
     return m
 
 def _china_norm_code(v):
