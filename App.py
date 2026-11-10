@@ -5948,6 +5948,10 @@ def _ads_reco_metrics_line(r):
         bits.append(f"TACOS <small>(تكلفة الإعلان من المبيعات)</small> <b>{m['tacos'] * 100:.1f}%</b>")
     if m.get("roas") is not None:
         bits.append(f"ROAS <small>(عائد الإعلان)</small> <b>{m['roas']:.2f}</b>")
+    if m.get("units") is not None and m.get("ad_orders") is not None:
+        _u = m["units"] or 0
+        _ao = min(m["ad_orders"] or 0, _u)
+        bits.append(f"🛒 من الإعلان <b>{_ao:,.0f}</b> طلب | عضوي <b>{max(_u - _ao, 0):,.0f}</b> طلب")
     if m.get("ad_share") is not None:
         bits.append(f"الإعلان من الربح <b>{m['ad_share'] * 100:.0f}%</b>")
     conf = {"high": "عالية", "medium": "متوسطة", "low": "منخفضة"}.get(r.get("confidence"), "")
